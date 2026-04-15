@@ -6,6 +6,8 @@ from http.client import HTTPException
 from socket import timeout
 
 from colorama import Fore, Style
+from adbutils.errors import AdbError
+from requests.exceptions import ConnectionError as RequestsConnectionError
 from uiautomator2.exceptions import UiObjectNotFoundError
 
 from GramAddict.core.device_facade import DeviceFacade
@@ -76,6 +78,8 @@ def run_safely(device, device_id, sessions, session_state, screen_record, config
                 HTTPException,
                 timeout,
                 UiObjectNotFoundError,
+                AdbError,
+                RequestsConnectionError,
             ):
                 restart(
                     device,

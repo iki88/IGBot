@@ -801,6 +801,23 @@ def iterate_over_followers(
             )
             load_more_button_exists = load_more_button.exists()
 
+            see_more_button = device.find(
+                resourceId=self.ResourceID.SEE_ALL_BUTTON,
+            )
+            if not see_more_button.exists():
+                see_more_button = device.find(
+                    className=ClassName.TEXT_VIEW,
+                    textMatches=case_insensitive_re("See more"),
+                )
+            if see_more_button.exists():
+                logger.info(
+                    'Found "See more" button, loading more followers.',
+                    extra={"color": f"{Fore.GREEN}"},
+                )
+                see_more_button.click_retry()
+                random_sleep(2, 4, modulable=False)
+                continue
+
             if scroll_end_detector.is_the_end():
                 return
 

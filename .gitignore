@@ -1,5 +1,3 @@
-/venv*
-/.venv
 /build
 /dump
 /dist
@@ -10,9 +8,6 @@
 */*.json
 *.pyc
 .DS_Store
-crashes
-accounts
-!config-examples/*
 Pipfile
 Pipfile.lock
 *.pdf
