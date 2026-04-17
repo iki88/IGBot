@@ -740,7 +740,7 @@ def wait_for_next_session(time_left, session_state, sessions, device):
         stop_bot(device, sessions, session_state, was_sleeping=True)
 
 
-def inspect_current_view(user_list) -> Tuple[int, int]:
+def inspect_current_view(user_list, _retries=2) -> Tuple[int, int]:
     """
     return the number of users and each row height in the current view
     """
@@ -759,6 +759,12 @@ def inspect_current_view(user_list) -> Tuple[int, int]:
             )
             continue
     if not lst:
+        if _retries > 0:
+            logger.debug(
+                f"Empty list detected, waiting 3s and retrying ({_retries} retries left)."
+            )
+            sleep(3)
+            return inspect_current_view(user_list, _retries=_retries - 1)
         raise EmptyList
     row_height, n_users = Counter(lst).most_common(1)[0]
     logger.debug(f"There are {n_users} users fully visible in that view.")

@@ -1,0 +1,26 @@
+# filters.yml - allows commenting on photos, videos, carousels from blogger-followers
+can_like_photos: true
+can_like_videos: true
+can_like_carousels: true
+
+can_comment_photos: true
+can_comment_videos: true
+can_comment_carousels: true
+can_comment_blogger_followers: true   # Important for your source
+can_comment_blogger_following: true
+
+can_watch_stories: true
+
+# Follower/following/post thresholds (relaxed to avoid filtering out casual users)
+min_followers: 10
+max_followers: 15000
+min_followings: 10
+max_followings: 7500
+min_posts: 1
+
+# Allow following private or empty accounts (can't like their posts but can follow)
+follow_private_or_empty: true
+
+# Skip bots/spam (use correct key names)
+skip_business: false
+skip_if_private: false

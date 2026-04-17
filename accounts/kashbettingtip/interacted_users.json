@@ -1,0 +1,30 @@
+{
+    "gymshark": {
+        "last_interaction": "2025-12-29 15:25:51.022634",
+        "following_status": "none",
+        "session_id": "d73fb71f-10d3-4071-9f30-45b7daaf8932",
+        "job_name": "blogger",
+        "target": "gymshark",
+        "liked": 1,
+        "watched": 0,
+        "commented": 0,
+        "followed": false,
+        "unfollowed": false,
+        "scraped": false,
+        "pm_sent": false
+    },
+    "nike": {
+        "last_interaction": "2025-12-29 15:28:37.408015",
+        "following_status": "none",
+        "session_id": "d73fb71f-10d3-4071-9f30-45b7daaf8932",
+        "job_name": "blogger",
+        "target": "nike",
+        "liked": 2,
+        "watched": 0,
+        "commented": 0,
+        "followed": false,
+        "unfollowed": false,
+        "scraped": false,
+        "pm_sent": false
+    }
+}
