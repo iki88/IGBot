@@ -15,3 +15,6 @@ Pipfile.lock
 *.log*
 *.ini
 *.db
+*.sql
+*.zip
+.venv/
