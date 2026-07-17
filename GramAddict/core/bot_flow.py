@@ -62,7 +62,7 @@ def start_bot(**kwargs):
     if not kwargs:
         if "--config" not in configs.args:
             logger.info(
-                "It's strongly recommend to use a config.yml file. Follow these links for more details: https://docs.gramaddict.org/#/configuration and https://github.com/GramAddict/bot/tree/master/config-examples",
+                "It's strongly recommend to use a config.yml file. Follow these links for more details: https://docs.gramaddict.org/#/configuration and https://github.com/joeahkim/Insta-Addict/tree/develop/config-examples",
                 extra={"color": f"{Fore.GREEN}{Style.BRIGHT}"},
             )
             sleep(3)

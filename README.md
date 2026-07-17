@@ -1,42 +1,30 @@
 <p align="center">
   <img src="https://github.com/GramAddict/bot/raw/master/res/logo.png" alt="logo">
   <br />
-  <h1 align="center">GramAddict</h1>
+  <h1 align="center">InstaAddict</h1>
   <br />
   <p align="center">Looking for Instagram automation? I'm proud to present you a <b>100% free and open source Instagram bot</b>. This bot will allow you to grow your following and engagement by liking, following, commenting and sending PM automatically with your Android phone/tablet/emulator. <b>No root required.</b> <p>
   <p align="center">
-    <a href="https://github.com/gramaddict/bot/blob/master/LICENSE">
-      <img src="https://img.shields.io/github/license/gramaddict/bot?style=flat"  alt=""/>
+    <a href="https://github.com/joeahkim/Insta-Addict/blob/develop/LICENSE">
+      <img src="https://img.shields.io/github/license/joeahkim/Insta-Addict?style=flat"  alt=""/>
     </a>
     <a href="https://www.python.org/">
       <img src="https://img.shields.io/badge/built%20with-Python3-red.svg?style=flat"  alt=""/>
     </a>
-    <a href="https://github.com/GramAddict/bot/pulls">
+    <a href="https://github.com/joeahkim/Insta-Addict/pulls">
       <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat"  alt=""/>
     </a>
-    <a href="https://github.com/GramAddict/bot/issues">
-    	<img src="https://img.shields.io/github/issues/gramaddict/bot?style=flat"  alt=""/>
+    <a href="https://github.com/joeahkim/Insta-Addict/issues">
+    	<img src="https://img.shields.io/github/issues/joeahkim/Insta-Addict?style=flat"  alt=""/>
     </a>
-    <a href="https://github.com/GramAddict/bot/pulls">
-      <img src="https://img.shields.io/github/issues-pr/gramaddict/bot?style=flat"  alt=""/>
+    <a href="https://github.com/joeahkim/Insta-Addict/pulls">
+      <img src="https://img.shields.io/github/issues-pr/joeahkim/Insta-Addict?style=flat"  alt=""/>
     </a>
-    <a href="https://github.com/GramAddict/bot/stargazers">
-	    <img src="https://img.shields.io/github/stars/gramaddict/bot?style=flat" alt="">
+    <a href="https://github.com/joeahkim/Insta-Addict/stargazers">
+	    <img src="https://img.shields.io/github/stars/joeahkim/Insta-Addict?style=flat" alt="">
     </a>
-    <a href="https://img.shields.io/github/last-commit/gramaddict/bot/master?style=flat">
-	    <img src="https://img.shields.io/github/last-commit/GramAddict/bot/master?style=flat" alt="">
-    </a>
-    <a href="https://pypi.org/project/gramaddict/">
-      <img src="https://img.shields.io/pypi/dm/gramaddict" alt="">
-    </a>
-    <a href="https://github.com/GramAddict/bot#backers">
-	    <img src="https://img.shields.io/opencollective/backers/gramaddict?style=flat" alt="">
-    </a>
-    <a href="https://discord.gg/NK8PNEFGFF">
-	    <img src="https://img.shields.io/discord/771481743471017994?style=flat" alt="">
-    </a>
-    <a href="https://duckduckgo.com/?q=where+can+i+find+old+ig+version+apk&t=newext&atb=v376-1&df=y&ia=web">
-        <img src="https://img.shields.io/badge/partially_works_on_ig_version-263.2.0.19.104-orange" alt="">
+    <a href="https://img.shields.io/github/last-commit/joeahkim/Insta-Addict/develop?style=flat">
+	    <img src="https://img.shields.io/github/last-commit/joeahkim/Insta-Addict/develop?style=flat" alt="">
     </a>
 </p>
 
@@ -45,20 +33,13 @@
 <br />
 
 # Why should I automate my Instagram account?
-It's very hard nowadays to grow an account. Have you ever been on the explore page? IG will show your post only to close accounts & accounts you interact most with, you will never be on the explore page. Nobody will see your beautiful photos, your hilarious memes, or whatever you are posting. But now you can do something about that! With GramAddict you can __get noticed easily__, and if you really deserve it, your account will __grow super fast__!
+It's very hard nowadays to grow an account. Have you ever been on the explore page? IG will show your post only to close accounts & accounts you interact most with, you will never be on the explore page. Nobody will see your beautiful photos, your hilarious memes, or whatever you are posting. But now you can do something about that! With InstaAddict you can __get noticed easily__, and if you really deserve it, your account will __grow super fast__!
 
 ## So, do I need to publish good content to grow?
 Of course you have to! This bot will mainly help you to get the __visibility you deserve__ and which is Instagram not giving you.
 
 ## Ok but I don't know how to start this journey...
-Don't worry about that now, it's not that hard to start botting with GramAddict! I tried to make it as noob-friendly as possible. In any case, if you follow the docs with all the steps provided, you will make it! You are also invited to join our community and ask for any help!
-
-## There is a community around this project?
-Yes! We are on __discord__ and we count a lot of __active users__ you can ask us whatever you want!
-
-  <a href="https://discord.gg/NK8PNEFGFF">
-    <img src="https://img.shields.io/discord/771481743471017994?style=flat" alt="">
-  </a>
+Don't worry about that now, it's not that hard to start botting with InstaAddict! I tried to make it as noob-friendly as possible. In any case, if you follow the docs with all the steps provided, you will make it! You are also invited to join our community and ask for any help!
 
 ## I saw there are a lot of similar projects on GitHub, why should I choose this one?
 You're right, there are plenty of other bot solutions. Most of them use API requests. However, you will get your account banned if you use API (1-30 days)!
@@ -165,8 +146,8 @@ Failed? [Detailed tutorial here](https://docs.gramaddict.org/#/quickstart?id=ste
 
 >Check that pip3 is installed by typing `pip3 -V`
 >If that returns an error you have to install it! How? [Google is your best friend!](https://www.google.com/search?q=how+to+install+pip) :P
-### Step 2: Install GramAddict:
-You can install GramAddict in two ways: with __pip__ or with __git__.
+### Step 2: Install InstaAddict:
+You can install InstaAddict in two ways: with __pip__ or with __git__.
 Is good practice creating virtual environments when you install a new package. That will save you from a lot of problems!
 
 #### Create a virtual environment
@@ -188,7 +169,7 @@ We create a virtual environment called `.venv` and activate it:
 
 #### With git:
 > __Warning:__ console commands like `gramaddict init`, `gramaddict dump` and `gramaddict run` won't work if you installed the bot with git.
-- clone the project: `git clone https://github.com/GramAddict/bot.git gramaddict`
+- clone the project: `git clone https://github.com/joeahkim/Insta-Addict.git gramaddict`
 - enter the gramaddict folder: `cd gramaddict`
 - install the requirements: `pip3 install -r requirements.txt`
 
@@ -245,7 +226,7 @@ Type `adb devices` in terminal
 
 This bot works only if your Instagram is in [English](https://help.instagram.com/111923612310997).
 1. initialize uiautomator2: `uiautomator2 init`
-2. initialize GramAddict: `gramaddict init your_ig_account_name_here`
+2. initialize InstaAddict: `gramaddict init your_ig_account_name_here`
     > __Warning:__ works only if you installed the bot with pip, if you used git you have to create account folder and youraccountname folder manually.
     - that script will crate all the files you need for configure and start this bot
     - you will find them inside the folder `accounts/youraccountname/`
@@ -267,41 +248,30 @@ This bot works only if your Instagram is in [English](https://help.instagram.com
 
 Failed? [Check this out!](https://docs.gramaddict.org/#/quickstart?id=troubleshooting)
 
+<!--
 # Bot crashes, what should I do?
-The script isn't perfect and may fail sometimes. If this is the case you can open a ticket on our [discord channel](https://discord.gg/NK8PNEFGFF). In that way you won't share with anyone your Instagram account name 😈. We'll be very happy to help you!
+The script isn't perfect and may fail sometimes. If this is the case you can open a ticket on our [discord channel](https://discord.gg/NK8PNEFGFF). In that way you won't share with anyone your Instagram account name. We'll be very happy to help you!
 
 # WOW! You dedicated so much time to this project! Why you did that for free??
 Well, we used to be in three a long time ago but suddenly my two friends left. This has been an opportunity for me to improve my skills in Python and that's why I didn't leave the project and keep maintaining it.
 But of course donations are very welcome, so if you think I did a great job you can buy me a beer :)
 
-
 <a  href="https://www.buymeacoffee.com/mastrolube"  target="_blank"><img  src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png"  hspace="10" alt="Buy Me A Coffee"  style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;"  ></a>
 
 # Can I do something to make this project grown?
-On GitHub there is a `star system` which indicates how good a project is. If you like this project it will be amazing if you can press the little star at the top! ⭐
+On GitHub there is a `star system` which indicates how good a project is. If you like this project it will be amazing if you can press the little star at the top!
+
 # Contributors
 
-This project exists thanks to all of our Contributors [[Contribute](https://docs.gramaddict.org/#/contributing)].
-
-<a href="https://github.com/gramaddict/bot/graphs/contributors"><img src="https://opencollective.com/gramaddict/contributors.svg?width=890&button=false" /></a>
-
-<br />
+This project exists thanks to all of our Contributors [Contribute].
 
 # Backers
 
-Thank you to everyone that supports us financially! 🙏 [[Become a backer](https://opencollective.com/gramaddict#backer)]
-
-<a href="https://opencollective.com/gramaddict#backers" target="_blank"><img src="https://opencollective.com/gramaddict/backers.svg?width=890"></a>
-<br />
+Thank you to everyone that supports us financially! [Become a backer]
 
 # Talk botty with us
 
-<p>
-  <a href="https://discord.gg/NK8PNEFGFF">
-    <img hspace="3" alt="Join us on Discord" src="https://github.com/GramAddict/bot/raw/master/res/discord.png" height=84/>
-  </a>
-</p>
+Join us on Discord
 
----
-
-> **Disclaimer**<a name="disclaimer" />: This project comes with no guarantee or warranty. You are responsible for whatever happens from using this project. It is possible to get soft or hard banned by using this project if you are not careful.
+Disclaimer: This project comes with no guarantee or warranty. You are responsible for whatever happens from using this project. It is possible to get soft or hard banned by using this project if you are not careful.
+-->

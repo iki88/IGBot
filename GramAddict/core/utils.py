@@ -79,7 +79,7 @@ def check_if_updated(crash=False):
 
     if not crash:
         logger.info(
-            f"GramAddict v.{__version__}",
+            f"InstaAddict v.{__version__}",
             extra={"color": f"{Style.BRIGHT}{Fore.MAGENTA}"},
         )
 
