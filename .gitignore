@@ -4,8 +4,6 @@
 /gramaddict.egg-info
 /.idea
 /.vscode
-*/*.yml
-*/*.json
 *.pyc
 .DS_Store
 Pipfile
@@ -18,3 +16,8 @@ Pipfile.lock
 *.sql
 *.zip
 .venv/
+
+# Account configs and data (sensitive)
+/accounts/
+/crashes/
+/logs/
