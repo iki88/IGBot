@@ -6,7 +6,7 @@ from os import path
 from atomicwrites import atomic_write
 from colorama import Fore
 
-from GramAddict.core.device_facade import Direction, Timeout
+from GramAddict.core.device_facade import DeviceFacade, Direction, Timeout
 from GramAddict.core.navigation import (
     nav_to_blogger,
     nav_to_feed,
@@ -725,7 +725,14 @@ def iterate_over_followers(
         row_height, n_users = inspect_current_view(user_list)
         try:
             for item in user_list:
-                cur_row_height = item.get_height()
+                try:
+                    cur_row_height = item.get_height()
+                except DeviceFacade.JsonRpcError:
+                    logger.info(
+                        "Item no longer visible: reached end of the screen.",
+                        extra={"color": f"{Fore.GREEN}"},
+                    )
+                    break
                 if cur_row_height < row_height:
                     continue
                 user_info_view = item.child(index=1)
