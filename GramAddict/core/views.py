@@ -1129,10 +1129,24 @@ class AccountView:
             )
             username_obj.click()
             return True
-        elif list_view.is_scrollable() and not has_scrolled:
+
+        # Fallback for IG 438+: account switcher uses content-desc on ViewGroup rows
+        account_row = self.device.find(
+            classNameMatches="android.view.ViewGroup",
+            descriptionMatches=case_insensitive_re(f"^{username}.*"),
+        )
+        if account_row.exists(Timeout.SHORT):
+            logger.info(
+                f"Switching to {username}...",
+                extra={"color": f"{Style.BRIGHT}{Fore.BLUE}"},
+            )
+            account_row.click()
+            return True
+
+        if list_view.exists() and list_view.is_scrollable() and not has_scrolled:
             logger.debug("User list is scrollable.")
             list_view.scroll(Direction.DOWN)
-            self._find_username(username, has_scrolled=True)
+            return self._find_username(username, has_scrolled=True)
         return False
 
     def refresh_account(self):
