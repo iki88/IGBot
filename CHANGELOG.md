@@ -13,7 +13,7 @@ This is the first production release of **InstaAddict**, a continuation of the [
 
 ### Changed
 - All user-facing branding changed from GramAddict to InstaAddict
-- GitHub references updated to `https://github.com/joeahkim/Insta-Addict`
+- GitHub references updated to `https://github.com/joeahkim/InstaAddict`
 - Version reset to 1.0.1 for the InstaAddict fork
 
 ---

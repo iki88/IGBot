@@ -1,30 +1,30 @@
 <p align="center">
-  <img src="https://github.com/GramAddict/bot/raw/master/res/logo.png" alt="logo">
+  <img src="https://github.com/joeahkim/InstaAddict/raw/master/res/logo.png" alt="logo">
   <br />
   <h1 align="center">InstaAddict</h1>
   <br />
   <p align="center">Looking for Instagram automation? I'm proud to present you a <b>100% free and open source Instagram bot</b>. This bot will allow you to grow your following and engagement by liking, following, commenting and sending PM automatically with your Android phone/tablet/emulator. <b>No root required.</b> <p>
   <p align="center">
-    <a href="https://github.com/joeahkim/Insta-Addict/blob/develop/LICENSE">
-      <img src="https://img.shields.io/github/license/joeahkim/Insta-Addict?style=flat"  alt=""/>
+    <a href="https://github.com/joeahkim/InstaAddict/blob/develop/LICENSE">
+      <img src="https://img.shields.io/github/license/joeahkim/InstaAddict?style=flat"  alt=""/>
     </a>
     <a href="https://www.python.org/">
       <img src="https://img.shields.io/badge/built%20with-Python3-red.svg?style=flat"  alt=""/>
     </a>
-    <a href="https://github.com/joeahkim/Insta-Addict/pulls">
+    <a href="https://github.com/joeahkim/InstaAddict/pulls">
       <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat"  alt=""/>
     </a>
-    <a href="https://github.com/joeahkim/Insta-Addict/issues">
-    	<img src="https://img.shields.io/github/issues/joeahkim/Insta-Addict?style=flat"  alt=""/>
+    <a href="https://github.com/joeahkim/InstaAddict/issues">
+    	<img src="https://img.shields.io/github/issues/joeahkim/InstaAddict?style=flat"  alt=""/>
     </a>
-    <a href="https://github.com/joeahkim/Insta-Addict/pulls">
-      <img src="https://img.shields.io/github/issues-pr/joeahkim/Insta-Addict?style=flat"  alt=""/>
+    <a href="https://github.com/joeahkim/InstaAddict/pulls">
+      <img src="https://img.shields.io/github/issues-pr/joeahkim/InstaAddict?style=flat"  alt=""/>
     </a>
-    <a href="https://github.com/joeahkim/Insta-Addict/stargazers">
-	    <img src="https://img.shields.io/github/stars/joeahkim/Insta-Addict?style=flat" alt="">
+    <a href="https://github.com/joeahkim/InstaAddict/stargazers">
+	    <img src="https://img.shields.io/github/stars/joeahkim/InstaAddict?style=flat" alt="">
     </a>
-    <a href="https://img.shields.io/github/last-commit/joeahkim/Insta-Addict/develop?style=flat">
-	    <img src="https://img.shields.io/github/last-commit/joeahkim/Insta-Addict/develop?style=flat" alt="">
+    <a href="https://img.shields.io/github/last-commit/joeahkim/InstaAddict/develop?style=flat">
+	    <img src="https://img.shields.io/github/last-commit/joeahkim/InstaAddict/develop?style=flat" alt="">
     </a>
 </p>
 
@@ -39,6 +39,20 @@
 We are deeply grateful to the GramAddict team for building such a solid foundation. Their dedication to keeping the bot free, open source, and community-driven made this project possible. InstaAddict picks up where GramAddict left off — continuing development, fixing compatibility with newer Instagram versions, and keeping the bot alive for the community.
 
 > This project is licensed under the same terms as the original. All credit for the core architecture and original features goes to the GramAddict contributors.
+
+### Maintained by
+
+<p>
+  <a href="https://github.com/joeahkim">
+    <img src="https://img.shields.io/badge/GitHub-joeahkim-181717?style=flat&logo=github" alt="GitHub"/>
+  </a>
+  <a href="https://x.com/_joeahkim">
+    <img src="https://img.shields.io/badge/X-@__joeahkim-000000?style=flat&logo=x" alt="X"/>
+  </a>
+  <a href="https://www.instagram.com/_joeahkim/">
+    <img src="https://img.shields.io/badge/Instagram-@__joeahkim-E4405F?style=flat&logo=instagram&logoColor=white" alt="Instagram"/>
+  </a>
+</p>
 
 <br />
 
@@ -60,7 +74,7 @@ I'm focused on the community and not on finding ways how to get money out of thi
 ## So this bot does not use API?
 __No__ this bot is working through __adb__ and is powered by __uiautomator2__ which is a testing wrapper for Android devices. In fact, your device (or an emulator) is used for doing the botting sh*it. That's very secure compared to other botting systems around there. I also made it look as much human as possible. You can think about the bot as a __stupid__ friend using your phone and doing things for you. The example bottom is quite old but will show you what we are talking about.
 <p align="center">
-  <img src="https://github.com/GramAddict/bot/raw/master/res/demo.gif">
+  <img src="https://github.com/joeahkim/InstaAddict//raw/master/res/demo.gif">
 </p>
 
 ## Urra! I'll never get banned anymore with this bot!
@@ -128,7 +142,7 @@ Full documentation available on [docs.gramaddict.org](https://docs.gramaddict.or
 You can get __reports__ through telegram from your bot activities!
 [Follow this guide to accomplish that](https://docs.gramaddict.org/#/configuration?id=telegram-reports).
 
-<img src="https://github.com/GramAddict/bot/raw/master/res/telegram-reports.png" width="200">
+<img src="https://github.com/joeahkim/InstaAddict/raw/master/res/telegram-reports.png" width="200">
 
 > In this case trends are negative because I use this account only for tuning this bot, and it's private...
 > I didn't accept anyone lately so the trends are meh :P
@@ -179,7 +193,7 @@ We create a virtual environment called `.venv` and activate it:
 
 #### With git:
 > __Warning:__ console commands like `gramaddict init`, `gramaddict dump` and `gramaddict run` won't work if you installed the bot with git.
-- clone the project: `git clone https://github.com/joeahkim/Insta-Addict.git gramaddict`
+- clone the project: `git clone https://github.com/joeahkim/InstaAddict.git gramaddict`
 - enter the gramaddict folder: `cd gramaddict`
 - install the requirements: `pip3 install -r requirements.txt`
 

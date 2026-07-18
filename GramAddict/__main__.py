@@ -13,14 +13,14 @@ def cmd_init(args):
             if not path.exists("./run.py"):
                 print("Creating run.py ...")
                 download_from_github(
-                    "https://github.com/GramAddict/bot/blob/master/run.py"
+                    "https://github.com/joeahkim/InstaAddict/blob/master/run.py"
                 )
             if not path.exists(f"./accounts/{username}"):
                 print(
                     f"Creating 'accounts/{username}' folder with a config starting point inside. You have to edit these files according with https://docs.gramaddict.org/#/configuration"
                 )
                 download_from_github(
-                    "https://github.com/GramAddict/bot/tree/master/config-examples",
+                    "https://github.com/joeahkim/InstaAddict/tree/master/config-examples",
                     output_dir=f"accounts/{username}",
                     flatten=True,
                 )
