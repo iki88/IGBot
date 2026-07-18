@@ -82,11 +82,15 @@ def check_if_updated(crash=False):
             f"InstaAddict v.{__version__}",
             extra={"color": f"{Style.BRIGHT}{Fore.MAGENTA}"},
         )
+        logger.info(
+            "Follow & Support: GitHub: https://github.com/joeahkim | X: https://x.com/_joeahkim | IG: https://instagram.com/_joeahkim",
+            extra={"color": f"{Style.BRIGHT}{Fore.CYAN}"},
+        )
 
 
 def ask_for_a_donation():
     logger.info(
-        "This bot is backed with love by me for free. If you like using it, consider donating to help keep me motivated: https://www.buymeacoffee.com/mastrolube",
+        "InstaAddict is free and open source. If you find it useful, consider following and supporting: https://github.com/joeahkim",
         extra={"color": f"{Style.BRIGHT}{Fore.MAGENTA}"},
     )
 

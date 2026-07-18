@@ -40,6 +40,20 @@ We are deeply grateful to the GramAddict team for building such a solid foundati
 
 > This project is licensed under the same terms as the original. All credit for the core architecture and original features goes to the GramAddict contributors.
 
+### Maintained by
+
+<p>
+  <a href="https://github.com/joeahkim">
+    <img src="https://img.shields.io/badge/GitHub-joeahkim-181717?style=flat&logo=github" alt="GitHub"/>
+  </a>
+  <a href="https://x.com/_joeahkim">
+    <img src="https://img.shields.io/badge/X-@__joeahkim-000000?style=flat&logo=x" alt="X"/>
+  </a>
+  <a href="https://www.instagram.com/_joeahkim/">
+    <img src="https://img.shields.io/badge/Instagram-@__joeahkim-E4405F?style=flat&logo=instagram&logoColor=white" alt="Instagram"/>
+  </a>
+</p>
+
 <br />
 
 # Why should I automate my Instagram account?
