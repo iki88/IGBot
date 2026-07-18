@@ -32,6 +32,16 @@
 
 <br />
 
+# About This Project
+
+**InstaAddict** is a fork and continuation of [GramAddict](https://github.com/GramAddict/bot), an open-source Instagram automation bot originally created and maintained by [mastrolube](https://github.com/mastrolube) and the GramAddict community. The original project is no longer actively maintained.
+
+We are deeply grateful to the GramAddict team for building such a solid foundation. Their dedication to keeping the bot free, open source, and community-driven made this project possible. InstaAddict picks up where GramAddict left off — continuing development, fixing compatibility with newer Instagram versions, and keeping the bot alive for the community.
+
+> This project is licensed under the same terms as the original. All credit for the core architecture and original features goes to the GramAddict contributors.
+
+<br />
+
 # Why should I automate my Instagram account?
 It's very hard nowadays to grow an account. Have you ever been on the explore page? IG will show your post only to close accounts & accounts you interact most with, you will never be on the explore page. Nobody will see your beautiful photos, your hilarious memes, or whatever you are posting. But now you can do something about that! With InstaAddict you can __get noticed easily__, and if you really deserve it, your account will __grow super fast__!
 
