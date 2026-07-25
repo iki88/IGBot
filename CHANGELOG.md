@@ -2,23 +2,23 @@
 
 ## 1.0.1 (2025-07-18) - First InstaAddict Release
 
-This is the first production release of **InstaAddict**, a continuation of the [GramAddict](https://github.com/GramAddict/bot) project.
+This is the first production release of **InstaAddict**, a continuation of the [InstaAddict](https://github.com/InstaAddict/bot) project.
 
 ### New
-- Forked and rebranded from GramAddict to InstaAddict
+- Forked and rebranded from InstaAddict to InstaAddict
 - Updated to support Instagram version 438.0.0.28.88
 - Updated profile header resource IDs to match new Instagram UI (posts, followers, following counts)
 - Added support for new `profile_header_familiar_*` resource ID patterns
 - Updated `.gitignore` to properly exclude sensitive account configs, crash dumps, and logs
 
 ### Changed
-- All user-facing branding changed from GramAddict to InstaAddict
+- All user-facing branding changed from InstaAddict to InstaAddict
 - GitHub references updated to `https://github.com/joeahkim/InstaAddict`
 - Version reset to 1.0.1 for the InstaAddict fork
 
 ---
 
-## Previous GramAddict Releases
+## Previous InstaAddict Releases
 
 ## 3.2.12 (2024-03-22)
 ### Fix
@@ -204,7 +204,7 @@ This is the first production release of **InstaAddict**, a continuation of the [
 
 * the parsing of the number of posts / followers / following could fail for someone
 
-Full set of changes: [`2.10.4...2.10.6`](https://github.com/GramAddict/bot/compare/2.10.4...2.10.6)
+Full set of changes: [`2.10.4...2.10.6`](https://github.com/InstaAddict/bot/compare/2.10.4...2.10.6)
 ## 2.10.5 (2021-11-18)
 
 #### Fixes
@@ -214,7 +214,7 @@ Full set of changes: [`2.10.4...2.10.6`](https://github.com/GramAddict/bot/compa
 
 * removed a typo
 
-Full set of changes: [`2.10.4...2.10.5`](https://github.com/GramAddict/bot/compare/2.10.4...2.10.5)
+Full set of changes: [`2.10.4...2.10.5`](https://github.com/InstaAddict/bot/compare/2.10.4...2.10.5)
 
 ## 2.10.4 (2021-11-08)
 
@@ -222,7 +222,7 @@ Full set of changes: [`2.10.4...2.10.5`](https://github.com/GramAddict/bot/compa
 
 * scraped is now counted as successful interaction
 
-Full set of changes: [`2.10.3...2.10.4`](https://github.com/GramAddict/bot/compare/2.10.3...2.10.4)
+Full set of changes: [`2.10.3...2.10.4`](https://github.com/InstaAddict/bot/compare/2.10.3...2.10.4)
 
 ## 2.10.3 (2021-11-06)
 
@@ -231,7 +231,7 @@ Full set of changes: [`2.10.3...2.10.4`](https://github.com/GramAddict/bot/compa
 * the bot did not inform about the skip in case of the filter on mutual friends or on the link in bio
 * false positive for link check in bio
 
-Full set of changes: [`2.10.2...2.10.3`](https://github.com/GramAddict/bot/compare/2.10.2...2.10.3)
+Full set of changes: [`2.10.2...2.10.3`](https://github.com/InstaAddict/bot/compare/2.10.2...2.10.3)
 
 ## 2.10.2 (2021-11-06)
 
@@ -239,7 +239,7 @@ Full set of changes: [`2.10.2...2.10.3`](https://github.com/GramAddict/bot/compa
 
 * link in bio object exists even if it's empty
 
-Full set of changes: [`2.10.1...2.10.2`](https://github.com/GramAddict/bot/compare/2.10.1...2.10.2)
+Full set of changes: [`2.10.1...2.10.2`](https://github.com/InstaAddict/bot/compare/2.10.1...2.10.2)
 
 ## 2.10.1 (2021-10-31)
 
@@ -247,7 +247,7 @@ Full set of changes: [`2.10.1...2.10.2`](https://github.com/GramAddict/bot/compa
 
 * someone in the world has a " ’ " as thousands separator instead of " , "
 
-Full set of changes: [`2.10.0...2.10.1`](https://github.com/GramAddict/bot/compare/2.10.0...2.10.1)
+Full set of changes: [`2.10.0...2.10.1`](https://github.com/InstaAddict/bot/compare/2.10.0...2.10.1)
 
 ## 2.10.0 (2021-10-27)
 
@@ -274,7 +274,7 @@ Full set of changes: [`2.10.0...2.10.1`](https://github.com/GramAddict/bot/compa
 * posts-from-file job improved and fixed
 * little improvements to the module mode
 
-Full set of changes: [`2.9.2...2.10.0`](https://github.com/GramAddict/bot/compare/2.9.2...2.10.0)
+Full set of changes: [`2.9.2...2.10.0`](https://github.com/InstaAddict/bot/compare/2.9.2...2.10.0)
 
 ## 2.9.2 (2021-10-06)
 
@@ -282,7 +282,7 @@ Full set of changes: [`2.9.2...2.10.0`](https://github.com/GramAddict/bot/compar
 
 * other incompatibilities in the latest IG version
 
-Full set of changes: [`2.9.1...2.9.2`](https://github.com/GramAddict/bot/compare/2.9.1...2.9.2)
+Full set of changes: [`2.9.1...2.9.2`](https://github.com/InstaAddict/bot/compare/2.9.1...2.9.2)
 
 ## 2.9.1 (2021-10-06)
 
@@ -301,7 +301,7 @@ Full set of changes: [`2.9.1...2.9.2`](https://github.com/GramAddict/bot/compare
 
 * clean code for open and close ig
 
-Full set of changes: [`2.9.0...2.9.1`](https://github.com/GramAddict/bot/compare/2.9.0...2.9.1)
+Full set of changes: [`2.9.0...2.9.1`](https://github.com/InstaAddict/bot/compare/2.9.0...2.9.1)
 
 ## 2.9.0 (2021-08-25)
 
@@ -315,7 +315,7 @@ Full set of changes: [`2.9.0...2.9.1`](https://github.com/GramAddict/bot/compare
 * improved readability of the code and correct some typos
 * moving sibling folders of run.py will no longer executed automatically
 
-Full set of changes: [`2.8.0...2.9.0`](https://github.com/GramAddict/bot/compare/2.8.0...2.9.0)
+Full set of changes: [`2.8.0...2.9.0`](https://github.com/InstaAddict/bot/compare/2.8.0...2.9.0)
 
 ## 2.8.0 (2021-08-04)
 
@@ -324,19 +324,19 @@ Full set of changes: [`2.8.0...2.9.0`](https://github.com/GramAddict/bot/compare
 * new filters: 'skip_if_link_in_bio: true/false' and 'mutual_friends: a_number' min count
 * new feature added: pre- and post-script execution
 
-Full set of changes: [`2.7.7...2.8.0`](https://github.com/GramAddict/bot/compare/2.7.7...2.8.0)
+Full set of changes: [`2.7.7...2.8.0`](https://github.com/InstaAddict/bot/compare/2.7.7...2.8.0)
 
 ## 2.7.7 (2021-08-03)
 
 #### Fixes
 
-* place first post not found [#208](https://github.com/GramAddict/bot/issues/208)
+* place first post not found [#208](https://github.com/InstaAddict/bot/issues/208)
 * replace detect-block with disable-block-detection
 #### Performance improvements
 
 * removed unneeded class and sort imports
 
-Full set of changes: [`2.7.6...2.7.7`](https://github.com/GramAddict/bot/compare/2.7.6...2.7.7)
+Full set of changes: [`2.7.6...2.7.7`](https://github.com/InstaAddict/bot/compare/2.7.6...2.7.7)
 
 ## 2.7.6 (2021-07-31)
 
@@ -344,7 +344,7 @@ Full set of changes: [`2.7.6...2.7.7`](https://github.com/GramAddict/bot/compare
 
 * missing resource id for sorting following list
 
-Full set of changes: [`2.7.5...2.7.6`](https://github.com/GramAddict/bot/compare/2.7.5...2.7.6)
+Full set of changes: [`2.7.5...2.7.6`](https://github.com/InstaAddict/bot/compare/2.7.5...2.7.6)
 
 ## 2.7.5 (2021-07-30)
 
@@ -353,7 +353,7 @@ Full set of changes: [`2.7.5...2.7.6`](https://github.com/GramAddict/bot/compare
 * new argument "detect_block: true/false" to enable/ disable block check after every action
 #### Fixes
 
-* a better way to sort following list [#207](https://github.com/GramAddict/bot/issues/207)
+* a better way to sort following list [#207](https://github.com/InstaAddict/bot/issues/207)
 #### Performance improvements
 
 * add debug info for swipes
@@ -361,7 +361,7 @@ Full set of changes: [`2.7.5...2.7.6`](https://github.com/GramAddict/bot/compare
 
 * sort imports
 
-Full set of changes: [`2.7.4...2.7.5`](https://github.com/GramAddict/bot/compare/2.7.4...2.7.5)
+Full set of changes: [`2.7.4...2.7.5`](https://github.com/InstaAddict/bot/compare/2.7.4...2.7.5)
 
 ## 2.7.4 (2021-07-25)
 
@@ -369,7 +369,7 @@ Full set of changes: [`2.7.4...2.7.5`](https://github.com/GramAddict/bot/compare
 
 * support for Ig v. 197.0.0.26.119
 
-Full set of changes: [`2.7.3...2.7.4`](https://github.com/GramAddict/bot/compare/2.7.3...2.7.4)
+Full set of changes: [`2.7.3...2.7.4`](https://github.com/InstaAddict/bot/compare/2.7.3...2.7.4)
 
 ## 2.7.3 (2021-07-14)
 
@@ -378,7 +378,7 @@ Full set of changes: [`2.7.3...2.7.4`](https://github.com/GramAddict/bot/compare
 * sometimes the bot press on 'Switch IME' instead of open your profile
 * automatic change in English locale stopped working
 
-Full set of changes: [`2.7.2...2.7.3`](https://github.com/GramAddict/bot/compare/2.7.2...2.7.3)
+Full set of changes: [`2.7.2...2.7.3`](https://github.com/InstaAddict/bot/compare/2.7.2...2.7.3)
 
 ## 2.7.2 (2021-07-14)
 
@@ -389,7 +389,7 @@ Full set of changes: [`2.7.2...2.7.3`](https://github.com/GramAddict/bot/compare
 
 * lowered a little the swipe up in sorting `Following accounts`
 
-Full set of changes: [`2.7.1...2.7.2`](https://github.com/GramAddict/bot/compare/2.7.1...2.7.2)
+Full set of changes: [`2.7.1...2.7.2`](https://github.com/InstaAddict/bot/compare/2.7.1...2.7.2)
 
 ## 2.7.1 (2021-07-13)
 
@@ -400,7 +400,7 @@ Full set of changes: [`2.7.1...2.7.2`](https://github.com/GramAddict/bot/compare
 
 * we don't need to click on an obj if we are already on it
 
-Full set of changes: [`2.7.0...2.7.1`](https://github.com/GramAddict/bot/compare/2.7.0...2.7.1)
+Full set of changes: [`2.7.0...2.7.1`](https://github.com/InstaAddict/bot/compare/2.7.0...2.7.1)
 
 ## 2.7.0 (2021-07-12)
 
@@ -412,7 +412,7 @@ Full set of changes: [`2.7.0...2.7.1`](https://github.com/GramAddict/bot/compare
 * forgot to remove 'time_left' when calling print_telegram_reports at the end of all sessions
 * in config-examples forgot 'comment_blogger' and fix typo in 'comment_blogger_following'
 
-Full set of changes: [`2.6.5...2.7.0`](https://github.com/GramAddict/bot/compare/2.6.5...2.7.0)
+Full set of changes: [`2.6.5...2.7.0`](https://github.com/InstaAddict/bot/compare/2.6.5...2.7.0)
 
 ## 2.6.5 (2021-07-06)
 
@@ -421,7 +421,7 @@ Full set of changes: [`2.6.5...2.7.0`](https://github.com/GramAddict/bot/compare
 * the count of items in the carousels stopped at the first match
 * from now on, every type of interaction is counted as successful and not just likes
 
-Full set of changes: [`2.6.4...2.6.5`](https://github.com/GramAddict/bot/compare/2.6.4...2.6.5)
+Full set of changes: [`2.6.4...2.6.5`](https://github.com/InstaAddict/bot/compare/2.6.4...2.6.5)
 
 ## 2.6.4 (2021-07-01)
 
@@ -435,7 +435,7 @@ Full set of changes: [`2.6.4...2.6.5`](https://github.com/GramAddict/bot/compare
 
 * text improvement and typo corrections
 
-Full set of changes: [`2.6.3...2.6.4`](https://github.com/GramAddict/bot/compare/2.6.3...2.6.4)
+Full set of changes: [`2.6.3...2.6.4`](https://github.com/InstaAddict/bot/compare/2.6.3...2.6.4)
 
 ## 2.6.3 (2021-06-26)
 
@@ -443,7 +443,7 @@ Full set of changes: [`2.6.3...2.6.4`](https://github.com/GramAddict/bot/compare
 
 * time left in telegram-reports was wrong
 
-Full set of changes: [`2.6.2...2.6.3`](https://github.com/GramAddict/bot/compare/2.6.2...2.6.3)
+Full set of changes: [`2.6.2...2.6.3`](https://github.com/InstaAddict/bot/compare/2.6.2...2.6.3)
 
 ## 2.6.2 (2021-06-25)
 
@@ -459,7 +459,7 @@ Full set of changes: [`2.6.2...2.6.3`](https://github.com/GramAddict/bot/compare
 
 * typo in readme
 
-Full set of changes: [`2.6.1...2.6.2`](https://github.com/GramAddict/bot/compare/2.6.1...2.6.2)
+Full set of changes: [`2.6.1...2.6.2`](https://github.com/InstaAddict/bot/compare/2.6.1...2.6.2)
 
 ## 2.6.1 (2021-06-24)
 
@@ -471,13 +471,13 @@ Full set of changes: [`2.6.1...2.6.2`](https://github.com/GramAddict/bot/compare
 * correct a typo in telegram-reports
 * improved the README
 
-Full set of changes: [`2.6.0...2.6.1`](https://github.com/GramAddict/bot/compare/2.6.0...2.6.1)
+Full set of changes: [`2.6.0...2.6.1`](https://github.com/InstaAddict/bot/compare/2.6.0...2.6.1)
 
 ## 2.6.0 (2021-06-24)
 
 #### New Features
 
-* you can run GramAddict from the command line for initializing your account folder with all the files needed
+* you can run InstaAddict from the command line for initializing your account folder with all the files needed
 * add support for allow re-interaction after a given amount of hours
 #### Fixes
 

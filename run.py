@@ -1,3 +1,3 @@
-import GramAddict
+import InstaAddict
 
-GramAddict.run()
+InstaAddict.run()
