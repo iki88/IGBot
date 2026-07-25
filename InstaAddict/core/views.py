@@ -522,7 +522,18 @@ class PostsViewList:
                                 break
                     break
             if obj1 is None:
-                obj1 = gap_view_obj.get_bounds()["bottom"]
+                if gap_view_obj.exists():
+                    obj1 = gap_view_obj.get_bounds()["bottom"]
+                else:
+                    logger.debug(
+                        "Gap/footer view not found after retries — likely a "
+                        "sponsored/ad post layout. Falling back to content "
+                        "container bounds."
+                    )
+                    fallback_media = self.device.find(
+                        resourceIdMatches=containers_content
+                    )
+                    obj1 = fallback_media.get_bounds()["bottom"]
             containers_content = self.device.find(resourceIdMatches=containers_content)
 
             obj2 = (
@@ -1013,10 +1024,10 @@ class PostsViewList:
             is_hashtag = True
             logger.debug("Looks like an hashtag, skip.")
         if ad_like_obj.exists():
-            sponsored_txt = "Sponsored"
-            ad_like_txt = ad_like_obj.get_text() or ad_like_obj.get_desc()
-            if ad_like_txt.casefold() == sponsored_txt.casefold():
-                logger.debug("Looks like an AD, skip.")
+            ad_labels = {"sponsored", "ad"}
+            ad_like_txt = ad_like_obj.get_text() or ad_like_obj.get_desc() or ""
+            if ad_like_txt.casefold() in ad_labels:
+                logger.debug(f"Looks like an AD (label: '{ad_like_txt}'), skip.")
                 is_ad = True
             elif is_hashtag:
                 owner_name = owner_name.split("•")[0].strip()
