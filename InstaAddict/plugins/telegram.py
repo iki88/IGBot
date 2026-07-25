@@ -41,6 +41,20 @@ def telegram_bot_send_text(bot_api_token, bot_chat_ID, text):
         logger.error(f"Error sending Telegram message: {e}")
         return None
 
+def telegram_bot_send_photo(bot_api_token, bot_chat_id, photo_path, caption=None):
+    try:
+        method = "sendPhoto"
+        url = f"https://api.telegram.org/bot{bot_api_token}/{method}"
+        with open(photo_path, "rb") as photo_file:
+            files = {"photo": photo_file}
+            data = {"chat_id": bot_chat_id}
+            if caption:
+                data["caption"] = caption
+            return requests.post(url, data=data, files=files).json()
+    except Exception as e:
+        logger.error(f"Error sending Telegram photo: {e}")
+        return None
+
 
 def _initialize_aggregated_data():
     return {

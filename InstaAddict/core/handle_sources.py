@@ -6,6 +6,8 @@ from os import path
 from atomicwrites import atomic_write
 from colorama import Fore
 
+from InstaAddict.plugins.telegram import load_telegram_config, telegram_bot_send_photo
+
 from InstaAddict.core.device_facade import DeviceFacade, Direction, Timeout
 from InstaAddict.core.navigation import (
     nav_to_blogger,
@@ -16,6 +18,7 @@ from InstaAddict.core.navigation import (
 from InstaAddict.core.resources import ClassName
 from InstaAddict.core.storage import FollowingStatus
 from InstaAddict.core.utils import (
+    EmptyList,
     get_value,
     inspect_current_view,
     random_choice,
@@ -688,6 +691,46 @@ def handle_followers(
         username,
     )
 
+def check_and_report_restricted_list(device, session_state, target_username):
+    no_results_heading = device.find(
+        className=ClassName.TEXT_VIEW,
+        textMatches=case_insensitive_re("No results"),
+    )
+    restricted_text = device.find(
+        className=ClassName.TEXT_VIEW,
+        textMatches=case_insensitive_re(".*We limit certain things.*"),
+    )
+    if not no_results_heading.exists() and not restricted_text.exists():
+        return False
+
+    logger.warning(
+        f"@{target_username}'s followers/following list is restricted by Instagram.",
+        extra={"color": f"{Fore.RED}"},
+    )
+
+    try:
+        my_username = session_state.my_username
+        telegram_config = load_telegram_config(my_username)
+        if not telegram_config:
+            logger.debug(
+                f"No telegram configuration found for {my_username}. Skipping restriction alert."
+            )
+            return True
+
+        os.makedirs("crashes", exist_ok=True)
+        screenshot_path = os.path.join("crashes", "restricted_list.png")
+        device.screenshot(screenshot_path)
+
+        telegram_bot_send_photo(
+            telegram_config.get("telegram-api-token"),
+            telegram_config.get("telegram-chat-id"),
+            screenshot_path,
+            caption=f"⚠️ Followers/following list restricted for @{target_username}",
+        )
+    except Exception as e:
+        logger.error(f"Failed to send Telegram restriction alert: {e}")
+
+    return True
 
 def iterate_over_followers(
     self,
@@ -722,7 +765,21 @@ def iterate_over_followers(
         user_list = device.find(
             resourceIdMatches=self.ResourceID.USER_LIST_CONTAINER,
         )
-        row_height, n_users = inspect_current_view(user_list)
+        try:
+            row_height, n_users = inspect_current_view(user_list)
+        except EmptyList:
+            if check_and_report_restricted_list(device, session_state, target):
+                logger.warning(
+                    f"Instagram restricted the list for @{target}. Skipping this account.",
+                    extra={"color": f"{Fore.RED}"},
+                )
+                logger.info("Back to blogger profile")
+                device.back()
+                random_sleep(1, 2, modulable=False)
+                device.back()
+                device.back()
+                return
+            raise
         try:
             for item in user_list:
                 try:

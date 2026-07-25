@@ -2,17 +2,17 @@
 
 ## 1.0.1 (2025-07-18) - First InstaAddict Release
 
-This is the first production release of **InstaAddict**, a continuation of the [InstaAddict](https://github.com/InstaAddict/bot) project.
+This is the first production release of **InstaAddict**, a continuation of the [GramAddict](https://github.com/GramAddict/bot) project.
 
 ### New
-- Forked and rebranded from InstaAddict to InstaAddict
+- Forked and rebranded from GramAddict to InstaAddict
 - Updated to support Instagram version 438.0.0.28.88
 - Updated profile header resource IDs to match new Instagram UI (posts, followers, following counts)
 - Added support for new `profile_header_familiar_*` resource ID patterns
 - Updated `.gitignore` to properly exclude sensitive account configs, crash dumps, and logs
 
 ### Changed
-- All user-facing branding changed from InstaAddict to InstaAddict
+- All user-facing branding changed from GramAddict to InstaAddict
 - GitHub references updated to `https://github.com/joeahkim/InstaAddict`
 - Version reset to 1.0.1 for the InstaAddict fork
 
