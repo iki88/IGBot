@@ -11,3 +11,4 @@ requests~=2.31.0
 packaging~=26.2
 standard-pkg-resources>=1.0.0
 imageio
+websocket-client
