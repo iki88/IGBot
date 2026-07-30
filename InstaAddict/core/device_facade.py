@@ -236,9 +236,10 @@ class DeviceFacade:
 
     def is_alive(self):
         try:
-            return self.deviceV2._is_alive()  # deprecated method
-        except AttributeError:
-            return self.deviceV2.server.alive
+            self.deviceV2.info
+            return True
+        except Exception:
+            return False
 
     def wake_up(self):
         """Make sure agent is alive or bring it back up before starting."""
