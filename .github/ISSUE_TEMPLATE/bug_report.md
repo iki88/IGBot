@@ -16,7 +16,7 @@ labels: kind/bug
 **Anything else we need to know?**:
 
 **Environment**:
-- GramAddict version:
+- InstaAddict version:
 - Device Model/Emulator Type:
 - Android Version:
 - Instagram Version:

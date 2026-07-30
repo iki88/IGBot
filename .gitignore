@@ -1,7 +1,7 @@
 /build
 /dump
 /dist
-/gramaddict.egg-info
+/InstaAddict.egg-info
 /.idea
 /.vscode
 *.pyc
@@ -21,3 +21,4 @@ Pipfile.lock
 /accounts/
 /crashes/
 /logs/
+__pycache__/

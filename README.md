@@ -34,11 +34,11 @@
 
 # About This Project
 
-**InstaAddict** is a fork and continuation of [GramAddict](https://github.com/GramAddict/bot), an open-source Instagram automation bot originally created and maintained by [mastrolube](https://github.com/mastrolube) and the GramAddict community. The original project is no longer actively maintained.
+**InstaAddict** is a fork and continuation of [InstaAddict](https://github.com/InstaAddict/bot), an open-source Instagram automation bot originally created and maintained by [mastrolube](https://github.com/mastrolube) and the InstaAddict community. The original project is no longer actively maintained.
 
-We are deeply grateful to the GramAddict team for building such a solid foundation. Their dedication to keeping the bot free, open source, and community-driven made this project possible. InstaAddict picks up where GramAddict left off — continuing development, fixing compatibility with newer Instagram versions, and keeping the bot alive for the community.
+We are deeply grateful to the InstaAddict team for building such a solid foundation. Their dedication to keeping the bot free, open source, and community-driven made this project possible. InstaAddict picks up where InstaAddict left off — continuing development, fixing compatibility with newer Instagram versions, and keeping the bot alive for the community.
 
-> This project is licensed under the same terms as the original. All credit for the core architecture and original features goes to the GramAddict contributors.
+> This project is licensed under the same terms as the original. All credit for the core architecture and original features goes to the InstaAddict contributors.
 
 ### Maintained by
 
@@ -100,7 +100,7 @@ There are lots of __cool features__ you can use __for free__!
 - Can be used stand-alone (without the use of a computer)
 - Includes realistic random human-like delays and actions
 - Can watch stories while interacting
-- Comment post with emojis and [spintax logic](https://github.com/GramAddict/docs/blob/main/configuration.md#spintax-support)
+- Comment post with emojis and [spintax logic](https://github.com/InstaAddict/docs/blob/main/configuration.md#spintax-support)
 - Send PM
 - Type like a human (letter by letter by faking using suggestions. For example, you won't type `H - e - l - l - o` letter by letter but something like `H - He - Hello`)
 - Browse carousels and watch their contents
@@ -187,9 +187,9 @@ We create a virtual environment called `.venv` and activate it:
       > If you activate the venv correctly, you will see a little (.venv) on the left side of the command line!
 #### With pip (I suggest you this way):
 
-- install the package: `pip3 install GramAddict`
+- install the package: `pip3 install InstaAddict`
 - check if it's installed: `gramaddict --version`
-- if everything is fine you will get the GramAddict version installed 🥳
+- if everything is fine you will get the InstaAddict version installed 🥳
 
 #### With git:
 > __Warning:__ console commands like `gramaddict init`, `gramaddict dump` and `gramaddict run` won't work if you installed the bot with git.

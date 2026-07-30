@@ -4,7 +4,7 @@ from unittest.mock import mock_open
 import pytest
 from datetime import datetime
 
-import GramAddict.plugins.telegram as TelegramReports
+import InstaAddict.plugins.telegram as TelegramReports
 
 
 @pytest.fixture

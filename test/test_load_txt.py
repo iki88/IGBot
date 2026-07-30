@@ -1,4 +1,4 @@
-from GramAddict.core.interaction import _load_and_clean_txt_file
+from InstaAddict.core.interaction import _load_and_clean_txt_file
 
 
 def test_load_txt_ok(mocker):
