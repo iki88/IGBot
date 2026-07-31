@@ -1197,6 +1197,8 @@ class PostsViewList:
                     self.device
                 )._check_if_ad_or_hashtag(post_owner_obj)
             if username is None:
+                raw_text = post_owner_obj.get_text()
+                logger.debug(f"[DEBUG owner name] raw_text='{raw_text}'")
                 username = (
                     post_owner_obj.get_text().replace("•", "").strip().split(" ", 1)[0]
                 )
