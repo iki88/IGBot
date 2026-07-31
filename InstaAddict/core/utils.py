@@ -47,7 +47,7 @@ def load_config(config: Config):
 
 
 def update_available():
-    response = requests.get("https://pypi.python.org/pypi/gramaddict/json")
+    response = requests.get("https://pypi.python.org/pypi/InstaAddict/json")
     if response.ok:
         latest_version = response.json()["info"]["version"]
 
@@ -501,9 +501,20 @@ def save_crash(device):
             )
         files = [f for f in os.listdir("./") if f.endswith(".mp4")]
         try:
-            os.replace(files[-1], os.path.join(crash_path, "video.mp4"))
+            source = files[-1]
+            target = os.path.join(crash_path, "video.mp4")
+            for attempt in range(10):
+                try:
+                    os.replace(source, target)
+                    break
+                except PermissionError:
+                    if attempt == 9:
+                        raise
+                    sleep(1)
         except (FileNotFoundError, IndexError):
             logger.error("File *.mp4 not found!")
+        except PermissionError as e:
+            logger.error(f"Cannot save crash video because it is still in use: {e}")
     g_log_file_name, g_logs_dir, _, _ = get_log_file_config()
     src_file = os.path.join(g_logs_dir, g_log_file_name)
     target_file = os.path.join(crash_path, "logs.txt")

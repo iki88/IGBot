@@ -137,20 +137,33 @@ class DeviceFacade:
 
         def _run_MOD(self):
             from collections import deque
+            from time import sleep
 
-            pipelines = [self._pipe_limit, self._pipe_convert, self._pipe_resize]
-            _iter = self._iter_minicap()
-            for p in pipelines:
-                _iter = p(_iter)
+            import numpy as np
 
-            with imageio.get_writer(self._filename, fps=self._fps) as wr:
+            try:
                 frames = deque(maxlen=self._fps * 30)
-                for im in _iter:
-                    frames.append(im)
+                if hasattr(self._d, "path2url"):
+                    pipelines = [self._pipe_limit, self._pipe_convert, self._pipe_resize]
+                    _iter = self._iter_minicap()
+                    for p in pipelines:
+                        _iter = p(_iter)
+                    for im in _iter:
+                        frames.append(im)
+                else:
+                    interval = 1 / max(self._fps, 1)
+                    while not self._stop_event.is_set():
+                        frames.append(np.asarray(self._d.screenshot()))
+                        sleep(interval)
+
                 if self.crash:
-                    for frame in frames:
-                        wr.append_data(frame)
-            self._done_event.set()
+                    with imageio.get_writer(self._filename, fps=self._fps) as wr:
+                        for frame in frames:
+                            wr.append_data(frame)
+            except Exception as e:
+                logger.warning(f"Screen recording failed: {e}")
+            finally:
+                self._done_event.set()
 
         def stop_MOD(self, crash=True):
             """
@@ -161,7 +174,7 @@ class DeviceFacade:
             if self._running:
                 self.crash = crash
                 self._stop_event.set()
-                ret = self._done_event.wait(10.0)
+                ret = self._done_event.wait(30.0)
 
                 # reset
                 self._stop_event.clear()
@@ -344,10 +357,13 @@ class DeviceFacade:
         def __iter__(self):
             children = []
             try:
-                children.extend(
-                    DeviceFacade.View(view=item, device=self.deviceV2)
-                    for item in self.viewV2
-                )
+                iterator = self.viewV2.__iter__()
+                while True:
+                    try:
+                        item = next(iterator)
+                    except StopIteration:
+                        break
+                    children.append(DeviceFacade.View(view=item, device=self.deviceV2))
                 return iter(children)
             except Exception as e:
                 raise DeviceFacade.JsonRpcError(e)
