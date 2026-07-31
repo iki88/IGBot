@@ -2,6 +2,7 @@ import datetime
 import logging
 import re
 import platform
+import xml.etree.ElementTree as ET
 from enum import Enum, auto
 from random import choice, randint, uniform
 from time import sleep
@@ -463,15 +464,21 @@ class PostsViewList:
         """calculate the right swipe amount necessary to swipe to next post in hashtag post view
         in order to make it available to other plug-ins I cut it in two moves"""
         displayWidth = self.device.get_info()["displayWidth"]
+        displayHeight = self.device.get_info()["displayHeight"]
         containers_content = ResourceID.MEDIA_CONTAINER
         containers_gap = ResourceID.GAP_VIEW_AND_FOOTER_SPACE
         suggested_users = ResourceID.NETEGO_CAROUSEL_HEADER
 
         # move type: half photo
         if swipe == SwipeTo.HALF_PHOTO:
-            zoomable_view_container = self.device.find(
-                resourceIdMatches=containers_content
-            ).get_bounds()["bottom"]
+            media_bounds = self._get_current_media_bounds(containers_content)
+            if media_bounds is None:
+                logger.debug("Can't find media bounds, using screen fallback.")
+                media_bounds = {
+                    "top": displayHeight * 0.25,
+                    "bottom": displayHeight * 0.75,
+                }
+            zoomable_view_container = media_bounds["bottom"]
             ac_exists, _, ac_bottom = PostsViewList(
                 self.device
             )._get_action_bar_position()
@@ -499,11 +506,8 @@ class PostsViewList:
                     else:
                         break
                 else:
-                    media = self.device.find(resourceIdMatches=containers_content)
-                    if (
-                        gap_view_obj.get_bounds()["bottom"]
-                        < media.get_bounds()["bottom"]
-                    ):
+                    media_bounds = self._get_current_media_bounds(containers_content)
+                    if media_bounds and gap_view_obj.get_bounds()["bottom"] < media_bounds["bottom"]:
                         PostsViewList(self.device).swipe_to_fit_posts(
                             SwipeTo.HALF_PHOTO
                         )
@@ -530,20 +534,23 @@ class PostsViewList:
                         "sponsored/ad post layout. Falling back to content "
                         "container bounds."
                     )
-                    fallback_media = self.device.find(
-                        resourceIdMatches=containers_content
+                    fallback_media_bounds = self._get_current_media_bounds(
+                        containers_content
                     )
-                    obj1 = fallback_media.get_bounds()["bottom"]
-            containers_content = self.device.find(resourceIdMatches=containers_content)
+                    obj1 = (
+                        fallback_media_bounds["bottom"]
+                        if fallback_media_bounds
+                        else displayHeight * 0.75
+                    )
+            media_bounds = self._get_current_media_bounds(containers_content)
+            if media_bounds is None:
+                logger.debug("Can't find media bounds, using screen fallback.")
+                media_bounds = {
+                    "top": displayHeight * 0.25,
+                    "bottom": displayHeight * 0.75,
+                }
 
-            obj2 = (
-                (
-                    containers_content.get_bounds()["bottom"]
-                    + containers_content.get_bounds()["top"]
-                )
-                * 1
-                / 3
-            )
+            obj2 = (media_bounds["bottom"] + media_bounds["top"]) * 1 / 3
 
             self.device.swipe_points(
                 displayWidth / 2,
@@ -552,6 +559,112 @@ class PostsViewList:
                 obj2 + 5,
             )
             return True
+
+    def _get_current_media_bounds(self, legacy_media_selector) -> Optional[dict]:
+        try:
+            media = self.device.find(resourceIdMatches=legacy_media_selector)
+            if media.exists() or media.count_items() >= 1:
+                return media.get_bounds()
+        except Exception as e:
+            logger.debug(f"Legacy media bounds lookup failed: {e}")
+
+        try:
+            root = ET.fromstring(self.device.deviceV2.dump_hierarchy())
+        except Exception as e:
+            logger.debug(f"Can't parse UI hierarchy while looking for media: {e}")
+            return None
+
+        media_ids = set(ResourceID.MEDIA_CONTAINER.split("|"))
+        media_ids.update(ResourceID.CAROUSEL_AND_MEDIA_GROUP.split("|"))
+        media_ids.update(
+            {
+                ResourceID.MEDIA_GROUP,
+                ResourceID.VIDEO_CONTAINER,
+                f"{configs.args.app_id}:id/row_feed_photo_imageview",
+                ResourceID.REEL_VIEWER_MEDIA_CONTAINER,
+            }
+        )
+        display_height = self.device.get_info()["displayHeight"]
+        display_width = self.device.get_info()["displayWidth"]
+
+        nodes = []
+        for node in root.iter("node"):
+            if node.attrib.get("package") != configs.args.app_id:
+                continue
+            if node.attrib.get("visible-to-user") != "true":
+                continue
+            bounds = PostsViewList._bounds_from_xml_node(node)
+            if bounds is None:
+                continue
+            nodes.append(
+                {
+                    "bounds": bounds,
+                    "resource_id": node.attrib.get("resource-id", ""),
+                    "desc": PostsViewList._normalize_ig_text(
+                        node.attrib.get("content-desc")
+                    ),
+                }
+            )
+
+        button_rows = sorted(
+            (
+                item
+                for item in nodes
+                if item["resource_id"] == ResourceID.ROW_FEED_VIEW_GROUP_BUTTONS
+            ),
+            key=lambda item: item["bounds"]["top"],
+        )
+        media_candidates = []
+        for item in nodes:
+            bounds = item["bounds"]
+            width = bounds["right"] - bounds["left"]
+            height = bounds["bottom"] - bounds["top"]
+            if width < display_width * 0.5 or height < display_height * 0.08:
+                continue
+            desc = item["desc"].casefold()
+            looks_like_media = (
+                item["resource_id"] in media_ids
+                or " likes" in desc
+                or " comments" in desc
+                or desc.startswith(("photo ", "reel by", "video by"))
+            )
+            if looks_like_media:
+                media_candidates.append(item)
+
+        if not media_candidates:
+            return None
+
+        for button_row in button_rows:
+            row_top = button_row["bounds"]["top"]
+            candidates_above_buttons = [
+                item
+                for item in media_candidates
+                if item["bounds"]["top"] < row_top
+                and item["bounds"]["bottom"] <= row_top + 4
+            ]
+            if candidates_above_buttons:
+                return max(
+                    candidates_above_buttons,
+                    key=lambda item: (
+                        item["bounds"]["bottom"] - item["bounds"]["top"],
+                        item["bounds"]["right"] - item["bounds"]["left"],
+                    ),
+                )["bounds"]
+
+        visible_candidates = [
+            item
+            for item in media_candidates
+            if 0 <= (item["bounds"]["top"] + item["bounds"]["bottom"]) / 2 <= display_height
+        ]
+        if not visible_candidates:
+            visible_candidates = media_candidates
+        return max(
+            visible_candidates,
+            key=lambda item: (
+                item["bounds"]["bottom"] - item["bounds"]["top"],
+                -(item["bounds"]["top"]),
+            ),
+        )["bounds"]
 
     def _find_likers_container(self):
         universal_actions = UniversalActions(self.device)
@@ -571,22 +684,39 @@ class PostsViewList:
             media = self.device.find(
                 resourceIdMatches=media_container,
             )
-            media_count = media.count_items()
+            try:
+                media_count = media.count_items()
+            except Exception:
+                media_count = 0
             logger.debug(f"I can see {media_count} media(s) in this view..")
+            try:
+                media_bounds = media.get_bounds() if media_count > 0 else None
+            except Exception as e:
+                logger.debug(f"Legacy media bounds lookup failed: {e}")
+                media_bounds = None
+            if media_bounds is None:
+                media_bounds = self._get_current_media_bounds(media_container)
+                if media_bounds is not None:
+                    logger.debug("Using compatibility media bounds.")
 
-            if media_count > 1 and (
-                media.get_bounds()["bottom"]
-                < self.device.get_info()["displayHeight"] / 3
+            if media_count > 1 and media_bounds and (
+                media_bounds["bottom"] < self.device.get_info()["displayHeight"] / 3
             ):
                 universal_actions._swipe_points(Direction.DOWN, delta_y=100)
                 continue
             if not likes_view.exists():
+                likes_fallback = self._get_current_likers_info()
+                if likes_fallback is not None:
+                    logger.debug("Likers container found in compatibility hierarchy.")
+                    return True, self._get_number_of_likers_from_text(
+                        likes_fallback["text"]
+                    )
                 if description_view.exists() or gap_view_obj.exists():
                     return False, likes
                 else:
                     universal_actions._swipe_points(Direction.DOWN, delta_y=100)
                     continue
-            elif media.get_bounds()["bottom"] > likes_view.get_bounds()["bottom"]:
+            elif media_bounds and media_bounds["bottom"] > likes_view.get_bounds()["bottom"]:
                 universal_actions._swipe_points(Direction.DOWN, delta_y=100)
                 continue
             logger.debug("Likers container exists!")
@@ -594,36 +724,98 @@ class PostsViewList:
             return likes_view.exists(), likes
         return False, 0
 
+    def _get_current_likers_info(self) -> Optional[dict]:
+        try:
+            root = ET.fromstring(self.device.deviceV2.dump_hierarchy())
+        except Exception as e:
+            logger.debug(f"Can't parse UI hierarchy while looking for likers: {e}")
+            return None
+
+        nodes = []
+        for node in root.iter("node"):
+            if node.attrib.get("package") != configs.args.app_id:
+                continue
+            if node.attrib.get("visible-to-user") != "true":
+                continue
+            bounds = PostsViewList._bounds_from_xml_node(node)
+            if bounds is None:
+                continue
+            nodes.append(
+                {
+                    "bounds": bounds,
+                    "resource_id": node.attrib.get("resource-id", ""),
+                    "text": PostsViewList._normalize_ig_text(node.attrib.get("text")),
+                }
+            )
+
+        button_rows = sorted(
+            (
+                item
+                for item in nodes
+                if item["resource_id"] == ResourceID.ROW_FEED_VIEW_GROUP_BUTTONS
+            ),
+            key=lambda item: item["bounds"]["top"],
+        )
+        if not button_rows:
+            return None
+
+        likers = []
+        for item in nodes:
+            text = item["text"]
+            if not text:
+                continue
+            text_lower = text.casefold()
+            if (
+                text_lower.startswith("liked by ")
+                or re.search(r"\b\d[\d,.kmb]*\s+likes?\b", text_lower)
+                or text_lower.endswith(" others")
+            ):
+                likers.append(item)
+
+        for button_row in button_rows:
+            row_bottom = button_row["bounds"]["bottom"]
+            candidates = [
+                item
+                for item in likers
+                if row_bottom <= item["bounds"]["top"] <= row_bottom + 120
+            ]
+            if candidates:
+                return min(candidates, key=lambda item: item["bounds"]["top"])
+        return None
+
+    def _get_number_of_likers_from_text(self, likes_view_text):
+        likes = 0
+        likes_view_text = PostsViewList._normalize_ig_text(likes_view_text).replace(
+            ",", ""
+        )
+        matches_likes = re.search(
+            r"(?P<likes>\d+) (?:others|likes)", likes_view_text, re.IGNORECASE
+        )
+        matches_view = re.search(
+            r"(?P<views>\d+) views", likes_view_text, re.IGNORECASE
+        )
+        if hasattr(matches_likes, "group"):
+            likes = int(matches_likes.group("likes"))
+            logger.info(
+                f"This post has {likes if 'likes' in likes_view_text else likes + 1} like(s)."
+            )
+            return likes
+        if hasattr(matches_view, "group"):
+            views = int(matches_view.group("views"))
+            logger.info(
+                f"I can see only that this post has {views} views(s). It may contain likes.."
+            )
+            return -1
+        if likes_view_text.endswith("others"):
+            logger.info("This post has more than 1 like.")
+            return -1
+        logger.info("This post has only 1 like.")
+        return 1
+
     def _get_number_of_likers(self, likes_view):
         likes = 0
         if likes_view.exists():
-            likes_view_text = likes_view.get_text().replace(",", "")
-            matches_likes = re.search(
-                r"(?P<likes>\d+) (?:others|likes)", likes_view_text, re.IGNORECASE
-            )
-            matches_view = re.search(
-                r"(?P<views>\d+) views", likes_view_text, re.IGNORECASE
-            )
-            if hasattr(matches_likes, "group"):
-                likes = int(matches_likes.group("likes"))
-                logger.info(
-                    f"This post has {likes if 'likes' in likes_view_text else likes + 1} like(s)."
-                )
-                return likes
-            elif hasattr(matches_view, "group"):
-                views = int(matches_view.group("views"))
-                logger.info(
-                    f"I can see only that this post has {views} views(s). It may contain likes.."
-                )
-                return -1
-            else:
-                if likes_view_text.endswith("others"):
-                    logger.info("This post has more than 1 like.")
-                    return -1
-                else:
-                    logger.info("This post has only 1 like.")
-                    likes = 1
-                    return likes
+            return self._get_number_of_likers_from_text(likes_view.get_text())
         else:
             logger.info("This post has no likes, skip.")
             return likes
@@ -646,52 +838,41 @@ class PostsViewList:
                 resourceId=ResourceID.ROW_FEED_TEXTVIEW_LIKES,
                 className=ClassName.TEXT_VIEW,
             )
+            if not likes_view.exists():
+                likes_fallback = self._get_current_likers_info()
+                if likes_fallback is not None:
+                    bounds = likes_fallback["bounds"]
+                    logger.debug(f"[DEBUG likers click - compat path] bounds={bounds}")
+                    right_edge_point = (
+                        bounds["right"] - 15,
+                        int((bounds["top"] + bounds["bottom"]) / 2),
+                    )
+                    self.device.deviceV2.click(*right_edge_point)
+                    DeviceFacade.sleep_mode(SleepTime.DEFAULT)
+                    return
             if " Liked by" in likes_view.get_text():
                 post_liked_by_a_following = True
             elif likes_view.child().count_items() < 2:
                 likes_view.click()
                 return
             if likes_view.child().exists():
-                if post_liked_by_a_following:
-                    likes_view.child().click()
-                    return
                 foil = likes_view.get_bounds()
+                # The avatar ("child") sits near the start of the text, and the
+                # username right after it is its own clickable span whose exact
+                # bounds we can't see via accessibility. Avoiding just the avatar
+                # isn't enough -- clicking near the right edge lands past both the
+                # avatar and the username link, on "...and X others" instead.
                 hole = likes_view.child().get_bounds()
-                try:
-                    sq1 = Square(
-                        foil["left"],
-                        foil["top"],
-                        hole["left"],
-                        foil["bottom"],
-                    ).point()
-                    sq2 = Square(
-                        hole["left"],
-                        foil["top"],
-                        hole["right"],
-                        hole["top"],
-                    ).point()
-                    sq3 = Square(
-                        hole["left"],
-                        hole["bottom"],
-                        hole["right"],
-                        foil["bottom"],
-                    ).point()
-                    sq4 = Square(
-                        hole["right"],
-                        foil["top"],
-                        foil["right"],
-                        foil["bottom"],
-                    ).point()
-                except ValueError:
-                    logger.debug(f"Point calculation fails: F:{foil} H:{hole}")
-                    likes_view.click(Location.RIGHT)
-                    return
-                sq_list = [sq1, sq2, sq3, sq4]
-                available_sq_list = [x for x in sq_list if x == x]
-                if available_sq_list:
-                    likes_view.click(Location.CUSTOM, coord=choice(available_sq_list))
-                else:
-                    likes_view.click(Location.RIGHT)
+                text = likes_view.get_text()
+                logger.debug(
+                    f"[DEBUG likers click] text='{text}' | foil={foil} | hole={hole}"
+                )
+                right_edge_point = (
+                    foil["right"] - 15,
+                    int((foil["top"] + foil["bottom"]) / 2),
+                )
+                likes_view.click(Location.CUSTOM, coord=right_edge_point)
+                return
             elif not post_liked_by_a_following:
                 likes_view.click(Location.RIGHT)
             else:
@@ -704,6 +885,143 @@ class PostsViewList:
         self.has_tags = tags_icon.exists()
         return self.has_tags
 
+    @staticmethod
+    def _bounds_from_xml_node(node):
+        bounds = node.attrib.get("bounds", "")
+        matches = re.findall(r"\d+", bounds)
+        if len(matches) != 4:
+            return None
+        left, top, right, bottom = map(int, matches)
+        return {
+            "left": left,
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+        }
+
+    @staticmethod
+    def _normalize_ig_text(text):
+        return re.sub(r"\s+", " ", (text or "").replace("\xa0", " ")).strip()
+
+    @staticmethod
+    def _node_has_owner_child(node, username):
+        username = PostsViewList._normalize_ig_text(username)
+        for child in node.iter("node"):
+            if child is node:
+                continue
+            if PostsViewList._normalize_ig_text(child.attrib.get("content-desc")) == username:
+                return True
+        return False
+
+    @staticmethod
+    def _is_caption_text_node(node, username):
+        username = PostsViewList._normalize_ig_text(username)
+        text = PostsViewList._normalize_ig_text(node.attrib.get("text"))
+        if not text.startswith(f"{username} "):
+            return False
+        resource_id = node.attrib.get("resource-id", "")
+        if resource_id in (
+            ResourceID.ROW_FEED_PHOTO_PROFILE_NAME,
+            ResourceID.ROW_FEED_PROFILE_HEADER,
+        ):
+            return False
+        if node.attrib.get("class", "") == ClassName.BUTTON:
+            return False
+        return PostsViewList._node_has_owner_child(node, username)
+
+    def _find_caption_text_in_current_post(self, username) -> Optional[str]:
+        username = PostsViewList._normalize_ig_text(username)
+        media_ids = set(ResourceID.MEDIA_CONTAINER.split("|"))
+        try:
+            root = ET.fromstring(self.device.deviceV2.dump_hierarchy())
+        except Exception as e:
+            logger.debug(f"Can't parse UI hierarchy while looking for caption: {e}")
+            return None
+
+        nodes = []
+        for node in root.iter("node"):
+            bounds = PostsViewList._bounds_from_xml_node(node)
+            if bounds is None or node.attrib.get("visible-to-user") != "true":
+                continue
+            nodes.append(
+                {
+                    "node": node,
+                    "bounds": bounds,
+                    "resource_id": node.attrib.get("resource-id", ""),
+                    "text": PostsViewList._normalize_ig_text(node.attrib.get("text")),
+                    "desc": PostsViewList._normalize_ig_text(
+                        node.attrib.get("content-desc")
+                    ),
+                }
+            )
+
+        headers = sorted(
+            (
+                item
+                for item in nodes
+                if item["resource_id"] == ResourceID.ROW_FEED_PROFILE_HEADER
+            ),
+            key=lambda item: item["bounds"]["top"],
+        )
+        button_rows = sorted(
+            (
+                item
+                for item in nodes
+                if item["resource_id"] == ResourceID.ROW_FEED_VIEW_GROUP_BUTTONS
+            ),
+            key=lambda item: item["bounds"]["top"],
+        )
+        captions = sorted(
+            (
+                item
+                for item in nodes
+                if PostsViewList._is_caption_text_node(item["node"], username)
+            ),
+            key=lambda item: item["bounds"]["top"],
+        )
+
+        for button_row in reversed(button_rows):
+            next_header_top = min(
+                (
+                    header["bounds"]["top"]
+                    for header in headers
+                    if header["bounds"]["top"] > button_row["bounds"]["bottom"]
+                ),
+                default=self.device.get_info()["displayHeight"] + 1,
+            )
+            for caption in captions:
+                caption_top = caption["bounds"]["top"]
+                if button_row["bounds"]["bottom"] <= caption_top < next_header_top:
+                    logger.debug("Description found in resource-id-less caption node.")
+                    return caption["text"]
+
+        current_headers = [
+            header
+            for header in headers
+            if username in header["desc"] or username in header["text"]
+        ]
+        for header in reversed(current_headers):
+            next_header_top = min(
+                (
+                    other["bounds"]["top"]
+                    for other in headers
+                    if other["bounds"]["top"] > header["bounds"]["top"]
+                ),
+                default=self.device.get_info()["displayHeight"] + 1,
+            )
+            has_media = any(
+                item["resource_id"] in media_ids
+                and header["bounds"]["top"] <= item["bounds"]["top"] < next_header_top
+                for item in nodes
+            )
+            if not has_media:
+                continue
+            for caption in captions:
+                if header["bounds"]["top"] <= caption["bounds"]["top"] < next_header_top:
+                    logger.debug("Description found in current post hierarchy.")
+                    return caption["text"]
+        return None
+
     def _check_if_last_post(
         self, last_description, current_job
     ) -> Tuple[bool, str, str, bool, bool, bool]:
@@ -712,8 +1030,9 @@ class PostsViewList:
         username, is_ad, is_hashtag = PostsViewList(self.device)._post_owner(
             current_job, Owner.GET_NAME
         )
+        username = PostsViewList._normalize_ig_text(username)
         has_tags = self._has_tags()
-        while True:
+        for _ in range(8):
             post_description = self.device.find(
                 index=-1,
                 resourceIdMatches=ResourceID.ROW_FEED_TEXT,
@@ -729,6 +1048,15 @@ class PostsViewList:
             if post_description.exists():
                 logger.debug("Description found!")
                 new_description = post_description.get_text().upper()
+                if new_description != last_description:
+                    return False, new_description, username, is_ad, is_hashtag, has_tags
+                logger.info(
+                    "This post has the same description and author as the last one."
+                )
+                return True, new_description, username, is_ad, is_hashtag, has_tags
+            caption_text = self._find_caption_text_in_current_post(username)
+            if caption_text:
+                new_description = caption_text.upper()
                 if new_description != last_description:
                     return False, new_description, username, is_ad, is_hashtag, has_tags
                 logger.info(
@@ -761,10 +1089,13 @@ class PostsViewList:
                         logger.info("This post hasn't the description...")
                         return False, "", username, is_ad, is_hashtag, has_tags
 
+                logger.debug(self.device.dump_hierarchy("window.xml"))
                 logger.debug(
                     f"Can't find the description of {username}'s post, try to swipe a little bit down."
                 )
                 universal_actions._swipe_points(direction=Direction.DOWN, delta_y=200)
+        logger.info("This post hasn't the description...")
+        return False, "", username, is_ad, is_hashtag, has_tags
 
     def _if_action_bar_is_over_obj_swipe(self, obj):
         """do a swipe of the amount of the action bar"""
@@ -866,6 +1197,8 @@ class PostsViewList:
                     self.device
                 )._check_if_ad_or_hashtag(post_owner_obj)
             if username is None:
+                raw_text = post_owner_obj.get_text()
+                logger.debug(f"[DEBUG owner name] raw_text='{raw_text}'")
                 username = (
                     post_owner_obj.get_text().replace("•", "").strip().split(" ", 1)[0]
                 )
