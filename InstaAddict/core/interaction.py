@@ -233,6 +233,12 @@ def interact_with_user(
         end_time = format(time() - start_time, ".2f")
         photos_indices = list(range(full_rows * 3 + columns_last_row))
 
+        if 0 < profile_data.posts_count < len(photos_indices):
+            logger.debug(
+                f"The grid shows {len(photos_indices)} slots but the profile has {profile_data.posts_count} posts. Trimming empty slots."
+            )
+            photos_indices = photos_indices[: profile_data.posts_count]
+
         if len(photos_indices) == profile_data.posts_count and len(photos_indices) > 1:
             del photos_indices[-1]
             logger.debug(
@@ -275,7 +281,12 @@ def interact_with_user(
             if opened_post_view is None:
                 save_crash(device)
                 continue
-            already_liked, _ = opened_post_view._is_post_liked()
+            if media_type in (None, MediaType.UNKNOWN):
+                media_type = opened_post_view.detect_opened_media_type()
+            if media_type in (MediaType.REEL, MediaType.IGTV, MediaType.VIDEO):
+                already_liked, _ = opened_post_view._is_video_liked()
+            else:
+                already_liked, _ = opened_post_view._is_post_liked()
             if already_liked:
                 logger.info("Post already liked!")
             elif opened_post_view and already_liked is not None:
@@ -287,7 +298,7 @@ def interact_with_user(
                         like_succeed = opened_post_view.like_video()
                         logger.debug("Closing video...")
                         device.back()
-                elif media_type in (MediaType.CAROUSEL, MediaType.PHOTO):
+                elif media_type in (MediaType.CAROUSEL, MediaType.PHOTO, MediaType.UNKNOWN):
                     if media_type == MediaType.CAROUSEL:
                         _browse_carousel(device, obj_count)
                     opened_post_view.watch_media(media_type)
@@ -327,10 +338,13 @@ def interact_with_user(
                     f"Could not {reason} media. Posts count: {profile_data.posts_count}."
                 )
             logger.info("Back to profile.")
-            while not post_grid_view._get_post_view().exists():
+            for _ in range(3):
+                if post_grid_view._is_still_on_profile():
+                    break
                 logger.debug("We are in the wrong place...")
                 device.back()
-            device.back()
+            else:
+                logger.warning("Can't go back to the profile!")
 
     if pm_percentage != 0 and can_send_PM(session_state, pm_percentage):
         sent_pm = _send_PM(device, session_state, my_username, swipe_amount)

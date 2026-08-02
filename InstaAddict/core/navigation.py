@@ -112,7 +112,10 @@ def nav_to_post_likers(device, username, my_username):
         return False
     logger.info(f"Opening the first post of {username}.")
     ProfileView(device).swipe_to_fit_posts()
-    PostsGridView(device).navigateToPost(0, 0)
+    opened_post_view, _, _ = PostsGridView(device).navigateToPost(0, 0)
+    if opened_post_view is None:
+        logger.warning("Couldn't open the first post. Skip.")
+        return False
     return True
 
 
