@@ -1557,6 +1557,56 @@ class OpenedPostView:
         self.device = device
         self.has_tags = False
 
+    def is_post_opened(self) -> bool:
+        """Confirm a post detail or the reels viewer is actually showing."""
+        post_media = self.device.find(
+            resourceIdMatches=case_insensitive_re(
+                "|".join(
+                    [
+                        ResourceID.MEDIA_CONTAINER,
+                        ResourceID.VIDEO_CONTAINER_AND_CLIPS_VIDEO_CONTAINER,
+                        ResourceID.ROW_FEED_BUTTON_LIKE,
+                        ResourceID.LIKE_BUTTON,
+                    ]
+                )
+            )
+        )
+        return post_media.exists(Timeout.MEDIUM)
+
+    def detect_opened_media_type(self) -> MediaType:
+        """Detect the media type from the opened post itself.
+        Used when the grid cell had no content description."""
+        clips_container = self.device.find(
+            resourceIdMatches=case_insensitive_re(ResourceID.CLIPS_VIDEO_CONTAINER)
+        )
+        if clips_container.exists():
+            logger.info("It's a Reel (detected after opening).")
+            return MediaType.REEL
+        video_container = self.device.find(
+            resourceIdMatches=case_insensitive_re(ResourceID.VIDEO_CONTAINER)
+        )
+        if video_container.exists():
+            play_button = self.device.find(
+                resourceIdMatches=case_insensitive_re(ResourceID.VIEW_PLAY_BUTTON)
+            )
+            timer = self.device.find(resourceId=ResourceID.TIMER)
+            if play_button.exists() or timer.exists():
+                logger.info("It's a video (detected after opening).")
+                return MediaType.VIDEO
+            logger.debug(
+                "video_container is present but there's no play button or timer - not a video."
+            )
+        carousel_indicator = self.device.find(
+            resourceIdMatches=case_insensitive_re(
+                f"{ResourceID.CAROUSEL_MEDIA_GROUP}|{ResourceID.CAROUSEL_INDEX_INDICATOR_TEXT_VIEW}"
+            )
+        )
+        if carousel_indicator.exists():
+            logger.info("It's a carousel (detected after opening).")
+            return MediaType.CAROUSEL
+        logger.info("It's a photo (detected after opening).")
+        return MediaType.PHOTO
+
     def _get_post_like_button(self) -> Optional[DeviceFacade.View]:
         post_media_view = self.device.find(resourceIdMatches=ResourceID.MEDIA_CONTAINER)
         if post_media_view.exists(Timeout.MEDIUM):
@@ -1595,7 +1645,18 @@ class OpenedPostView:
             resourceIdMatches=case_insensitive_re(ResourceID.MEDIA_CONTAINER)
         )
         liked = False
-        if post_media_view.exists():
+        if not post_media_view.exists():
+            like_button = self.device.find(
+                resourceIdMatches=case_insensitive_re(ResourceID.ROW_FEED_BUTTON_LIKE)
+            )
+            if like_button.exists(Timeout.SHORT):
+                logger.info("Liking post via the little heart ❤️.")
+                like_button.click()
+                UniversalActions.detect_block(self.device)
+                liked = like_button.get_selected()
+            else:
+                logger.error("Can't find the media container nor the like button!")
+        elif post_media_view.exists():
             logger.info("Liking post.")
             if self.has_tags:
                 logger.info(
@@ -1637,10 +1698,13 @@ class OpenedPostView:
         :return: video in full-screen mode
         :rtype: bool
         """
+        in_fullscreen, _ = self._is_video_in_fullscreen()
+        if in_fullscreen:
+            logger.debug("Video is already in full screen.")
+            return True
         post_media_view = self.device.find(
             resourceIdMatches=case_insensitive_re(ResourceID.MEDIA_CONTAINER)
         )
-        in_fullscreen = False
         if post_media_view.exists():
             logger.info("Going in full screen.")
             post_media_view.click()
@@ -1802,6 +1866,13 @@ class PostsGridView:
     def _get_post_view(self):
         return self.device.find(resourceIdMatches=case_insensitive_re(ResourceID.LIST))
 
+    def _is_still_on_profile(self) -> bool:
+        """The profile tab bar is only visible while no post is opened."""
+        profile_tabs = self.device.find(
+            resourceIdMatches=case_insensitive_re(ResourceID.PROFILE_TABS_CONTAINER)
+        )
+        return profile_tabs.exists(Timeout.SHORT)
+
     def navigateToPost(self, row, col):
         post_list_view = self._get_post_view()
         post_list_view.wait(Timeout.MEDIUM)
@@ -1814,9 +1885,20 @@ class PostsGridView:
             return None, None, None
         content_desc = post_view.ui_info()["contentDescription"]
         media_type, obj_count = PostsViewList.detect_media_type(content_desc)
-        post_view.click()
-
-        return OpenedPostView(self.device), media_type, obj_count
+        opened_post_view = OpenedPostView(self.device)
+        for attempt in range(2):
+            post_view.click()
+            if opened_post_view.is_post_opened() or not self._is_still_on_profile():
+                return opened_post_view, media_type, obj_count
+            if attempt == 0:
+                logger.debug("Post didn't open, trying one more click...")
+                post_view = row_view.child(index=col)
+                if not post_view.exists():
+                    break
+        logger.debug(
+            f"Click on row {row}, column {col} didn't open any post (empty grid slot?)."
+        )
+        return None, None, None
 
 
 class ProfileView(ActionBarView):
