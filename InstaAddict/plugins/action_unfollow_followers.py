@@ -1,7 +1,7 @@
 import logging
 from enum import Enum, unique
 
-from colorama import Fore
+from colorama import Fore, Style
 
 from InstaAddict.core.decorators import run_safely
 from InstaAddict.core.device_facade import DeviceFacade, Timeout
@@ -22,6 +22,7 @@ from InstaAddict.core.views import (
     ProfileView,
     UniversalActions,
 )
+from InstaAddict.plugins.telegram import load_telegram_config, telegram_bot_send_text
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,7 @@ class ActionUnfollowFollowers(Plugin):
         self.args = configs.args
         self.device_id = configs.args.device
         self.state = State()
+        self.no_unfollow_option = []
         self.session_state = sessions[-1]
         self.sessions = sessions
         self.unfollow_type = plugin
@@ -175,6 +177,8 @@ class ActionUnfollowFollowers(Plugin):
 
         while not self.state.is_job_completed and (self.state.unfollowed_count < count):
             job()
+
+        self._report_accounts_without_unfollow_option()
 
     def unfollow(
         self,
@@ -374,6 +378,8 @@ class ActionUnfollowFollowers(Plugin):
                         unfollowed = FollowingView(device).do_unfollow_from_list(
                             user_row=item, username=username
                         )
+                        if unfollowed is None:
+                            self.no_unfollow_option.append(username)
                     else:
                         unfollowed = self.do_unfollow(
                             device,
@@ -531,6 +537,48 @@ class ActionUnfollowFollowers(Plugin):
         logger.info("Back to the followings list.")
         device.back()
         return True
+
+    def _report_accounts_without_unfollow_option(self):
+        """Send the list of accounts that have no Unfollow option to telegram.
+        Never fails: if telegram is not configured or sending fails, just log."""
+        if not self.no_unfollow_option:
+            return
+        logger.info(
+            f"{len(self.no_unfollow_option)} account(s) have no Unfollow option: {', '.join('@' + u for u in self.no_unfollow_option)}."
+        )
+        try:
+            username = self.args.username
+            if username is None:
+                logger.info("No username set - skipping telegram report.")
+                return
+            telegram_config = load_telegram_config(username)
+            if not telegram_config:
+                logger.info(
+                    "Telegram is not configured - skipping report of accounts without Unfollow option."
+                )
+                return
+            usernames_list = "\n".join(
+                f"\u2022 @{u}" for u in self.no_unfollow_option
+            )
+            text = (
+                f"*Accounts without the Unfollow option ({len(self.no_unfollow_option)}):*\n"
+                f"{usernames_list}"
+            )
+            response = telegram_bot_send_text(
+                telegram_config.get("telegram-api-token"),
+                telegram_config.get("telegram-chat-id"),
+                text,
+            )
+            if response and response.get("ok"):
+                logger.info(
+                    "Telegram message sent successfully.",
+                    extra={"color": f"{Style.BRIGHT}{Fore.BLUE}"},
+                )
+            else:
+                error = response.get("description") if response else "Unknown error"
+                logger.error(f"Failed to send Telegram message: {error}")
+        except Exception as e:
+            logger.error(f"Can't report accounts without Unfollow option: {e}")
 
     def check_is_follower(self, device, username, my_username):
         logger.info(

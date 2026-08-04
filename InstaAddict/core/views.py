@@ -2370,7 +2370,11 @@ class FollowingView:
     def __init__(self, device: DeviceFacade):
         self.device = device
 
-    def do_unfollow_from_list(self, username, user_row=None) -> bool:
+    def do_unfollow_from_list(self, username, user_row=None) -> Optional[bool]:
+        """
+        :return: True if unfollowed, False on failure,
+                 None if the account has no Unfollow option at all
+        """
         exists = False
         username_row = ""
         if user_row is None:
@@ -2381,32 +2385,61 @@ class FollowingView:
         if user_row.exists(Timeout.MEDIUM):
             exists = True
             username_row = user_row.child(index=1).child().child().get_text()
-            following_button = user_row.child(index=2)
         if not exists or username_row != username:
             logger.error(f"Cannot find {username} in following list.")
             return False
-        if following_button.exists(Timeout.SHORT):
-            following_button.click()
-            UNFOLLOW_REGEX = "^Unfollow$"
-            confirm_unfollow_button = self.device.find(
-                resourceId=ResourceID.PRIMARY_BUTTON, textMatches=UNFOLLOW_REGEX
+
+        # new layout: unfollow is behind the three-dots menu on each row
+        options_button = user_row.child(
+            descriptionMatches=case_insensitive_re("options|more")
+        )
+        if not options_button.exists(Timeout.SHORT):
+            # fallback: it's the last item on the row, after the Message/Following button
+            options_button = user_row.child(index=3)
+        if not options_button.exists():
+            logger.error(f"Cannot find the options button for {username}.")
+            save_crash(self.device)
+            return False
+        logger.debug("Opening the three-dots menu.")
+        options_button.click()
+
+        UNFOLLOW_REGEX = "^Unfollow$"
+        unfollow_row = self.device.find(
+            classNameMatches=ClassName.BUTTON_OR_TEXTVIEW_REGEX,
+            textMatches=UNFOLLOW_REGEX,
+        )
+        if not unfollow_row.exists(Timeout.SHORT):
+            logger.info(
+                f"@{username} has no Unfollow option. Can't unfollow from the list."
             )
-            if confirm_unfollow_button.exists(Timeout.SHORT):
-                random_sleep(1, 2)
-                confirm_unfollow_button.click()
-            UniversalActions.detect_block(self.device)
-            FOLLOW_REGEX = "^Follow$"
-            follow_button = user_row.child(index=2, textMatches=FOLLOW_REGEX)
-            if follow_button.exists(Timeout.SHORT):
-                logger.info(
-                    f"{username} unfollowed.",
-                    extra={"color": f"{Style.BRIGHT}{Fore.GREEN}"},
-                )
-                return True
-            if not confirm_unfollow_button.exists(Timeout.SHORT):
-                logger.error(f"Cannot confirm unfollow for {username}.")
-                save_crash(self.device)
-                return False
+            self.device.back()
+            return None
+        logger.debug("Pressing on Unfollow.")
+        unfollow_row.click()
+        random_sleep(0, 1, modulable=False)
+
+        # private accounts ask for an extra confirmation
+        confirm_unfollow_button = self.device.find(
+            classNameMatches=ClassName.BUTTON_OR_TEXTVIEW_REGEX,
+            textMatches=UNFOLLOW_REGEX,
+        )
+        if confirm_unfollow_button.exists(Timeout.SHORT):
+            logger.debug("Confirm unfollow private account.")
+            confirm_unfollow_button.click()
+            random_sleep(0, 1, modulable=False)
+
+        UniversalActions.detect_block(self.device)
+        FOLLOW_REGEX = "^Follow$"
+        follow_button = user_row.child(index=2, textMatches=FOLLOW_REGEX)
+        if follow_button.exists(Timeout.SHORT):
+            logger.info(
+                f"{username} unfollowed.",
+                extra={"color": f"{Style.BRIGHT}{Fore.GREEN}"},
+            )
+            return True
+        logger.error(f"Cannot confirm unfollow for {username}.")
+        save_crash(self.device)
+        return False
 
 
 class FollowersView:
