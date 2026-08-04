@@ -1,6 +1,32 @@
 # Changelog
 
-## 1.0.1 (2025-07-18) - First InstaAddict Release
+## v1.0.2 — Instagram compatibility & reliability fixes
+
+Two weeks of accumulated fixes for running InstaAddict against current Instagram versions (tested against 440.0.0.46.86), plus dependency and packaging cleanup.
+
+### Instagram UI compatibility
+- Handle IG 438+'s account switcher via `content-desc` fallback matching, since the previous selector no longer matches the current layout
+- Handle Instagram's follower-list restriction gracefully instead of crashing when a target's list is rate-limited
+- Detect and skip sponsored/ad posts in the feed instead of mishandling them
+- Fixed post likers list opening the wrong profile: `open_likers_container()` was misclicking the first liker's avatar/username instead of opening the full likers list — fixed in both the primary selector path and the XML-hierarchy compatibility fallback
+- Fixed stricter photo/video detection: a `video_container` element alone is no longer enough to classify a post as a video, since photo posts on current IG also carry overlay badges matching that element. A post is now only classified as video if a play button or timer is present too — closes #5
+- Fixed back-navigation overshoot after opening a post: replaced a fixed-count back-press assumption with a state check (stop once the profile tab bar is visible again, capped at 3 presses), preventing the bot from overshooting back to the blogger's likers list between posts
+- Fixed `_check_if_last_post()` hanging indefinitely (sometimes for hours) on collab/repost posts where the caption is attributed to a different account than the profile owner — added a retry cap and a graceful fallback
+- Fixed posts with undetectable media type (`MediaType.UNKNOWN`) being silently skipped by the like logic instead of falling back to the standard like flow
+- Reworked unfollow-from-list to use the current three-dots options menu instead of a now-removed direct "Following" button; accounts with no Unfollow option available are now collected and reported via Telegram at the end of a run instead of being logged as crashes
+
+### Stability
+- Fixed `DeviceFacade.is_alive()` throwing `AttributeError` on current `uiautomator2` (`_is_alive()` and `.server.alive` were both removed upstream) — replaced with a functional check against `.info`
+- Fixed a narrow `except uiautomator2.JSONRPCError` clause throwing its own `AttributeError` and masking the real underlying error, since `JSONRPCError` is no longer a valid top-level attribute on current `uiautomator2`
+
+### Setup & packaging
+- Package directory fully renamed from `GramAddict` to `InstaAddict`
+- Account folders now auto-created from `config-examples/` on first run instead of requiring manual setup
+- `requirements.txt`: added `imageio` and `websocket-client` (previously undeclared runtime dependencies), and resolved `setuptools`/`pkg_resources` breakage on Python 3.13
+
+**Full diff**: `v1.0.1...v1.0.2`
+
+## 1.0.1 (2026-07-18) - First InstaAddict Release
 
 This is the first production release of **InstaAddict**, a continuation of the [GramAddict](https://github.com/GramAddict/bot) project.
 
