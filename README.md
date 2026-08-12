@@ -36,9 +36,9 @@
 
 **InstaAddict** is a fork and continuation of [GramAddict](https://github.com/gramaddict/bot), an open-source Instagram automation bot originally created and maintained by [mastrolube](https://github.com/mastrolube) and the InstaAddict community. The original project is no longer actively maintained.
 
-We are deeply grateful to the InstaAddict team for building such a solid foundation. Their dedication to keeping the bot free, open source, and community-driven made this project possible. InstaAddict picks up where InstaAddict left off — continuing development, fixing compatibility with newer Instagram versions, and keeping the bot alive for the community.
+We are deeply grateful to the Gramaddict team for building such a solid foundation. Their dedication to keeping the bot free, open source, and community-driven made this project possible. InstaAddict picks up where GramAddict left off — continuing development, fixing compatibility with newer Instagram versions, and keeping the bot alive for the community.
 
-> This project is licensed under the same terms as the original. All credit for the core architecture and original features goes to the InstaAddict contributors.
+> This project is licensed under the same terms as the original. All credit for the core architecture and original features goes to the GramaAddict contributors.
 
 ### Maintained by
 
@@ -271,6 +271,15 @@ This bot works only if your Instagram is in [English](https://help.instagram.com
 4. now you're done, and you can finally start the bot: `python3 run.py --config accounts/yourusername/config.yml` or `gramaddict run --config accounts/yourusername/config.yml`
 
 Failed? [Check this out!](https://docs.gramaddict.org/#/quickstart?id=troubleshooting)
+
+# Support This Project
+InstaAddict is 100% free and open source, and maintaining it takes time. If it helped you grow your account, consider buying us a coffee! ☕
+
+<p align="center">
+  <a href="https://paystack.shop/pay/joeahkim">
+    <img src="https://img.shields.io/badge/Donate-Paystack-00C3F7?style=for-the-badge&logo=stripe&logoColor=white" alt="Donate via Paystack"/>
+  </a>
+</p>
 
 <!--
 # Bot crashes, what should I do?
