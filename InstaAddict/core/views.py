@@ -2429,7 +2429,8 @@ class FollowingView:
             random_sleep(0, 1, modulable=False)
 
         UniversalActions.detect_block(self.device)
-        FOLLOW_REGEX = "^Follow$"
+        # "Follow back" shows up for accounts that follow you: the unfollow worked
+        FOLLOW_REGEX = "^Follow$|^Follow back$"
         follow_button = user_row.child(index=2, textMatches=FOLLOW_REGEX)
         if follow_button.exists(Timeout.SHORT):
             logger.info(
