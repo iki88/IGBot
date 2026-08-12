@@ -34,7 +34,7 @@
 
 # About This Project
 
-**InstaAddict** is a fork and continuation of [InstaAddict](https://github.com/InstaAddict/bot), an open-source Instagram automation bot originally created and maintained by [mastrolube](https://github.com/mastrolube) and the InstaAddict community. The original project is no longer actively maintained.
+**InstaAddict** is a fork and continuation of [GramAddict](https://github.com/gramaddict/bot), an open-source Instagram automation bot originally created and maintained by [mastrolube](https://github.com/mastrolube) and the InstaAddict community. The original project is no longer actively maintained.
 
 We are deeply grateful to the InstaAddict team for building such a solid foundation. Their dedication to keeping the bot free, open source, and community-driven made this project possible. InstaAddict picks up where InstaAddict left off — continuing development, fixing compatibility with newer Instagram versions, and keeping the bot alive for the community.
 
