@@ -281,6 +281,11 @@ def start_bot(**kwargs):
                 break
             if profile_view.getUsername() != session_state.my_username:
                 logger.debug("Not in your main profile.")
+                for _ in range(3):
+                    if tab_bar_view.is_tab_bar_visible():
+                        break
+                    logger.debug("Tab bar not visible, go back.")
+                    device.back()
                 tab_bar_view.navigateToProfile()
             if plugin in unfollow_jobs:
                 if configs.args.scrape_to_file is not None:
