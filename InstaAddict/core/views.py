@@ -106,6 +106,10 @@ class TabBarView:
             className=ClassName.LINEAR_LAYOUT,
         )
 
+    def is_tab_bar_visible(self) -> bool:
+        """The tab bar is only present on the main screens (home, search, profile, ...)."""
+        return self._getTabBar().exists(Timeout.SHORT)
+
     def navigateToHome(self):
         self._navigateTo(TabBarTabs.HOME)
         return HomeView(self.device)

@@ -3,42 +3,62 @@
   <br />
   <h1 align="center">InstaAddict</h1>
   <br />
-  <p align="center">Looking for Instagram automation? I'm proud to present you a <b>100% free and open source Instagram bot</b>. This bot will allow you to grow your following and engagement by liking, following, commenting and sending PM automatically with your Android phone/tablet/emulator. <b>No root required.</b> <p>
+  <p align="center">Looking for Instagram automation? I'm proud to present you a <b>100% free and open source Instagram bot</b>. This bot will allow you to grow your following and engagement by liking, following, commenting and sending PMs automatically with your Android phone/tablet/emulator. <b>No root required.</b></p>
   <p align="center">
     <a href="https://github.com/joeahkim/InstaAddict/blob/develop/LICENSE">
-      <img src="https://img.shields.io/github/license/joeahkim/InstaAddict?style=flat"  alt=""/>
+      <img src="https://img.shields.io/github/license/joeahkim/InstaAddict?style=flat" alt=""/>
+    </a>
+    <a href="https://pypi.org/project/instaaddict/">
+      <img src="https://img.shields.io/pypi/v/instaaddict?style=flat&label=pypi" alt=""/>
     </a>
     <a href="https://www.python.org/">
-      <img src="https://img.shields.io/badge/built%20with-Python3-red.svg?style=flat"  alt=""/>
+      <img src="https://img.shields.io/badge/built%20with-Python3-red.svg?style=flat" alt=""/>
     </a>
     <a href="https://github.com/joeahkim/InstaAddict/pulls">
-      <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat"  alt=""/>
+      <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat" alt=""/>
     </a>
     <a href="https://github.com/joeahkim/InstaAddict/issues">
-    	<img src="https://img.shields.io/github/issues/joeahkim/InstaAddict?style=flat"  alt=""/>
+      <img src="https://img.shields.io/github/issues/joeahkim/InstaAddict?style=flat" alt=""/>
     </a>
     <a href="https://github.com/joeahkim/InstaAddict/pulls">
-      <img src="https://img.shields.io/github/issues-pr/joeahkim/InstaAddict?style=flat"  alt=""/>
+      <img src="https://img.shields.io/github/issues-pr/joeahkim/InstaAddict?style=flat" alt=""/>
     </a>
     <a href="https://github.com/joeahkim/InstaAddict/stargazers">
-	    <img src="https://img.shields.io/github/stars/joeahkim/InstaAddict?style=flat" alt="">
+      <img src="https://img.shields.io/github/stars/joeahkim/InstaAddict?style=flat" alt="">
     </a>
-    <a href="https://img.shields.io/github/last-commit/joeahkim/InstaAddict/develop?style=flat">
-	    <img src="https://img.shields.io/github/last-commit/joeahkim/InstaAddict/develop?style=flat" alt="">
+    <a href="https://github.com/joeahkim/InstaAddict/commits/develop">
+      <img src="https://img.shields.io/github/last-commit/joeahkim/InstaAddict/develop?style=flat" alt="">
     </a>
+    <a href="https://discord.gg/PvxsP8HFa">
+      <img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"/>
+    </a>
+  </p>
 </p>
 
+<br />
 
+## Table of contents
+
+* [About this project](#about-this-project)
+* [Why automate your Instagram?](#why-should-i-automate-my-instagram-account)
+* [Why InstaAddict over other bots?](#i-saw-there-are-a-lot-of-similar-projects-on-github-why-should-i-choose-this-one)
+* [How it works](#so-this-bot-does-not-use-api)
+* [Compatibility / known working versions](#compatibility--known-working-versions)
+* [Features](#cool-what-can-i-do-with-this-bot)
+* [Quick start](#quick-start)
+* [Common setup issues](#common-setup-issues)
+* [Support this project](#support-this-project)
+* [Community](#talk-botty-with-us)
 
 <br />
 
 # About This Project
 
-**InstaAddict** is a fork and continuation of [GramAddict](https://github.com/gramaddict/bot), an open-source Instagram automation bot originally created and maintained by [mastrolube](https://github.com/mastrolube) and the InstaAddict community. The original project is no longer actively maintained.
+**InstaAddict** is a fork and continuation of [GramAddict](https://github.com/GramAddict/bot), an open-source Instagram automation bot originally created and maintained by [mastrolube](https://github.com/mastrolube) and the GramAddict community. The original project is no longer actively maintained — Instagram keeps changing its app's UI, and without ongoing fixes those changes silently break automation over time.
 
-We are deeply grateful to the Gramaddict team for building such a solid foundation. Their dedication to keeping the bot free, open source, and community-driven made this project possible. InstaAddict picks up where GramAddict left off — continuing development, fixing compatibility with newer Instagram versions, and keeping the bot alive for the community.
+We're deeply grateful to the GramAddict team for building such a solid foundation. Their dedication to keeping the bot free, open source, and community-driven made this project possible. InstaAddict picks up where GramAddict left off — actively tracking Instagram's UI changes, fixing compatibility as things break, and keeping the bot alive for the community.
 
-> This project is licensed under the same terms as the original. All credit for the core architecture and original features goes to the GramaAddict contributors.
+> This project is licensed under the same terms as the original. All credit for the core architecture and original features goes to the GramAddict contributors.
 
 ### Maintained by
 
@@ -57,223 +77,345 @@ We are deeply grateful to the Gramaddict team for building such a solid foundati
 <br />
 
 # Why should I automate my Instagram account?
-It's very hard nowadays to grow an account. Have you ever been on the explore page? IG will show your post only to close accounts & accounts you interact most with, you will never be on the explore page. Nobody will see your beautiful photos, your hilarious memes, or whatever you are posting. But now you can do something about that! With InstaAddict you can __get noticed easily__, and if you really deserve it, your account will __grow super fast__!
 
-## So, do I need to publish good content to grow?
-Of course you have to! This bot will mainly help you to get the __visibility you deserve__ and which is Instagram not giving you.
+It's hard to grow an account organically these days. Instagram's explore/discovery surfaces mostly favor accounts you already interact with — nobody sees your posts unless you're already getting engagement. InstaAddict helps close that gap by handling the repetitive interaction work (liking, following, watching stories) so real people are more likely to discover and engage with your actual content.
 
-## Ok but I don't know how to start this journey...
-Don't worry about that now, it's not that hard to start botting with InstaAddict! I tried to make it as noob-friendly as possible. In any case, if you follow the docs with all the steps provided, you will make it! You are also invited to join our community and ask for any help!
+## So do I still need to post good content?
 
-## I saw there are a lot of similar projects on GitHub, why should I choose this one?
-You're right, there are plenty of other bot solutions. Most of them use API requests. However, you will get your account banned if you use API (1-30 days)!
-There's also a very similar project to this one, yet it's not free and the dev doesn't care about the community much. They removed few lines from the core and ask you for a subscription plan in order to use those features. Furthermore, you don't even know what's the real code during execution - it's encrypted. And if they are stealing something else? Who knows? I don't.
-This bot is __free to use__ and __open source__, you won't get charged for few extra lines, __EVER__.
-I'm focused on the community and not on finding ways how to get money out of this project. __I really care about the community__ and every dev should too. 🤗
+Yes, absolutely. This bot gets you visibility — it doesn't replace having something worth looking at once people arrive.
 
-## So this bot does not use API?
-__No__ this bot is working through __adb__ and is powered by __uiautomator2__ which is a testing wrapper for Android devices. In fact, your device (or an emulator) is used for doing the botting sh*it. That's very secure compared to other botting systems around there. I also made it look as much human as possible. You can think about the bot as a __stupid__ friend using your phone and doing things for you. The example bottom is quite old but will show you what we are talking about.
+## I don't know where to start...
+
+That's fine — this README walks you through the whole setup. If you get stuck anywhere, the [Discord community](https://discord.gg/PvxsP8HFa) is there to help.
+
+## I've seen a lot of similar projects on GitHub — why this one?
+
+Most competing bots use direct API requests, which is exactly what gets accounts banned (1–30 days) — Instagram actively watches for that traffic pattern. There are also several closed-source "premium" bots that strip features out of the free tier and charge a subscription to unlock them back, while running encrypted code so you can't verify what it's actually doing on your account.
+
+InstaAddict is free to use and open source, full stop. No paywalled features, no encrypted execution, no subscription. If you want to verify exactly what it does, the code is right here.
+
+## So this bot doesn't use the API?
+
+Correct — it drives the real Instagram app through **adb** and **uiautomator2**, an Android UI-testing framework. Your device (or emulator) is literally used to tap through the app the way a person would, which is far harder for Instagram to distinguish from real usage than API-based bots.
+
 <p align="center">
-  <img src="https://github.com/joeahkim/InstaAddict//raw/master/res/demo.gif">
+  <img src="https://github.com/joeahkim/InstaAddict/raw/master/res/demo.gif">
 </p>
 
-## Urra! I'll never get banned anymore with this bot!
-No no no, wait! 🤦
-You have to configure the bot for doing things as a human would do. Do you really spend all the day scrolling on Instagram? If yes contact a medic :P
-You don't have to do so many actions or Instagram will block you. That appends even if you do that by your hands.. Have you ever added a lot of people in a row and got blocked for that action? Or spamming people with a link in PM?
-__DON'T F*CKING DO THAT__
+## Does that mean I'll never get banned?
 
-__Be gently and anonymous and nobody will notice that you're botting, trust me__.
+No — please configure sensible limits. Real humans don't scroll and interact with hundreds of accounts nonstop all day, and neither should your bot. Aggressive limits (too many follows/likes in a row, spammy PMs) get flagged whether a bot or a person does them. Keep it modest, keep it paced, and it'll stay under the radar.
 
-## Do I need a computer for running the bot?
-Yes, but you can also run it [directly on your phone](https://docs.gramaddict.org/#/termux)!!
+## Do I need a computer?
 
-In any case, you can decide to use a physical device or an emulator. If you're under Windows I suggest you use [Memu](https://www.memuplay.com/), under Mac OS we found out that [Android studio](https://developer.android.com/studio) works well (Installable with [homebrew](https://formulae.brew.sh/cask/android-studio)).
-For hosting the bot you can use:
-- your computer (with Windows, macOS, or Linux)
-- a Raspberry (which is a cheap little pc Linux based)
+Yes for the initial setup, but the bot itself can run [directly on your phone via Termux](https://docs.gramaddict.org/#/termux) once configured. You can host it on:
 
-## Cool! What can I do with this bot?
-There are lots of __cool features__ you can use __for free__!
-- Works without rooting
-- Works with both emulators and physical devices
-- Can be used stand-alone (without the use of a computer)
-- Includes realistic random human-like delays and actions
-- Can watch stories while interacting
-- Comment post with emojis and [spintax logic](https://github.com/InstaAddict/docs/blob/main/configuration.md#spintax-support)
-- Send PM
-- Type like a human (letter by letter by faking using suggestions. For example, you won't type `H - e - l - l - o` letter by letter but something like `H - He - Hello`)
-- Browse carousels and watch their contents
-- Watch videos for a specific amount of time
-- Scheduler
-- Getting tasty telegram reports
-- Supports multiple actions in one session
-- Lots of customizable limits to keep your account safe from soft bans
-- Available interactions
-    - interact with a user's followers or following
-    - interact with a top or recent hashtag's post likers
-    - interact with a top or recent hashtag post
-    - interact with a top or recent place's post likers
-    - interact with a top or recent place post
-    - interact with user's post likers
-    - interact with a single blogger
-    - interact with your feed
-    - interact with users from a list (*.txt)
-    - interact with posts from links inside a list (*.txt)
-    - unfollow any followers
-    - unfollow any followers, followed by bot
-    - unfollow any followers, followed by bot, who don't follow you back
-    - unfollow from a list (*.txt)
-    - scrape mode for collecting usernames instead of interacting with them (you will find more information about that in the doc)
+* your computer (Windows, macOS, or Linux)
+* a Raspberry Pi (a cheap, low-power Linux box that can run this unattended)
 
-- Lots of available filters to customize who you interact with
-    - you can blacklist people to avoid interacting with them
-    - you can whitelist people to not remove them when you unfollow people
-    - biography main characters and language
-    - profile name main characters
-    - private / public / business / non business account
-    - number of posts / followers / following
-    ... and more!
+### Choosing between a physical device or an emulator
+
+Both work. If you're going the emulator route, there's one thing that trips people up: **Instagram's APK is ARM-only**, so your emulator needs either a native ARM system image or built-in ARM translation. Recommended:
+
+* **Windows:** [MEmu](https://www.memuplay.com/) or [LDPlayer](https://www.ldplayer.net/) — both include ARM translation out of the box.
+* **macOS:** [Android Studio](https://developer.android.com/studio) (installable via `brew install --cask android-studio`), but make sure you pick an **ARM64 system image** in the AVD manager, not the default x86_64 one — an x86-only image will fail to install or crash Instagram.
+
 <br />
 
-Full documentation available on [docs.gramaddict.org](https://docs.gramaddict.org)
+# Compatibility / known working versions
 
-## Telegram reports? What's that?
-You can get __reports__ through telegram from your bot activities!
-[Follow this guide to accomplish that](https://docs.gramaddict.org/#/configuration?id=telegram-reports).
+InstaAddict actively tracks Instagram's UI changes. This is updated as fixes land — see [CHANGELOG.md](CHANGELOG.md) for the full history.
+
+| Component    | Verified working                 |
+| ------------ | -------------------------------- |
+| Instagram    | 440.0.0.46.86                    |
+| uiautomator2 | 2.16.26                          |
+| Python       | **3.13.14**                      |
+| Platforms    | Windows, macOS, Termux (Android) |
+
+**Python 3.13.14 is the version currently tested and verified with InstaAddict.** Other Python versions may work, but they are not officially tested at this time.
+
+If something breaks on a newer Instagram version, please [open an issue](https://github.com/joeahkim/InstaAddict/issues) — we treat "this stopped working" reports as our highest-priority bugs, not an afterthought.
+
+<br />
+
+# Cool! What can I do with this bot?
+
+* Works without rooting
+* Works with both emulators and physical devices
+* Can run stand-alone (no computer required after setup, via Termux)
+* Realistic, randomized human-like delays and actions
+* Auto-creates your account config folder from a template on first run
+* Watches stories while interacting
+* Comments with emojis and [spintax logic](https://github.com/InstaAddict/docs/blob/main/configuration.md#spintax-support)
+* Sends PMs
+* Types like a human (suggestion-faking rather than key-by-key typing)
+* Browses carousels and watches their contents
+* Watches videos for a configurable duration
+* Session scheduling
+* Telegram activity reports
+* Multiple actions per session
+* Extensive, customizable limits to keep your account safe from soft bans
+* Available interaction jobs:
+
+  * a user's followers or following
+  * a hashtag's top or recent post likers
+  * a hashtag's top or recent posts
+  * a place's top or recent post likers
+  * a place's top or recent posts
+  * a specific user's post likers
+  * a single blogger
+  * your own feed
+  * a list of users from a `.txt` file
+  * posts from a list of links in a `.txt` file
+  * unfollow any followers
+  * unfollow followers the bot itself followed
+  * unfollow followers the bot followed who don't follow back
+  * unfollow from a `.txt` list
+  * scrape mode — collect usernames without interacting, for later use
+* Extensive filters for who gets interacted with:
+
+  * blacklist / whitelist
+  * biography character set and language
+  * profile name character set
+  * private / public / business / non-business accounts
+  * post count / follower count / following count
+  * ...and more
+
+Full documentation: [docs.gramaddict.org](https://docs.gramaddict.org/) (shared with the upstream project — most configuration concepts still apply directly).
+
+## Telegram reports
+
+Get session activity reports sent straight to Telegram. [Setup guide here](https://docs.gramaddict.org/#/configuration?id=telegram-reports).
 
 <img src="https://github.com/joeahkim/InstaAddict/raw/master/res/telegram-reports.png" width="200">
 
-> In this case trends are negative because I use this account only for tuning this bot, and it's private...
-> I didn't accept anyone lately so the trends are meh :P
+<br />
 
-Cool, isn't it? 💦
 # Quick start
-Now that you're there you still don't know how to install that whole thing.
-I'll try to help you accomplish that with a short tutorial. The full is available [here](https://docs.gramaddict.org/#/quickstart).
 
-## What do you need:
-- a computer (with Windows, macOS or Linux)
-- Python installed on your machine (with pip)
-- Adb tools
-- a physical device or an emulator (with Android 4.4+)
-### Step 1: Install Python (>=3.6):
->Python 3.10 is currently not supported!
+## What you need
 
-If you're on Linux or macOS you should have Python and Git installed, just check that your Python version is >= 3.6.
+* A computer (Windows, macOS, or Linux)
+* **Python 3.13.14**
+* adb (Android Debug Bridge)
+* A physical Android device or an emulator (Android 4.4+)
 
-On Windows you have to [install it](https://www.python.org/downloads/release/python-397/) for sure.
+## Step 1: Install Python
 
-Failed? [Detailed tutorial here](https://docs.gramaddict.org/#/quickstart?id=step-1-install-python-if-not-installed).
->A little reminder: we refer to python with __python3__. You may also have python2 installed if you're on Linux for example. If you're on Windows you can use __python__ instead of python3.
->Check which python alias you have to use by typing `python -V` or `python3 -V` or `py -V` and use the right one for the rest of the tutorial.
+**InstaAddict is currently tested and verified with Python 3.13.14.**
 
->Check that pip3 is installed by typing `pip3 -V`
->If that returns an error you have to install it! How? [Google is your best friend!](https://www.google.com/search?q=how+to+install+pip) :P
-### Step 2: Install InstaAddict:
-You can install InstaAddict in two ways: with __pip__ or with __git__.
-Is good practice creating virtual environments when you install a new package. That will save you from a lot of problems!
+We recommend using **Python 3.13.14** for the most reliable installation and runtime experience.
 
-#### Create a virtual environment
-We create a virtual environment called `.venv` and activate it:
+* **macOS/Linux:** install Python 3.13.14 and verify with `python3 --version`
+* **Windows:** [download Python 3.13.14](https://www.python.org/downloads/release/python-31314/) and make sure to check **"Add Python to PATH"** during installation.
 
-- create a directory where you will create the new environment
-- write in console: `python3 -m venv .venv`
-  > We use `venv` instead of `virtualenv` because `venv` is shipped directly with python3 and you don't have to install anything 🤪
-- activate the .venv:
-    - `source .venv/bin/activate` on Linux/macOS
-    - `.venv\Scripts\activate.bat` on Windows cmd
-    - `.venv\Scripts\activate.ps1` on Windows PowerShell
-      > If you activate the venv correctly, you will see a little (.venv) on the left side of the command line!
-#### With pip (I suggest you this way):
+Verify your installation:
 
-- install the package: `pip3 install InstaAddict`
-- check if it's installed: `gramaddict --version`
-- if everything is fine you will get the InstaAddict version installed 🥳
+```bash
+python3 --version
+```
 
-#### With git:
-> __Warning:__ console commands like `gramaddict init`, `gramaddict dump` and `gramaddict run` won't work if you installed the bot with git.
-- clone the project: `git clone https://github.com/joeahkim/InstaAddict.git gramaddict`
-- enter the gramaddict folder: `cd gramaddict`
-- install the requirements: `pip3 install -r requirements.txt`
+You should see:
 
-### Step 3: Install adb:
-Adb stands for [Android Debug Bridge](https://developer.android.com/studio/command-line/adb). It's needed for making this bot working properly. I think this one is the hardest part to accomplish but don't give up! You can do it, with my help. 💪
-1. download [this package](https://developer.android.com/studio/releases/platform-tools) and unzip it somewhere and remind the path
-   > __Warning:__ place that where you're sure you won't ever delete it, otherwise the bot won't work anymore!
-2. add platform-tools path to the PATH environment variable
-   - if you're on __Linux/macOS__ that's pretty easy:
-      - open ~/.bash_profile with any text editor you like
-      - add the following line with the full path to the platform-tools directory: export PATH=~/Library/Android/sdk/platform-tools/:$PATH. This path may be different depending on the way you installed platform-tools
-      - save file and restart Terminal
-   - on __Windows__ there are more steps to accomplish that:
-      - open Windows Explorer (you can press WINKEY+E) and right-click "My Computer" on left side
-      - in the pop-up menu, click `Properties`
-      - in the `System Properties` window, click the `Advanced` tab, and then click `Environment Variables`
-      - in the `System Variables` window, highlight `Path`, and click `Edit`
-      - in the `Edit System Variables` window, press on `New`
-      - enter the full path for the folder platform-tools you unzipped before
-      - press all the Ok and restart Command Prompt
-3. check that everything is fine
-   - write `adb version`, you should get something like that:
-      > C:\Users\dedil>adb version
-      > Android Debug Bridge version 1.0.41
-      > Version 30.0.5-6877874
+```text
+Python 3.13.14
+```
 
-### Step 4: Set up the device:
+On Windows, you can also use:
 
-**Physical device**
+```bash
+python --version
+```
 
-1. First thing you have to do is to [enable developer options and USB debugging](https://developer.android.com/studio/debug/dev-options#enable).
-2. connect your phone to your computer with a USB cable
-3. device will ask you to allow connection. Press "Connect"
+or:
 
-**Emulator for Mac OS**
+```bash
+py --version
+```
 
-1. Install the [Homebrew](https://brew.sh)
-2. Install the [Cask](https://cask.readthedocs.io/en/latest/index.html) by running `brew install cask`
-3. Add the Cask application folder to your `$PATH`, e.g. `echo 'export PATH="$HOME/.cask/bin:$PATH"' >> ~/.bash_profile` and open a new terminal or reload with `source ~/.bash_profile`
-4. Install the [Android Studio](https://formulae.brew.sh/cask/android-studio)
-5. Run the Android Studio and click on 'More Actions -> Virtual Device Manager', then select the device and image, I found out that Pixel 2 API 28 combo works well.
-6. Run the virtual device and install the Instagram app on it, don't forget to log in.
+Check that pip is installed:
 
-**Verify the device with adb**
+```bash
+pip3 --version
+```
 
-Type `adb devices` in terminal
-   - a list of devices attached should be displayed, if not you did something wrong
-      > List of devices attached
-      > A0B1CD2345678901    device
+On Windows, `pip --version` may be used instead.
 
-   - this is your device ID, you have to use it only if you have more than one device connected at the same time
+## Step 2: Install InstaAddict
 
-### Step 5: Start the bot:
+Using a virtual environment is strongly recommended — it isolates this project's dependencies from everything else on your machine.
 
-This bot works only if your Instagram is in [English](https://help.instagram.com/111923612310997).
-1. initialize uiautomator2: `uiautomator2 init`
-2. initialize InstaAddict: `gramaddict init your_ig_account_name_here`
-    > __Warning:__ works only if you installed the bot with pip, if you used git you have to create account folder and youraccountname folder manually.
-    - that script will crate all the files you need for configure and start this bot
-    - you will find them inside the folder `accounts/youraccountname/`
-      ```sh
-        gramaddict/
-          run.py
-          accounts/
-            youraccountname/
-              config.yml
-              telegram.yml
-              filters.yml
-              whitelist.txt
-              blacklist.txt
-              comments_list.txt
-              pm_list.txt
-      ```
-3. now that you have all the requirements you have to configure the whole thing by [following this guide](https://docs.gramaddict.org/#/configuration)
-4. now you're done, and you can finally start the bot: `python3 run.py --config accounts/yourusername/config.yml` or `gramaddict run --config accounts/yourusername/config.yml`
+```bash
+python3 -m venv .venv
+```
 
-Failed? [Check this out!](https://docs.gramaddict.org/#/quickstart?id=troubleshooting)
+Activate it:
+
+* Linux/macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+* Windows cmd:
+
+```bat
+.venv\Scripts\activate.bat
+```
+
+* Windows PowerShell:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+You'll see `(.venv)` at the start of your prompt once it's active.
+
+### With pip (recommended)
+
+```bash
+pip3 install instaaddict
+```
+
+Verify:
+
+```bash
+pip3 show instaaddict
+```
+
+### With git
+
+```bash
+git clone https://github.com/joeahkim/InstaAddict.git
+cd InstaAddict
+pip3 install -r requirements.txt
+```
+
+## Step 3: Install adb
+
+1. Download [platform-tools](https://developer.android.com/studio/releases/platform-tools) and unzip it somewhere permanent — not `Downloads`, since that folder tends to get cleared out and will quietly break your setup later.
+
+2. Add the `platform-tools` folder to your `PATH`:
+
+   * **Linux/macOS:** add `export PATH=~/Library/Android/sdk/platform-tools/:$PATH` (adjust the path to wherever you unzipped it) to `~/.bash_profile` or `~/.zshrc`, then restart your terminal.
+   * **Windows:** System Properties → Advanced → Environment Variables → edit `Path`, add the full `platform-tools` folder path. **Open a brand-new terminal window afterward** — an already-open terminal won't pick up the change.
+
+3. Verify:
+
+```bash
+adb version
+```
+
+## Step 4: Set up your device
+
+### Physical device
+
+1. [Enable developer options and USB debugging](https://developer.android.com/studio/debug/dev-options#enable).
+2. Connect via USB, and tap "Allow" when prompted on the device.
+
+### Emulator
+
+1. Install an ARM-compatible emulator (see emulator notes above) and install Instagram inside it via its Play Store.
+2. Enable Developer Options + USB debugging inside the emulated Android the same way as a physical device.
+3. Connect adb over TCP (port varies by emulator — check its settings panel):
+
+```bash
+adb connect localhost:21503
+```
+
+**Verify the connection either way:**
+
+```bash
+adb devices
+```
+
+You should see a device listed:
+
+```text
+List of devices attached
+A0B1CD2345678901    device
+```
+
+That identifier is your device ID — only needed if multiple devices are connected at once.
+
+## Step 5: Start the bot
+
+InstaAddict requires Instagram to be set to [English](https://help.instagram.com/111923612310997).
+
+1. Initialize uiautomator2 on your device:
+
+```bash
+python3 -m uiautomator2 init
+```
+
+If you have multiple devices/emulators connected, target a specific one:
+
+```bash
+python3 -m uiautomator2 init <device-id>
+```
+
+2. Run the bot, pointing at a new account config:
+
+```bash
+python3 run.py --config accounts/your_ig_username/config.yml
+```
+
+If the `accounts/your_ig_username/` folder doesn't exist yet, it's created automatically from the template in `config-examples/` on first run — review the generated `config.yml` (especially the `device:` field) before running again.
+
+3. Configuration reference: [docs.gramaddict.org](https://docs.gramaddict.org/#/configuration)
+
+Still stuck? See [Common setup issues](#common-setup-issues), or ask in [Discord](https://discord.gg/PvxsP8HFa).
+
+<br />
+
+# Common setup issues
+
+These come up on fresh installs regardless of OS — worth checking here before opening an issue.
+
+**`ModuleNotFoundError: No module named 'pkg_resources'`**
+
+`setuptools` removed `pkg_resources` starting at v82.0.0. Install the standalone replacement:
+
+```bash
+pip3 install standard-pkg-resources
+```
+
+**`ModuleNotFoundError: No module named 'distutils'`**
+
+`distutils` was removed from Python's standard library in 3.12+. This usually means your `packaging` library is outdated. Upgrade it:
+
+```bash
+pip3 install --upgrade packaging
+```
+
+**Both errors on the same fresh install?**
+
+Run this once to resolve the whole chain in one shot:
+
+```bash
+pip3 install --upgrade setuptools packaging standard-pkg-resources adbutils uiautomator2
+```
+
+**`ModuleNotFoundError` for `configargparse`, `imageio`, or `websocket-client`**
+
+```bash
+pip3 install -r requirements.txt
+```
+
+**`pip install --break-system-packages`**
+
+On some Linux distros and Termux, pip refuses to install into the system Python ("externally managed environment"). Add `--break-system-packages` to the install command, or better, make sure you're inside an activated virtual environment first.
+
+**`adb` not recognized after adding it to PATH (Windows)**
+
+Close and reopen your terminal — PATH changes don't apply to already-open sessions. Also double check you're actually in PowerShell (`PS` in the prompt) vs. Command Prompt, since the two don't share environment state.
+
+<br />
 
 # Support This Project
-InstaAddict is 100% free and open source, and maintaining it takes time. If it helped you grow your account, consider buying us a coffee! ☕
+
+InstaAddict is 100% free and open source, and maintaining it takes real time — tracking every Instagram UI change, fixing what breaks, and helping people in Discord. If it's helped you grow your account, consider chipping in. ☕
 
 <p align="center">
   <a href="https://paystack.shop/pay/joeahkim">
@@ -281,30 +423,22 @@ InstaAddict is 100% free and open source, and maintaining it takes time. If it h
   </a>
 </p>
 
-<!--
-# Bot crashes, what should I do?
-The script isn't perfect and may fail sometimes. If this is the case you can open a ticket on our [discord channel](https://discord.gg/NK8PNEFGFF). In that way you won't share with anyone your Instagram account name. We'll be very happy to help you!
+<br />
 
-# WOW! You dedicated so much time to this project! Why you did that for free??
-Well, we used to be in three a long time ago but suddenly my two friends left. This has been an opportunity for me to improve my skills in Python and that's why I didn't leave the project and keep maintaining it.
-But of course donations are very welcome, so if you think I did a great job you can buy me a beer :)
+# Bot crashed — what do I do?
 
-<a  href="https://www.buymeacoffee.com/mastrolube"  target="_blank"><img  src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png"  hspace="10" alt="Buy Me A Coffee"  style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;"  ></a>
-
-# Can I do something to make this project grown?
-On GitHub there is a `star system` which indicates how good a project is. If you like this project it will be amazing if you can press the little star at the top!
-
-# Contributors
-
-This project exists thanks to all of our Contributors [Contribute].
-
-# Backers
-
-Thank you to everyone that supports us financially! [Become a backer]
+This isn't a perfect science — Instagram's UI shifts under us regularly, so things do break sometimes. Open a ticket in [#crash-reports on Discord](https://discord.gg/PvxsP8HFa) rather than posting your Instagram username publicly on GitHub. Attach the crash zip from your `crashes/` folder — that's usually enough for us to pin down what changed.
 
 # Talk botty with us
 
-Join us on Discord
+Join the [Discord community](https://discord.gg/PvxsP8HFa) — support, dev discussion, a `#showcase` channel for your growth results, and a live feed of what's happening on the repo.
 
-Disclaimer: This project comes with no guarantee or warranty. You are responsible for whatever happens from using this project. It is possible to get soft or hard banned by using this project if you are not careful.
--->
+# Can I help this project grow?
+
+* ⭐ Star the repo — it's a small thing that genuinely helps visibility.
+* 🐛 File an issue if something's broken, especially "this used to work and now it doesn't."
+* 🛠 If you want to contribute code — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
+**Disclaimer:** This project comes with no guarantee or warranty. You are responsible for what happens as a result of using it. It is possible to get soft- or hard-banned by using this project if you're not careful with your limits.
