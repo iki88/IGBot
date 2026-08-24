@@ -3,10 +3,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QStyle,
     QVBoxLayout,
     QWidget,
 )
+
+from IGBot.ui.icons import phone_icon
 
 
 class NavigationSidebar(QWidget):
@@ -31,12 +32,12 @@ class NavigationSidebar(QWidget):
         self.navigation = QListWidget(self)
         self.navigation.setObjectName("navigationList")
         self.navigation.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        devices = QListWidgetItem(
-            self.style().standardIcon(QStyle.SP_ComputerIcon), "Devices"
-        )
+        devices = QListWidgetItem(phone_icon(), "Devices")
         self.navigation.addItem(devices)
         self.navigation.setCurrentRow(0)
-        self.navigation.currentRowChanged.connect(self.page_selected)
+        self.navigation.itemClicked.connect(
+            lambda item: self.page_selected.emit(self.navigation.row(item))
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 18, 12, 12)

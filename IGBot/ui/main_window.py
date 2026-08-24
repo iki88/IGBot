@@ -66,7 +66,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
     def _connect_signals(self) -> None:
-        self.sidebar.page_selected.connect(self.pages.setCurrentIndex)
+        self.sidebar.page_selected.connect(self._navigate_to_page)
         self.toolbar.refresh_requested.connect(self.device_controller.refresh)
         self.device_controller.refresh_started.connect(
             lambda: self.statusBar().showMessage("Discovering Android devices…")
@@ -92,6 +92,7 @@ class MainWindow(QMainWindow):
             self._open_phone_accounts
         )
         self.phone_accounts_page.back_requested.connect(self._open_devices)
+        self.devices_page.notification_requested.connect(self.statusBar().showMessage)
 
     def _show_device_count(self, devices: list[DeviceRecord]) -> None:
         total = len(devices)
@@ -111,6 +112,10 @@ class MainWindow(QMainWindow):
         self._managed_phone_serial = None
         self.pages.setCurrentWidget(self.devices_page)
         self.toolbar.set_context_title("Device management")
+
+    def _navigate_to_page(self, page_index: int) -> None:
+        if page_index == 0:
+            self._open_devices()
 
     def _sync_phone_accounts(self, devices: list[DeviceRecord]) -> None:
         if self._managed_phone_serial is None:

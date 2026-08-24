@@ -1,6 +1,6 @@
 import logging
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -25,6 +25,7 @@ from IGBot.ui.models.device_table_model import (
 )
 from IGBot.ui.widgets.confirmation_dialog import ConfirmationDialog
 from IGBot.ui.widgets.device_actions_delegate import DeviceActionsDelegate
+from IGBot.ui.widgets.device_id_delegate import DeviceIdDelegate
 from IGBot.ui.widgets.empty_state import EmptyState
 from IGBot.ui.widgets.page_header import PageHeader
 
@@ -33,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 class DevicesPage(QWidget):
     """Fleet management workspace backed by the persistent device inventory."""
+
+    notification_requested = Signal(str, int)
 
     def __init__(
         self, controller: DeviceController, parent: QWidget | None = None
@@ -52,12 +55,14 @@ class DevicesPage(QWidget):
         self.search.setObjectName("deviceSearch")
         self.search.setPlaceholderText("Search by Device ID or Phone")
         self.search.setClearButtonEnabled(True)
-        self.search.setMaximumWidth(460)
+        self.search.setMaximumWidth(350)
 
-        self.fleet_summary = QLabel("0 phones", self)
+        self.fleet_summary = QLabel("0 Phones", self)
         self.fleet_summary.setObjectName("summaryText")
-        self.connection_summary = QLabel("0 connected", self)
+        self.connection_summary = QLabel("0 Connected", self)
         self.connection_summary.setObjectName("connectedSummary")
+        self.offline_summary = QLabel("0 Offline", self)
+        self.offline_summary.setObjectName("offlineSummary")
 
         self.model = DeviceTableModel(self)
         self.proxy_model = DeviceFilterProxyModel(self)
@@ -80,6 +85,10 @@ class DevicesPage(QWidget):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
 
         self.actions_delegate = DeviceActionsDelegate(self.table)
+        self.device_id_delegate = DeviceIdDelegate(self.table)
+        self.table.setItemDelegateForColumn(
+            DeviceTableModel.DEVICE_ID, self.device_id_delegate
+        )
         self.table.setItemDelegateForColumn(
             DeviceTableModel.ACTIONS, self.actions_delegate
         )
@@ -107,7 +116,7 @@ class DevicesPage(QWidget):
         header.setSectionResizeMode(DeviceTableModel.PHONE, QHeaderView.Stretch)
         header.setSectionResizeMode(DeviceTableModel.ACTIONS, QHeaderView.Fixed)
         self.table.setColumnWidth(DeviceTableModel.CONNECTION, 54)
-        self.table.setColumnWidth(DeviceTableModel.DEVICE_ID, 180)
+        self.table.setColumnWidth(DeviceTableModel.DEVICE_ID, 205)
         self.table.setColumnWidth(DeviceTableModel.PHONE, 175)
         self.table.setColumnWidth(DeviceTableModel.ACCOUNTS, 82)
         self.table.setColumnWidth(DeviceTableModel.STATUS, 86)
@@ -121,6 +130,7 @@ class DevicesPage(QWidget):
         controls.addStretch()
         controls.addWidget(self.fleet_summary)
         controls.addWidget(self.connection_summary)
+        controls.addWidget(self.offline_summary)
 
         card = QFrame(self)
         card.setObjectName("contentCard")
@@ -147,6 +157,7 @@ class DevicesPage(QWidget):
         self.table.doubleClicked.connect(self._manage_index)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
         self.actions_delegate.action_requested.connect(self._handle_row_action)
+        self.device_id_delegate.copy_requested.connect(self._copy_device_id)
 
     def _on_refresh_started(self) -> None:
         self.error_banner.hide()
@@ -177,12 +188,11 @@ class DevicesPage(QWidget):
 
     def _update_summaries(self) -> None:
         total = len(self._devices)
-        visible = self.proxy_model.rowCount()
         connected = sum(device.connected for device in self._devices)
-        self.fleet_summary.setText(
-            f"{visible} of {total} phones" if self.search.text() else f"{total} phones"
-        )
-        self.connection_summary.setText(f"{connected} connected")
+        offline = total - connected
+        self.fleet_summary.setText(f"{total} Phones")
+        self.connection_summary.setText(f"{connected} Connected")
+        self.offline_summary.setText(f"{offline} Offline")
 
     def _update_content_visibility(self) -> None:
         visible_rows = self.proxy_model.rowCount()
@@ -225,6 +235,7 @@ class DevicesPage(QWidget):
     def _copy_device_id(self, serial: str) -> None:
         QApplication.clipboard().setText(serial)
         logger.info("Copied device ID to the clipboard")
+        self.notification_requested.emit("Device ID copied.", 2500)
 
     def _confirm_delete(self, serial: str) -> bool:
         if not self._show_delete_dialog(
@@ -239,8 +250,8 @@ class DevicesPage(QWidget):
 
     def _show_delete_dialog(self, title: str, text: str) -> bool:
         detail = (
-            "The phone will remain hidden until it disconnects from ADB."
+            "The phone will remain removed even while connected through ADB."
             if title == "Delete Device?"
-            else "Device-specific IGBot metadata will be removed."
+            else "Device metadata and all account assignments will be removed."
         )
         return ConfirmationDialog.confirm(title, text, detail, self)

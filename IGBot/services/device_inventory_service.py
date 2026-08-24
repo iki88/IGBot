@@ -40,33 +40,25 @@ class DeviceInventoryService:
 
         connected = set(discovery.devices)
         state = self._load_state()
-        suppressed = {serial for serial in state["suppressed"] if serial in connected}
-        known_serials = [
-            entry["serial"]
-            for entry in state["devices"]
-            if entry["serial"] not in suppressed
-        ]
+        deleted = set(state["deleted"])
+        known_serials = [entry["serial"] for entry in state["devices"]]
 
         for serial in discovery.devices:
-            if serial not in known_serials and serial not in suppressed:
+            if serial not in known_serials and serial not in deleted:
                 state["devices"].append({"serial": serial, "phone_name": ""})
                 known_serials.append(serial)
 
-        state["suppressed"] = sorted(suppressed)
+        state["deleted"] = sorted(deleted)
         self._save_state(state)
         return DeviceFleetSnapshot(devices=self._records_from_state(state, connected))
 
-    def delete(self, serial: str, connected: bool) -> None:
+    def delete(self, serial: str) -> None:
+        self._account_assignments.unassign_device(serial)
         state = self._load_state()
         state["devices"] = [
             entry for entry in state["devices"] if entry["serial"] != serial
         ]
-        if connected:
-            state["suppressed"] = sorted(set(state["suppressed"]) | {serial})
-        else:
-            state["suppressed"] = [
-                value for value in state["suppressed"] if value != serial
-            ]
+        state["deleted"] = sorted(set(state["deleted"]) | {serial})
         self._save_state(state)
 
     def _records_from_state(
@@ -87,15 +79,15 @@ class DeviceInventoryService:
         try:
             raw = json.loads(self._inventory_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            return {"devices": [], "suppressed": []}
+            return {"devices": [], "deleted": []}
         except (OSError, json.JSONDecodeError) as error:
             raise RuntimeError(
                 f"Could not read device inventory {self._inventory_path}: {error}"
             ) from error
 
         devices = raw.get("devices", [])
-        suppressed = raw.get("suppressed", [])
-        if not isinstance(devices, list) or not isinstance(suppressed, list):
+        deleted = raw.get("deleted", raw.get("suppressed", []))
+        if not isinstance(devices, list) or not isinstance(deleted, list):
             raise TypeError(
                 f"Device inventory {self._inventory_path} has an invalid format"
             )
@@ -104,11 +96,11 @@ class DeviceInventoryService:
             or not isinstance(entry.get("serial"), str)
             or not isinstance(entry.get("phone_name", ""), str)
             for entry in devices
-        ) or any(not isinstance(serial, str) for serial in suppressed):
+        ) or any(not isinstance(serial, str) for serial in deleted):
             raise TypeError(
                 f"Device inventory {self._inventory_path} has invalid device records"
             )
-        return {"devices": devices, "suppressed": suppressed}
+        return {"devices": devices, "deleted": deleted}
 
     def _save_state(self, state: dict[str, list]) -> None:
         self._inventory_path.parent.mkdir(parents=True, exist_ok=True)

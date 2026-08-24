@@ -51,11 +51,6 @@ QListWidget#navigationList::item {
     margin-bottom: 3px;
 }
 
-QListWidget#navigationList::item:hover {
-    background-color: #19212b;
-    color: #f0f4f8;
-}
-
 QListWidget#navigationList::item:selected {
     background-color: #173b66;
     color: #ffffff;
@@ -78,8 +73,8 @@ QToolBar#topToolbar QToolButton {
     padding: 0 10px;
 }
 
-QToolBar#topToolbar QToolButton:hover {
-    background-color: #1b2430;
+QToolBar#topToolbar QToolButton:pressed {
+    background-color: #202b37;
     border-color: #526274;
 }
 
@@ -121,8 +116,6 @@ QPushButton#primaryButton {
     font-weight: 600;
 }
 
-QPushButton#primaryButton:hover { background-color: #1f78ba; }
-
 QPushButton#primaryButton:pressed { background-color: #14598f; }
 
 QPushButton#primaryButton:disabled {
@@ -139,7 +132,7 @@ QPushButton#secondaryButton {
     font-weight: 600;
 }
 
-QPushButton#secondaryButton:hover {
+QPushButton#secondaryButton:pressed {
     background-color: #222d39;
     border-color: #526274;
 }
@@ -152,7 +145,7 @@ QPushButton#tertiaryButton {
     padding: 0 7px;
 }
 
-QPushButton#tertiaryButton:hover {
+QPushButton#tertiaryButton:pressed {
     background-color: #1d2631;
     color: #d6dee8;
 }
@@ -165,7 +158,7 @@ QPushButton#dangerButton {
     font-weight: 600;
 }
 
-QPushButton#dangerButton:hover { background-color: #c63740; }
+QPushButton#dangerButton:pressed { background-color: #8f2229; }
 
 QLineEdit#deviceSearch {
     background-color: #0b1016;
@@ -177,15 +170,14 @@ QLineEdit#deviceSearch {
     selection-background-color: #1769aa;
 }
 
-QLineEdit#deviceSearch:hover { border-color: #465568; }
-
 QLineEdit#deviceSearch:focus {
     border-color: #378bd1;
     background-color: #0d131a;
 }
 
 QLabel#summaryText,
-QLabel#connectedSummary {
+QLabel#connectedSummary,
+QLabel#offlineSummary {
     background-color: #19212b;
     border: 1px solid #2c3744;
     border-radius: 11px;
@@ -199,6 +191,12 @@ QLabel#connectedSummary {
     background-color: #12251b;
     border-color: #265b3b;
     color: #65c989;
+}
+
+QLabel#offlineSummary {
+    background-color: #2a181b;
+    border-color: #69343a;
+    color: #ff8b83;
 }
 
 QTableView#deviceTable,
@@ -218,11 +216,6 @@ QTableView#deviceTable::item,
 QTableView#accountsTable::item {
     border-bottom: 1px solid #1c242e;
     padding: 0 9px;
-}
-
-QTableView#deviceTable::item:hover,
-QTableView#accountsTable::item:hover {
-    background-color: #162332;
 }
 
 QTableView#deviceTable::item:selected,
@@ -382,8 +375,6 @@ QScrollBar::handle:vertical {
     border-radius: 4px;
     min-height: 28px;
 }
-
-QScrollBar::handle:vertical:hover { background: #47576a; }
 
 QScrollBar::add-line:vertical,
 QScrollBar::sub-line:vertical { height: 0; }

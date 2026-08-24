@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QHelpEvent, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,18 +24,24 @@ class DeviceActionsDelegate(QStyledItemDelegate):
 
     action_requested = Signal(str, str)
     _BUTTONS = (
-        _ActionButton("manage", "Manage", 82, QStyle.SP_DirOpenIcon),
         _ActionButton("start", "Start", 70, QStyle.SP_MediaPlay, enabled=False),
+        _ActionButton("manage", "Manage", 82, QStyle.SP_DirOpenIcon),
         _ActionButton("delete", "", 42, QStyle.SP_TrashIcon),
     )
     _GAP = 6
 
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._armed_action: tuple[str, str] | None = None
+        self._pressed_action: tuple[str, str] | None = None
+        self._pressed_widget = None
+        self._pressed_rect: QRect | None = None
+
     def paint(self, painter: QPainter, option, index) -> None:
+        serial = index.data(Qt.UserRole)
         for button, rect in self._button_rects(option.rect):
-            hovered = button.enabled and rect.contains(
-                option.widget.mapFromGlobal(option.widget.cursor().pos())
-            )
-            background, border, foreground = self._colors(button, hovered)
+            pressed = self._pressed_action == (serial, button.action)
+            background, border, foreground = self._colors(button, pressed)
 
             painter.save()
             painter.setRenderHint(QPainter.Antialiasing)
@@ -68,7 +74,7 @@ class DeviceActionsDelegate(QStyledItemDelegate):
             painter.restore()
 
     def editorEvent(self, event, model, option, index) -> bool:
-        if event.type() != QEvent.MouseButtonRelease:
+        if event.type() not in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease):
             return False
         mouse_event = event
         if (
@@ -78,11 +84,35 @@ class DeviceActionsDelegate(QStyledItemDelegate):
             return False
 
         serial = index.data(Qt.UserRole)
+        requested_action = None
         for button, rect in self._button_rects(option.rect):
             if button.enabled and rect.contains(mouse_event.position().toPoint()):
-                self.action_requested.emit(button.action, serial)
-                return True
-        return False
+                requested_action = button.action
+                break
+
+        if event.type() == QEvent.MouseButtonPress:
+            if requested_action is None:
+                return False
+            action_key = (serial, requested_action)
+            self._armed_action = action_key
+            self._reset_pressed()
+            self._pressed_action = action_key
+            self._pressed_widget = option.widget
+            self._pressed_rect = QRect(option.rect)
+            option.widget.update(option.rect)
+            QTimer.singleShot(
+                110,
+                lambda: self._clear_pressed(action_key),
+            )
+            return True
+
+        armed_action = self._armed_action
+        self._armed_action = None
+        self._reset_pressed()
+        if requested_action is not None and armed_action == (serial, requested_action):
+            self.action_requested.emit(requested_action, serial)
+            return True
+        return armed_action is not None
 
     def helpEvent(self, event, view, option, index) -> bool:
         if not isinstance(event, QHelpEvent):
@@ -99,20 +129,36 @@ class DeviceActionsDelegate(QStyledItemDelegate):
         return False
 
     @staticmethod
-    def _colors(button: _ActionButton, hovered: bool):
+    def _colors(button: _ActionButton, pressed: bool):
         if not button.enabled:
-            return QColor("#161b22"), QColor("#30363d"), QColor("#6e7681")
+            return QColor("#202832"), QColor("#455261"), QColor("#9aa8b7")
         if button.action == "delete":
             return (
-                QColor("#3d1f24" if hovered else "#21161a"),
-                QColor("#f85149" if hovered else "#6e3035"),
+                QColor("#4a1f24" if pressed else "#21161a"),
+                QColor("#f85149" if pressed else "#6e3035"),
                 QColor("#ffb3ad"),
             )
         return (
-            QColor("#1f6feb" if hovered else "#212d3b"),
-            QColor("#388bfd" if hovered else "#3c526b"),
+            QColor("#173b66" if pressed else "#212d3b"),
+            QColor("#388bfd" if pressed else "#3c526b"),
             QColor("#f0f6fc"),
         )
+
+    def _clear_pressed(self, action_key: tuple[str, str]) -> None:
+        if self._pressed_action == action_key:
+            self._reset_pressed()
+
+    def _reset_pressed(self) -> None:
+        widget = self._pressed_widget
+        rect = self._pressed_rect
+        self._pressed_action = None
+        self._pressed_widget = None
+        self._pressed_rect = None
+        if widget is not None and rect is not None:
+            try:
+                widget.update(rect)
+            except RuntimeError:
+                return
 
     def _button_rects(self, cell_rect: QRect):
         total_width = sum(button.width for button in self._BUTTONS) + self._GAP * 2

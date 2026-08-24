@@ -80,13 +80,12 @@ class DeviceController(QObject):
 
     @Slot(str)
     def delete_device(self, serial: str) -> None:
-        record = self._records.get(serial)
-        if record is None:
+        if serial not in self._records:
             self.operation_failed.emit(f"Device {serial} is not in the inventory")
             return
 
         self.deletion_started.emit(serial)
-        task = _ServiceTask(lambda: self._service.delete(serial, record.connected))
+        task = _ServiceTask(lambda: self._service.delete(serial))
         task.signals.completed.connect(lambda _: self._on_delete_completed(serial))
         task.signals.failed.connect(self._on_operation_failed)
         self._start_task(task)
