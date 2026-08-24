@@ -4,7 +4,9 @@
     font-size: 14px;
 }
 
-QMainWindow, QWidget#devicesPage { background-color: #0d1117; }
+QMainWindow,
+QWidget#devicesPage,
+QWidget#phoneAccountsPage { background-color: #0d1117; }
 
 QWidget#navigationSidebar {
     background-color: #161b22;
@@ -96,6 +98,69 @@ QPushButton#primaryButton:disabled {
     background-color: #21262d;
     border-color: #30363d;
     color: #6e7681;
+}
+
+QPushButton#secondaryButton {
+    background-color: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #c9d1d9;
+    font-weight: 600;
+    padding: 8px 14px;
+}
+
+QPushButton#secondaryButton:hover {
+    background-color: #30363d;
+    border-color: #8b949e;
+}
+
+QLineEdit#deviceSearch {
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 7px;
+    color: #f0f6fc;
+    min-height: 36px;
+    padding: 0 12px;
+    selection-background-color: #1f6feb;
+}
+
+QLineEdit#deviceSearch:focus { border-color: #388bfd; }
+
+QTableView#deviceTable,
+QTableView#accountsTable {
+    alternate-background-color: #11161d;
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 7px;
+    color: #c9d1d9;
+    gridline-color: #30363d;
+    outline: 0;
+    selection-background-color: #1f3b5d;
+    selection-color: #f0f6fc;
+}
+
+QTableView#deviceTable::item,
+QTableView#accountsTable::item {
+    border-bottom: 1px solid #21262d;
+    padding: 0 10px;
+}
+
+QTableView#deviceTable::item:hover,
+QTableView#accountsTable::item:hover { background-color: #182231; }
+
+QHeaderView::section {
+    background-color: #161b22;
+    border: 0;
+    border-bottom: 1px solid #30363d;
+    color: #8b949e;
+    font-weight: 600;
+    padding: 10px;
+}
+
+QTableCornerButton::section {
+    background-color: #161b22;
+    border: 0;
+    border-bottom: 1px solid #30363d;
 }
 
 QListWidget#deviceList {

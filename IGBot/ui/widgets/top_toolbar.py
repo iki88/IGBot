@@ -14,9 +14,9 @@ class TopToolbar(QToolBar):
         self.setMovable(False)
         self.setFloatable(False)
 
-        title = QLabel("Device management", self)
-        title.setObjectName("toolbarTitle")
-        self.addWidget(title)
+        self.title = QLabel("Device management", self)
+        self.title.setObjectName("toolbarTitle")
+        self.addWidget(self.title)
 
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -27,3 +27,6 @@ class TopToolbar(QToolBar):
         refresh_action.setStatusTip("Refresh connected Android devices")
         refresh_action.triggered.connect(self.refresh_requested)
         self.addAction(refresh_action)
+
+    def set_context_title(self, title: str) -> None:
+        self.title.setText(title)
