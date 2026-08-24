@@ -101,12 +101,23 @@ class DeviceFacade:
             raise DeviceFacade.JsonRpcError(e)
 
     def _ig_is_opened(self) -> bool:
-        return self._get_current_app() == self.app_id
+        current = self._get_current_app()
+        print()
+        print("========== IGBOT DEBUG ==========")
+        print(f"CURRENT APP : {repr(current)}")
+        print(f"EXPECTED APP: {repr(self.app_id)}")
+        print(f"MATCH       : {current == self.app_id}")
+        print("=================================")
+        print()
+        return current == self.app_id
 
     def check_if_ig_is_opened(func):
         def wrapper(self, **kwargs):
             avoid_lst = ["choose_cloned_app", "check_if_crash_popup_is_there"]
             caller = stack()[1].function
+            print()
+            print(f"CALLER  : {caller}")
+            print(f"FUNCTION: {func.__name__}")
             if not self._ig_is_opened() and caller not in avoid_lst:
                 raise DeviceFacade.AppHasCrashed("App has crashed / has been closed!")
             return func(self, **kwargs)

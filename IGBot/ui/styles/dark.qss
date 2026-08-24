@@ -1,0 +1,5 @@
+QMainWindow{background:#202124;color:white;}
+QListWidget,QTextEdit{background:#2b2b2b;color:white;border:1px solid #444;}
+QToolBar{background:#2b2b2b;}
+QStatusBar{background:#2b2b2b;color:white;}
+QLabel{color:white;}

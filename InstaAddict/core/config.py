@@ -72,7 +72,10 @@ class Config:
 
             self.username = self.config.get("username", False)
             self.debug = self.config.get("debug", False)
-            self.app_id = self.config.get("app_id", "com.instagram.android")
+            self.app_id = self.config.get(
+    "app-id",
+    self.config.get("app_id", "com.instagram.android")
+)
         else:
             if "--debug" in self.args:
                 self.debug = True
