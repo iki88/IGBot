@@ -13,7 +13,10 @@ def test_phone_accounts_page_shows_clean_empty_state():
     page.set_phone(DeviceRecord("phone-a", "", True), [])
 
     assert page.empty_state.isVisibleTo(page)
-    assert page.empty_state.text() == "No Instagram accounts assigned to this phone."
+    assert (
+        page.empty_state.description.text()
+        == "No Instagram accounts assigned to this phone."
+    )
     assert page.model.rowCount() == 0
     assert application is not None
 

@@ -11,8 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
-    QMessageBox,
-    QPushButton,
+    QStyle,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -24,7 +23,10 @@ from IGBot.ui.models.device_table_model import (
     DeviceFilterProxyModel,
     DeviceTableModel,
 )
+from IGBot.ui.widgets.confirmation_dialog import ConfirmationDialog
 from IGBot.ui.widgets.device_actions_delegate import DeviceActionsDelegate
+from IGBot.ui.widgets.empty_state import EmptyState
+from IGBot.ui.widgets.page_header import PageHeader
 
 logger = logging.getLogger(__name__)
 
@@ -38,20 +40,24 @@ class DevicesPage(QWidget):
         super().__init__(parent)
         self.setObjectName("devicesPage")
         self._controller = controller
+        self._devices: list[DeviceRecord] = []
 
-        self.title = QLabel("Devices", self)
-        self.title.setObjectName("pageTitle")
-        self.subtitle = QLabel("Manage Android phones discovered through ADB.", self)
-        self.subtitle.setObjectName("pageSubtitle")
-
-        self.refresh_button = QPushButton("Refresh devices", self)
-        self.refresh_button.setObjectName("primaryButton")
-        self.refresh_button.clicked.connect(self._controller.refresh)
+        self.page_header = PageHeader(
+            "Devices",
+            "Monitor connectivity and manage phone account assignments.",
+            self,
+        )
 
         self.search = QLineEdit(self)
         self.search.setObjectName("deviceSearch")
         self.search.setPlaceholderText("Search by Device ID or Phone")
         self.search.setClearButtonEnabled(True)
+        self.search.setMaximumWidth(460)
+
+        self.fleet_summary = QLabel("0 phones", self)
+        self.fleet_summary.setObjectName("summaryText")
+        self.connection_summary = QLabel("0 connected", self)
+        self.connection_summary.setObjectName("connectedSummary")
 
         self.model = DeviceTableModel(self)
         self.proxy_model = DeviceFilterProxyModel(self)
@@ -69,7 +75,7 @@ class DevicesPage(QWidget):
         self.table.setShowGrid(False)
         self.table.setWordWrap(False)
         self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(48)
+        self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.horizontalHeader().setSectionsClickable(False)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
 
@@ -79,9 +85,12 @@ class DevicesPage(QWidget):
         )
         self._configure_columns()
 
-        self.empty_state = QLabel("No phones have been discovered.", self)
-        self.empty_state.setObjectName("emptyState")
-        self.empty_state.setAlignment(Qt.AlignCenter)
+        self.empty_state = EmptyState(
+            self.style().standardIcon(QStyle.SP_ComputerIcon),
+            "No phones discovered",
+            "Connect an Android phone through ADB, then refresh the workspace.",
+            self,
+        )
 
         self.error_banner = QLabel(self)
         self.error_banner.setObjectName("errorBanner")
@@ -97,37 +106,36 @@ class DevicesPage(QWidget):
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.setSectionResizeMode(DeviceTableModel.PHONE, QHeaderView.Stretch)
         header.setSectionResizeMode(DeviceTableModel.ACTIONS, QHeaderView.Fixed)
-        self.table.setColumnWidth(DeviceTableModel.CONNECTION, 132)
-        self.table.setColumnWidth(DeviceTableModel.DEVICE_ID, 185)
-        self.table.setColumnWidth(DeviceTableModel.PHONE, 180)
-        self.table.setColumnWidth(DeviceTableModel.ACCOUNTS, 84)
-        self.table.setColumnWidth(DeviceTableModel.STATUS, 92)
-        self.table.setColumnWidth(DeviceTableModel.ACTIONS, 280)
+        self.table.setColumnWidth(DeviceTableModel.CONNECTION, 54)
+        self.table.setColumnWidth(DeviceTableModel.DEVICE_ID, 180)
+        self.table.setColumnWidth(DeviceTableModel.PHONE, 175)
+        self.table.setColumnWidth(DeviceTableModel.ACCOUNTS, 82)
+        self.table.setColumnWidth(DeviceTableModel.STATUS, 86)
+        self.table.setColumnWidth(DeviceTableModel.ACTIONS, 244)
 
     def _build_layout(self) -> None:
-        header = QHBoxLayout()
-        heading = QVBoxLayout()
-        heading.setSpacing(4)
-        heading.addWidget(self.title)
-        heading.addWidget(self.subtitle)
-        header.addLayout(heading)
-        header.addStretch()
-        header.addWidget(self.refresh_button)
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(12)
+        controls.addWidget(self.search, 1)
+        controls.addStretch()
+        controls.addWidget(self.fleet_summary)
+        controls.addWidget(self.connection_summary)
 
         card = QFrame(self)
         card.setObjectName("contentCard")
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(16, 16, 16, 16)
-        card_layout.setSpacing(12)
-        card_layout.addWidget(self.search)
+        card_layout.setContentsMargins(14, 14, 14, 14)
+        card_layout.setSpacing(10)
+        card_layout.addLayout(controls)
         card_layout.addWidget(self.error_banner)
         card_layout.addWidget(self.table, 1)
         card_layout.addWidget(self.empty_state, 1)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(20)
-        layout.addLayout(header)
+        layout.setContentsMargins(22, 18, 22, 18)
+        layout.setSpacing(14)
+        layout.addWidget(self.page_header)
         layout.addWidget(card, 1)
 
     def _connect_signals(self) -> None:
@@ -141,20 +149,16 @@ class DevicesPage(QWidget):
         self.actions_delegate.action_requested.connect(self._handle_row_action)
 
     def _on_refresh_started(self) -> None:
-        self.refresh_button.setEnabled(False)
-        self.refresh_button.setText("Refreshing…")
         self.error_banner.hide()
 
     def _set_devices(self, devices: list[DeviceRecord]) -> None:
-        self.refresh_button.setEnabled(True)
-        self.refresh_button.setText("Refresh devices")
         self.table.setEnabled(True)
+        self._devices = devices
         self.model.set_devices(devices)
+        self._update_summaries()
         self._update_content_visibility()
 
     def _show_error(self, message: str) -> None:
-        self.refresh_button.setEnabled(True)
-        self.refresh_button.setText("Refresh devices")
         self._show_operation_error(message)
 
     def _show_operation_error(self, message: str) -> None:
@@ -168,16 +172,32 @@ class DevicesPage(QWidget):
 
     def _on_search_changed(self, query: str) -> None:
         self.proxy_model.set_query(query)
+        self._update_summaries()
         self._update_content_visibility()
+
+    def _update_summaries(self) -> None:
+        total = len(self._devices)
+        visible = self.proxy_model.rowCount()
+        connected = sum(device.connected for device in self._devices)
+        self.fleet_summary.setText(
+            f"{visible} of {total} phones" if self.search.text() else f"{total} phones"
+        )
+        self.connection_summary.setText(f"{connected} connected")
 
     def _update_content_visibility(self) -> None:
         visible_rows = self.proxy_model.rowCount()
         self.table.setVisible(visible_rows > 0)
         self.empty_state.setVisible(visible_rows == 0)
         if self.model.rowCount() > 0 and visible_rows == 0:
-            self.empty_state.setText("No phones match your search.")
+            self.empty_state.set_content(
+                "No matching phones",
+                "Try a different Device ID or phone name.",
+            )
         else:
-            self.empty_state.setText("No phones have been discovered.")
+            self.empty_state.set_content(
+                "No phones discovered",
+                "Connect an Android phone through ADB, then refresh the workspace.",
+            )
 
     def _manage_index(self, proxy_index) -> None:
         if proxy_index.isValid():
@@ -218,13 +238,9 @@ class DevicesPage(QWidget):
         )
 
     def _show_delete_dialog(self, title: str, text: str) -> bool:
-        dialog = QMessageBox(self)
-        dialog.setIcon(QMessageBox.Warning)
-        dialog.setWindowTitle(title)
-        dialog.setText(title)
-        dialog.setInformativeText(text)
-        cancel_button = dialog.addButton("Cancel", QMessageBox.RejectRole)
-        delete_button = dialog.addButton("Delete", QMessageBox.DestructiveRole)
-        dialog.setDefaultButton(cancel_button)
-        dialog.exec()
-        return dialog.clickedButton() is delete_button
+        detail = (
+            "The phone will remain hidden until it disconnects from ADB."
+            if title == "Delete Device?"
+            else "Device-specific IGBot metadata will be removed."
+        )
+        return ConfirmationDialog.confirm(title, text, detail, self)

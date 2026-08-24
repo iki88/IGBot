@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QStyle,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -13,6 +14,8 @@ from PySide6.QtWidgets import (
 
 from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.ui.models.phone_accounts_model import PhoneAccountsModel
+from IGBot.ui.widgets.empty_state import EmptyState
+from IGBot.ui.widgets.page_header import PageHeader
 
 
 class PhoneAccountsPage(QWidget):
@@ -24,14 +27,28 @@ class PhoneAccountsPage(QWidget):
         super().__init__(parent)
         self.setObjectName("phoneAccountsPage")
 
-        self.back_button = QPushButton("Back to devices", self)
+        self.back_button = QPushButton("Devices", self)
         self.back_button.setObjectName("secondaryButton")
+        self.back_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowBack))
         self.back_button.clicked.connect(self.back_requested)
 
-        self.title = QLabel("Phone Accounts", self)
-        self.title.setObjectName("pageTitle")
-        self.phone_details = QLabel(self)
-        self.phone_details.setObjectName("pageSubtitle")
+        self.page_header = PageHeader(
+            "Phone Accounts",
+            "Accounts assigned through InstaAddict configuration.",
+            self,
+        )
+        self.page_header.add_action_widget(self.back_button)
+
+        self.connection_dot = QLabel("●", self)
+        self.connection_dot.setObjectName("connectionDot")
+        self.phone_name = QLabel(self)
+        self.phone_name.setObjectName("deviceContextTitle")
+        self.phone_serial = QLabel(self)
+        self.phone_serial.setObjectName("deviceContextSerial")
+        self.account_summary = QLabel("0 accounts", self)
+        self.account_summary.setObjectName("summaryText")
+
+        self.device_context = self._build_device_context()
 
         self.model = PhoneAccountsModel(self)
         self.table = QTableView(self)
@@ -41,9 +58,11 @@ class PhoneAccountsPage(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSortingEnabled(False)
+        self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
+        self.table.setWordWrap(False)
         self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(44)
+        self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.horizontalHeader().setSectionsClickable(False)
         self.table.horizontalHeader().setSectionResizeMode(
             PhoneAccountsModel.HEADERS.index("Instagram Account"), QHeaderView.Stretch
@@ -51,42 +70,64 @@ class PhoneAccountsPage(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(
             PhoneAccountsModel.HEADERS.index("Configuration"), QHeaderView.Stretch
         )
+        self.table.setColumnWidth(
+            PhoneAccountsModel.HEADERS.index("Application ID"), 210
+        )
 
-        self.empty_state = QLabel("No Instagram accounts assigned to this phone.", self)
-        self.empty_state.setObjectName("emptyState")
-        self.empty_state.setAlignment(Qt.AlignCenter)
+        self.empty_state = EmptyState(
+            self.style().standardIcon(QStyle.SP_FileDialogListView),
+            "No accounts assigned",
+            "No Instagram accounts assigned to this phone.",
+            self,
+        )
 
         self._build_layout()
 
+    def _build_device_context(self) -> QFrame:
+        details = QVBoxLayout()
+        details.setContentsMargins(0, 0, 0, 0)
+        details.setSpacing(1)
+        details.addWidget(self.phone_name)
+        details.addWidget(self.phone_serial)
+
+        layout = QHBoxLayout()
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(10)
+        layout.addWidget(self.connection_dot)
+        layout.addLayout(details)
+        layout.addStretch()
+        layout.addWidget(self.account_summary)
+
+        context = QFrame(self)
+        context.setObjectName("deviceContext")
+        context.setLayout(layout)
+        return context
+
     def _build_layout(self) -> None:
-        heading = QVBoxLayout()
-        heading.setSpacing(4)
-        heading.addWidget(self.title)
-        heading.addWidget(self.phone_details)
-
-        header = QHBoxLayout()
-        header.addWidget(self.back_button)
-        header.addSpacing(12)
-        header.addLayout(heading)
-        header.addStretch()
-
         card = QFrame(self)
         card.setObjectName("contentCard")
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(16, 16, 16, 16)
+        card_layout.setContentsMargins(14, 14, 14, 14)
         card_layout.addWidget(self.table, 1)
         card_layout.addWidget(self.empty_state, 1)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(20)
-        layout.addLayout(header)
+        layout.setContentsMargins(22, 18, 22, 18)
+        layout.setSpacing(12)
+        layout.addWidget(self.page_header)
+        layout.addWidget(self.device_context)
         layout.addWidget(card, 1)
 
     def set_phone(self, device: DeviceRecord, accounts: list[AssignedAccount]) -> None:
-        name = f"{device.phone_name} · " if device.phone_name else ""
-        connection = "Connected" if device.connected else "Offline"
-        self.phone_details.setText(f"{name}{device.serial} · {connection}")
+        self.phone_name.setText(device.phone_name or "Unnamed phone")
+        self.phone_serial.setText(device.serial)
+        self.connection_dot.setProperty("connected", device.connected)
+        self.connection_dot.style().unpolish(self.connection_dot)
+        self.connection_dot.style().polish(self.connection_dot)
+
+        count = len(accounts)
+        noun = "account" if count == 1 else "accounts"
+        self.account_summary.setText(f"{count} {noun}")
         self.model.set_accounts(accounts)
         has_accounts = bool(accounts)
         self.table.setVisible(has_accounts)

@@ -1,4 +1,5 @@
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
+from PySide6.QtGui import QColor, QFont
 
 from IGBot.core.device import DeviceRecord
 
@@ -9,7 +10,7 @@ class DeviceTableModel(QAbstractTableModel):
     """Ordered model of phones known to IGBot."""
 
     CONNECTION, DEVICE_ID, PHONE, ACCOUNTS, STATUS, ACTIONS = range(6)
-    HEADERS = ("●", "Device ID", "Phone", "Accounts", "Status", "Actions")
+    HEADERS = ("ADB", "Device ID", "Phone", "Accounts", "Status", "Actions")
     DeviceRole = Qt.UserRole + 1
 
     def __init__(self, parent=None) -> None:
@@ -31,6 +32,12 @@ class DeviceTableModel(QAbstractTableModel):
             return device
         if role == Qt.UserRole:
             return device.serial
+        if role == Qt.ForegroundRole and index.column() == self.CONNECTION:
+            return QColor("#3fb950" if device.connected else "#f85149")
+        if role == Qt.ToolTipRole and index.column() == self.CONNECTION:
+            return "Connected through ADB" if device.connected else "Offline"
+        if role == Qt.FontRole and index.column() == self.DEVICE_ID:
+            return QFont("Cascadia Mono", 9)
         if role == Qt.TextAlignmentRole and index.column() in (
             self.CONNECTION,
             self.ACCOUNTS,
@@ -41,7 +48,7 @@ class DeviceTableModel(QAbstractTableModel):
             return None
 
         values = (
-            "🟢 Connected" if device.connected else "🔴 Offline",
+            "●",
             device.serial,
             device.phone_name or "—",
             len(device.accounts),

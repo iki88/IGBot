@@ -2,7 +2,14 @@ import logging
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import QLabel, QPlainTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class _LogEmitter(QObject):
@@ -35,11 +42,14 @@ class LiveLogPanel(QWidget):
 
         title = QLabel("Live Log", self)
         title.setObjectName("panelTitle")
+        clear_button = QPushButton("Clear", self)
+        clear_button.setObjectName("tertiaryButton")
 
         self.output = QPlainTextEdit(self)
         self.output.setObjectName("liveLogOutput")
         self.output.setReadOnly(True)
         self.output.setMaximumBlockCount(2_000)
+        clear_button.clicked.connect(self.output.clear)
 
         self._emitter = _LogEmitter(self)
         self._emitter.message_ready.connect(self._append_message)
@@ -47,10 +57,16 @@ class LiveLogPanel(QWidget):
         self._logging_attached = True
         logging.getLogger().addHandler(self._handler)
 
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(clear_button)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
-        layout.addWidget(title)
+        layout.setContentsMargins(12, 8, 12, 10)
+        layout.setSpacing(6)
+        layout.addLayout(header)
         layout.addWidget(self.output)
 
     def closeEvent(self, event) -> None:

@@ -1,4 +1,5 @@
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtGui import QFont
 
 from IGBot.core.device import AssignedAccount
 
@@ -21,13 +22,19 @@ class PhoneAccountsModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(self.HEADERS)
 
     def data(self, index: QModelIndex, role=Qt.DisplayRole):
-        if not index.isValid() or role != Qt.DisplayRole:
+        if not index.isValid():
             return None
         account = self._accounts[index.row()]
+        if role == Qt.ToolTipRole and index.column() == 2:
+            return str(account.config_path)
+        if role == Qt.FontRole and index.column() in (1, 2):
+            return QFont("Cascadia Mono", 9)
+        if role != Qt.DisplayRole:
+            return None
         return (
             account.username,
             account.app_id,
-            str(account.config_path),
+            f"{account.config_path.parent.name}/{account.config_path.name}",
         )[index.column()]
 
     def headerData(

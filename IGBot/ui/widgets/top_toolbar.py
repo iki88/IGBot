@@ -1,6 +1,6 @@
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QLabel, QSizePolicy, QToolBar, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QStyle, QToolBar, QWidget
 
 
 class TopToolbar(QToolBar):
@@ -13,6 +13,7 @@ class TopToolbar(QToolBar):
         self.setObjectName("topToolbar")
         self.setMovable(False)
         self.setFloatable(False)
+        self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
         self.title = QLabel("Device management", self)
         self.title.setObjectName("toolbarTitle")
@@ -22,11 +23,16 @@ class TopToolbar(QToolBar):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(spacer)
 
-        refresh_action = QAction("Refresh", self)
-        refresh_action.setShortcut("F5")
-        refresh_action.setStatusTip("Refresh connected Android devices")
-        refresh_action.triggered.connect(self.refresh_requested)
-        self.addAction(refresh_action)
+        self.refresh_action = QAction("Refresh", self)
+        self.refresh_action.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        self.refresh_action.setShortcut("F5")
+        self.refresh_action.setStatusTip("Refresh connected Android devices")
+        self.refresh_action.triggered.connect(self.refresh_requested)
+        self.addAction(self.refresh_action)
 
     def set_context_title(self, title: str) -> None:
         self.title.setText(title)
+
+    def set_refreshing(self, refreshing: bool) -> None:
+        self.refresh_action.setEnabled(not refreshing)
+        self.refresh_action.setText("Refreshing…" if refreshing else "Refresh")

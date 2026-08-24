@@ -47,7 +47,7 @@ class MainWindow(QMainWindow):
         content_splitter.setObjectName("contentSplitter")
         content_splitter.addWidget(self.pages)
         content_splitter.addWidget(self.live_log)
-        content_splitter.setSizes([650, 220])
+        content_splitter.setSizes([710, 170])
         content_splitter.setStretchFactor(0, 4)
         content_splitter.setStretchFactor(1, 1)
         content_splitter.setChildrenCollapsible(False)
@@ -56,7 +56,7 @@ class MainWindow(QMainWindow):
         shell.setObjectName("shellSplitter")
         shell.addWidget(self.sidebar)
         shell.addWidget(content_splitter)
-        shell.setSizes([230, 1210])
+        shell.setSizes([190, 1250])
         shell.setStretchFactor(0, 0)
         shell.setStretchFactor(1, 1)
         shell.setCollapsible(0, False)
@@ -71,10 +71,19 @@ class MainWindow(QMainWindow):
         self.device_controller.refresh_started.connect(
             lambda: self.statusBar().showMessage("Discovering Android devices…")
         )
+        self.device_controller.refresh_started.connect(
+            lambda: self.toolbar.set_refreshing(True)
+        )
         self.device_controller.devices_changed.connect(self._show_device_count)
+        self.device_controller.devices_changed.connect(
+            lambda _: self.toolbar.set_refreshing(False)
+        )
         self.device_controller.devices_changed.connect(self._sync_phone_accounts)
         self.device_controller.discovery_failed.connect(
             lambda message: self.statusBar().showMessage(message)
+        )
+        self.device_controller.discovery_failed.connect(
+            lambda _: self.toolbar.set_refreshing(False)
         )
         self.device_controller.operation_failed.connect(
             lambda message: self.statusBar().showMessage(message)
