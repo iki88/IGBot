@@ -30,7 +30,8 @@ dependencies = [
 
 [project.optional-dependencies]
 analytics = ["matplotlib==3.4.2"]
-dev = ["flit", "pre-commit", "black", "flake8", "isort", "ruff"]
+desktop = ["PySide6>=6.7,<7"]
+dev = ["flit", "pre-commit", "black", "flake8", "isort", "ruff", "pytest", "pytest-mock"]
 
 [project.urls]
 Source = "https://github.com/joeahkim/InstaAddict"
