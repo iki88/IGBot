@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from IGBot.core.device import AssignedAccount, DeviceRecord
+from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
 from IGBot.ui.models.phone_accounts_model import PhoneAccountsModel
 from IGBot.ui.widgets.empty_state import EmptyState
 from IGBot.ui.widgets.page_header import PageHeader
@@ -35,6 +36,7 @@ class PhoneAccountsPage(QWidget):
     restore_requested = Signal(str)
     account_delete_requested = Signal(str)
     account_folder_requested = Signal(str)
+    account_open_requested = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -77,9 +79,7 @@ class PhoneAccountsPage(QWidget):
         self.proxy_model = QSortFilterProxyModel(self)
         self.proxy_model.setSourceModel(self.model)
         self.proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
-        self.proxy_model.setFilterKeyColumn(
-            PhoneAccountsModel.HEADERS.index("Instagram Account")
-        )
+        self.proxy_model.setFilterKeyColumn(PhoneAccountsModel.USERNAME)
         self.search = QLineEdit(self)
         self.search.setObjectName("deviceSearch")
         self.search.setPlaceholderText("Search by Instagram username")
@@ -93,24 +93,16 @@ class PhoneAccountsPage(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSortingEnabled(False)
+        self.table.setSortingEnabled(True)
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
         self.table.setWordWrap(False)
         self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(40)
-        self.table.horizontalHeader().setSectionsClickable(False)
-        self.table.horizontalHeader().setSectionResizeMode(
-            PhoneAccountsModel.HEADERS.index("Instagram Account"), QHeaderView.Stretch
-        )
-        self.table.horizontalHeader().setSectionResizeMode(
-            PhoneAccountsModel.HEADERS.index("Configuration"), QHeaderView.Stretch
-        )
-        self.table.setColumnWidth(
-            PhoneAccountsModel.HEADERS.index("Application ID"), 210
-        )
-        self.table.setColumnWidth(PhoneAccountsModel.HEADERS.index("Actions"), 140)
-        self.table.clicked.connect(self._handle_account_action)
+        self.table.verticalHeader().setDefaultSectionSize(34)
+        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self._configure_columns()
+        self.table.doubleClicked.connect(self._open_account)
 
         self.empty_state = EmptyState(
             self.style().standardIcon(QStyle.SP_FileDialogListView),
@@ -121,6 +113,30 @@ class PhoneAccountsPage(QWidget):
 
         self._build_layout()
 
+    def _configure_columns(self) -> None:
+        header = self.table.horizontalHeader()
+        header.setSectionsClickable(True)
+        header.setMinimumSectionSize(55)
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setSectionResizeMode(PhoneAccountsModel.USERNAME, QHeaderView.Stretch)
+        widths = {
+            "Start Hour": 84,
+            "End Hour": 78,
+            "Followers": 82,
+            "Following": 84,
+            "Followed": 80,
+            "Unfollowed": 90,
+            "Story": 65,
+            "Like": 60,
+            "Comment": 82,
+            "DM": 58,
+            "Posted": 72,
+            "Status": 96,
+        }
+        for column, title in enumerate(PhoneAccountsModel.HEADERS):
+            if column != PhoneAccountsModel.USERNAME:
+                self.table.setColumnWidth(column, widths[title])
+
     def _build_device_context(self) -> QFrame:
         details = QVBoxLayout()
         details.setContentsMargins(0, 0, 0, 0)
@@ -129,8 +145,8 @@ class PhoneAccountsPage(QWidget):
         details.addWidget(self.phone_serial)
 
         layout = QHBoxLayout()
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(8)
         layout.addWidget(self.connection_dot)
         layout.addLayout(details)
         layout.addStretch()
@@ -145,20 +161,22 @@ class PhoneAccountsPage(QWidget):
         card = QFrame(self)
         card.setObjectName("contentCard")
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(14, 14, 14, 14)
+        card_layout.setContentsMargins(11, 10, 11, 11)
+        card_layout.setSpacing(8)
         card_layout.addWidget(self.search)
         card_layout.addWidget(self.table, 1)
         card_layout.addWidget(self.empty_state, 1)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 18, 22, 18)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 15, 20, 16)
+        layout.setSpacing(10)
         layout.addWidget(self.page_header)
         layout.addWidget(self.device_context)
         layout.addWidget(card, 1)
 
     def set_phone(self, device: DeviceRecord, accounts: list[AssignedAccount]) -> None:
         self._serial = device.serial
+        self.device_context.show()
         self.search.clear()
         self.search.hide()
         self.options_button.show()
@@ -186,6 +204,7 @@ class PhoneAccountsPage(QWidget):
 
     def set_archived(self, accounts: list[AssignedAccount]) -> None:
         self._serial = ""
+        self.device_context.show()
         self.search.clear()
         self.search.show()
         self.options_button.hide()
@@ -204,6 +223,22 @@ class PhoneAccountsPage(QWidget):
         )
         self.empty_state.setVisible(not accounts)
 
+    def set_all_accounts(self, accounts: list[AssignedAccount]) -> None:
+        self._serial = ""
+        self.search.clear()
+        self.search.show()
+        self.options_button.hide()
+        self.device_context.hide()
+        self.page_header.title.setText("Accounts")
+        self.page_header.subtitle.setText("Accounts assigned across managed phones.")
+        self.model.set_accounts(accounts)
+        self.table.setVisible(bool(accounts))
+        self.empty_state.set_content(
+            "No active accounts",
+            "No Instagram accounts are assigned to managed phones.",
+        )
+        self.empty_state.setVisible(not accounts)
+
     def _rename_device(self) -> None:
         phone_name, accepted = TextInputDialog.get_text(
             "Rename Device", "CUSTOM PHONE NAME", self.phone_name.text(), self
@@ -219,28 +254,26 @@ class PhoneAccountsPage(QWidget):
         if self._serial:
             self.delete_requested.emit(self._serial)
 
-    def _handle_account_action(self, index) -> None:
-        if index.column() != PhoneAccountsModel.HEADERS.index("Actions"):
-            return
+    def _open_account(self, index) -> None:
+        source_index = self.proxy_model.mapToSource(index)
+        account = self.model.account_at(source_index.row())
+        if account is not None:
+            self.account_open_requested.emit(account)
 
-        menu = self._build_account_options(index)
-        position = self.table.visualRect(index).bottomLeft()
-        menu.exec(self.table.viewport().mapToGlobal(position))
-
-    def _build_account_options(self, index) -> QMenu:
-        username = index.data(Qt.UserRole)
-        configuration_column = PhoneAccountsModel.HEADERS.index("Configuration")
-        config_path = index.siblingAtColumn(configuration_column).data(Qt.ToolTipRole)
+    def build_account_options(self, account: AssignedAccount) -> QMenu:
+        username = account.username
+        config_path = account.config_path
         menu = QMenu(self.table)
 
-        if self._serial:
+        archived = account.device_id == ARCHIVED_ACCOUNTS
+        if not archived:
             menu.addAction(
                 "Transfer Account",
-                lambda: self.transfer_requested.emit(username, self._serial),
+                lambda: self.transfer_requested.emit(username, account.device_id),
             )
             menu.addAction(
                 "Archive Account",
-                lambda: self.archive_requested.emit(username, self._serial),
+                lambda: self.archive_requested.emit(username, account.device_id),
             )
         else:
             menu.addAction(
@@ -252,7 +285,7 @@ class PhoneAccountsPage(QWidget):
             lambda: self.account_folder_requested.emit(str(Path(config_path).parent)),
         )
 
-        if not self._serial:
+        if archived:
             menu.addAction(
                 "Delete Account", lambda: self.account_delete_requested.emit(username)
             )

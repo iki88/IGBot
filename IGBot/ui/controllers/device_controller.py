@@ -50,7 +50,14 @@ class DeviceController(QObject):
     archive_completed = Signal(object)
     archive_failed = Signal(object)
     restore_failed = Signal(str)
+    restore_completed = Signal(object)
     account_deletion_failed = Signal(str)
+    archived_account_deleted = Signal(object)
+    account_created = Signal(object)
+    account_creation_failed = Signal(str)
+    account_configuration_ready = Signal(object, object)
+    account_configuration_saved = Signal(object)
+    account_configuration_failed = Signal(str)
 
     def __init__(
         self,
@@ -115,6 +122,54 @@ class DeviceController(QObject):
     @Slot(str, str)
     def rename_device(self, serial: str, phone_name: str) -> None:
         self._run_and_refresh(lambda: self._service.rename_device(serial, phone_name))
+
+    @Slot(str, str, str)
+    def add_account(self, username: str, password: str, serial: str) -> None:
+        task = _ServiceTask(
+            lambda: self._service.add_account(username, password, serial)
+        )
+        task.signals.completed.connect(self._on_account_created)
+        task.signals.failed.connect(self.account_creation_failed)
+        self._start_task(task)
+
+    @Slot(object)
+    def _on_account_created(self, account: AssignedAccount) -> None:
+        destination = self._records.get(account.device_id)
+        phone_name = (
+            destination.phone_name or destination.serial
+            if destination
+            else account.device_id
+        )
+        logger.info("Added account %s to %s", account.username, phone_name)
+        self.account_created.emit(account)
+        self.refresh()
+
+    def load_account_configuration(self, account: AssignedAccount) -> None:
+        task = _ServiceTask(lambda: self._service.account_configuration(account))
+        task.signals.completed.connect(
+            lambda configuration: self.account_configuration_ready.emit(
+                account, configuration
+            )
+        )
+        task.signals.failed.connect(self.account_configuration_failed)
+        self._start_task(task)
+
+    def save_account_configuration(
+        self, account: AssignedAccount, username: str, password: str, app_id: str
+    ) -> None:
+        task = _ServiceTask(
+            lambda: self._service.update_account_configuration(
+                account, username, password, app_id
+            )
+        )
+        task.signals.completed.connect(self._on_account_configuration_saved)
+        task.signals.failed.connect(self.account_configuration_failed)
+        self._start_task(task)
+
+    def _on_account_configuration_saved(self, account: AssignedAccount) -> None:
+        logger.info("Saved account configuration for %s", account.username)
+        self.account_configuration_saved.emit(account)
+        self.refresh()
 
     @Slot(str)
     def open_device_folder(self, serial: str) -> None:
@@ -224,6 +279,7 @@ class DeviceController(QObject):
         logger.info(
             "Restored account %s: Archived → %s", result.username, destination_name
         )
+        self.restore_completed.emit(result)
         self.refresh()
         self.load_archived_accounts()
 
@@ -245,6 +301,7 @@ class DeviceController(QObject):
             return
 
         logger.info("Deleted archived account %s: Archived → Deleted", result.username)
+        self.archived_account_deleted.emit(result)
         self.refresh()
         self.load_archived_accounts()
 

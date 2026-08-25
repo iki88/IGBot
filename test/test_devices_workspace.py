@@ -1,10 +1,11 @@
 import os
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
-from IGBot.core.device import DeviceFleetSnapshot, DeviceRecord
+from IGBot.core.device import AssignedAccount, DeviceFleetSnapshot, DeviceRecord
 from IGBot.ui.main_window import MainWindow
 from IGBot.ui.models.device_table_model import DeviceTableModel
 from IGBot.ui.pages.devices_page import DevicesPage
@@ -153,4 +154,144 @@ def test_sidebar_devices_item_returns_from_phone_accounts(application):
 
     assert window.pages.currentWidget() is window.devices_page
     assert window.toolbar.title.text() == "Device management"
+    window.close()
+
+
+def test_sidebar_contains_workspace_and_settings_navigation(application):
+    window = MainWindow(_DeviceService())
+
+    assert [
+        window.sidebar.navigation.item(index).text()
+        for index in range(window.sidebar.navigation.count())
+    ] == ["Devices", "Accounts", "Archived", "Activity Log"]
+    assert window.sidebar.settings_navigation.item(0).text() == "Global Settings"
+    window.close()
+
+
+def test_global_accounts_workspace_excludes_archived_accounts(application):
+    window = MainWindow(_DeviceService())
+    account = AssignedAccount(
+        "active_account",
+        "phone-a",
+        "com.instagram.android",
+        Path("accounts/active_account/config.yml"),
+    )
+    window.device_controller._records = {
+        "phone-a": DeviceRecord("phone-a", "Rack One", True, (account,))
+    }
+
+    accounts_item = window.sidebar.navigation.item(1)
+    window.sidebar.navigation.itemClicked.emit(accounts_item)
+
+    assert window.pages.currentWidget() is window.phone_accounts_page
+    assert window.phone_accounts_page.model.rowCount() == 1
+    assert window.phone_accounts_page.model.account_at(0) == account
+    assert not window.toolbar.add_device_action.isVisible()
+    window.close()
+
+
+def test_account_navigation_uses_context_specific_toolbar(application):
+    window = MainWindow(_DeviceService())
+    account = AssignedAccount(
+        "active_account",
+        "phone-a",
+        "com.instagram.android",
+        Path("accounts/active_account/config.yml"),
+    )
+    device = DeviceRecord("phone-a", "Rack One", True, (account,))
+    window.device_controller._records = {"phone-a": device}
+
+    window._open_phone_accounts(device, [account])
+
+    assert window.toolbar.add_account_action.isVisible()
+    assert window.toolbar.start_action.isVisible()
+    assert window.toolbar.stop_action.isVisible()
+    assert window.toolbar.view_phone_action.isVisible()
+    assert not window.toolbar.view_phone_action.isEnabled()
+    assert not window.toolbar.save_action.isVisible()
+
+    window._open_account(account)
+
+    assert window.pages.currentWidget() is window.account_page
+    assert window.account_page.account == account
+    assert window.toolbar.save_action.isVisible()
+    assert window.toolbar.save_action.isEnabled()
+    assert window.toolbar.options_button.text() == "Account Options"
+    assert not window.toolbar.add_account_action.isVisible()
+    assert not window.toolbar.start_action.isVisible()
+    assert not window.toolbar.stop_action.isVisible()
+    assert not window.toolbar.view_phone_action.isVisible()
+    assert [window.account_page.tabs.tabText(i) for i in range(11)] == list(
+        window.account_page.TABS
+    )
+    window.close()
+
+
+def test_phone_toolbar_actions_use_compact_icons(application):
+    window = MainWindow(_DeviceService())
+    window._open_phone_accounts(DeviceRecord("phone-a", "Rack One", True), [])
+
+    actions = (
+        window.toolbar.add_account_action,
+        window.toolbar.today_action,
+        window.toolbar.start_action,
+        window.toolbar.stop_action,
+        window.toolbar.view_phone_action,
+    )
+
+    assert [action.text() for action in actions] == [
+        "Add Account",
+        "Today",
+        "Start",
+        "Stop",
+        "View Phone",
+    ]
+    assert all(action.isVisible() and not action.icon().isNull() for action in actions)
+    assert window.toolbar.add_account_action.isEnabled()
+    assert all(not action.isEnabled() for action in actions[1:])
+    assert window.toolbar.iconSize().width() == 16
+    assert not window.toolbar.options_button.icon().isNull()
+    window.close()
+
+
+def test_archived_account_opens_shared_account_page(application):
+    window = MainWindow(_DeviceService())
+    account = AssignedAccount(
+        "archived_account",
+        "ARCHIVED_ACCOUNTS",
+        "com.instagram.android",
+        Path("accounts/archived_account/config.yml"),
+    )
+
+    window._open_archived([account])
+    window._open_account(account)
+
+    assert window.pages.currentWidget() is window.account_page
+    assert window.account_page.device.text() == "Archived"
+    assert [
+        action.text() for action in window.toolbar.options_button.menu().actions()
+    ] == [
+        "Restore Account",
+        "Open Account Folder",
+        "Delete Account",
+    ]
+    window.close()
+
+
+def test_activity_log_and_global_settings_routes(application):
+    window = MainWindow(_DeviceService())
+
+    window._navigate_to_page(3)
+
+    assert window.pages.currentWidget() is window.activity_log_page
+    assert (
+        window.activity_log_page.output.document() is window.live_log.output.document()
+    )
+    assert window.live_log.isHidden()
+
+    settings_item = window.sidebar.settings_navigation.item(0)
+    window.sidebar.settings_navigation.itemClicked.emit(settings_item)
+
+    assert window.pages.currentWidget() is window.global_settings_page
+    assert window.toolbar.title.text() == "Global settings"
     window.close()

@@ -1,5 +1,5 @@
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont
 
 from IGBot.core.device import AssignedAccount
 
@@ -9,7 +9,23 @@ _ROOT_INDEX = QModelIndex()
 class PhoneAccountsModel(QAbstractTableModel):
     """Read-only model of real InstaAddict accounts assigned to one phone."""
 
-    HEADERS = ("Instagram Account", "Application ID", "Configuration", "Actions")
+    HEADERS = (
+        "Start Hour",
+        "End Hour",
+        "Username",
+        "Followers",
+        "Following",
+        "Followed",
+        "Unfollowed",
+        "Story",
+        "Like",
+        "Comment",
+        "DM",
+        "Posted",
+        "Status",
+    )
+    USERNAME = HEADERS.index("Username")
+    STATUS = HEADERS.index("Status")
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -25,29 +41,45 @@ class PhoneAccountsModel(QAbstractTableModel):
         if not index.isValid():
             return None
         account = self._accounts[index.row()]
-        if role == Qt.ToolTipRole and index.column() == 2:
+        if role == Qt.ToolTipRole and index.column() == self.USERNAME:
             return str(account.config_path)
-        if role == Qt.FontRole and index.column() in (1, 2):
+        if role == Qt.FontRole and index.column() != self.USERNAME:
             return QFont("Cascadia Mono", 9)
+        if role == Qt.TextAlignmentRole:
+            return (
+                Qt.AlignLeft | Qt.AlignVCenter
+                if index.column() == self.USERNAME
+                else Qt.AlignCenter
+            )
+        if role == Qt.ForegroundRole and index.column() != self.USERNAME:
+            return QColor("#8694a4")
         if role == Qt.UserRole:
             return account.username
+        if role == Qt.UserRole + 1:
+            return account.device_id
         if role != Qt.DisplayRole:
             return None
-        return (
-            account.username,
-            account.app_id,
-            f"{account.config_path.parent.name}/{account.config_path.name}",
-            "Account Options",
-        )[index.column()]
+        return account.username if index.column() == self.USERNAME else "—"
 
     def headerData(
         self, section: int, orientation: Qt.Orientation, role=Qt.DisplayRole
     ):
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
             return self.HEADERS[section]
+        if orientation == Qt.Horizontal and role == Qt.TextAlignmentRole:
+            return (
+                Qt.AlignLeft | Qt.AlignVCenter
+                if section == self.USERNAME
+                else Qt.AlignCenter
+            )
         return super().headerData(section, orientation, role)
 
     def set_accounts(self, accounts: list[AssignedAccount]) -> None:
         self.beginResetModel()
         self._accounts = list(accounts)
         self.endResetModel()
+
+    def account_at(self, row: int) -> AssignedAccount | None:
+        if 0 <= row < len(self._accounts):
+            return self._accounts[row]
+        return None

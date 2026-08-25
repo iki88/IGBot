@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from IGBot.core.device import AssignedAccount, DeviceRecord
@@ -34,7 +35,7 @@ def test_phone_accounts_page_displays_real_assignments():
     page.set_phone(DeviceRecord("phone-a", "Rack One", True, (account,)), [account])
 
     assert page.model.rowCount() == 1
-    assert page.model.index(0, 0).data() == "real_account"
+    assert page.model.index(0, page.model.USERNAME).data() == "real_account"
     assert not page.empty_state.isVisibleTo(page)
     assert application is not None
 
@@ -60,7 +61,7 @@ def test_archived_accounts_search_filters_usernames_case_insensitively():
     page.search.setText("MADISON")
 
     assert page.proxy_model.rowCount() == 1
-    assert page.proxy_model.index(0, 0).data() == "MadisonParker"
+    assert page.proxy_model.index(0, page.model.USERNAME).data() == "MadisonParker"
 
     page.search.clear()
 
@@ -91,9 +92,7 @@ def test_active_account_options_include_transfer_archive_and_open_folder():
         config_path=Path("accounts/real_account/config.yml"),
     )
     page.set_phone(DeviceRecord("phone-a", "Rack One", True), [account])
-    index = page.proxy_model.index(0, page.model.HEADERS.index("Actions"))
-
-    menu = page._build_account_options(index)
+    menu = page.build_account_options(account)
 
     assert [action.text() for action in menu.actions()] == [
         "Transfer Account",
@@ -114,7 +113,6 @@ def test_archived_account_options_include_restore_open_folder_and_delete():
         config_path=Path("accounts/archived_account/config.yml"),
     )
     page.set_archived([account])
-    index = page.proxy_model.index(0, page.model.HEADERS.index("Actions"))
     opened_folders = []
     restore_requests = []
     delete_requests = []
@@ -122,7 +120,7 @@ def test_archived_account_options_include_restore_open_folder_and_delete():
     page.restore_requested.connect(restore_requests.append)
     page.account_delete_requested.connect(delete_requests.append)
 
-    menu = page._build_account_options(index)
+    menu = page.build_account_options(account)
     actions = menu.actions()
 
     assert [action.text() for action in actions] == [
@@ -141,4 +139,83 @@ def test_archived_account_options_include_restore_open_folder_and_delete():
     assert restore_requests == ["archived_account"]
     assert opened_folders == [str(Path("accounts/archived_account"))]
     assert delete_requests == ["archived_account"]
+    assert application is not None
+
+
+def test_phone_account_double_click_opens_selected_account():
+    application = QApplication.instance() or QApplication([])
+    page = PhoneAccountsPage()
+    account = AssignedAccount(
+        username="real_account",
+        device_id="phone-a",
+        app_id="com.instagram.android",
+        config_path=Path("accounts/real_account/config.yml"),
+    )
+    page.set_phone(DeviceRecord("phone-a", "Rack One", True), [account])
+    opened = []
+    page.account_open_requested.connect(opened.append)
+
+    page.table.doubleClicked.emit(page.proxy_model.index(0, page.model.USERNAME))
+
+    assert opened == [account]
+    assert "Actions" not in page.model.HEADERS
+    assert application is not None
+
+
+def test_global_accounts_workspace_supports_username_search():
+    application = QApplication.instance() or QApplication([])
+    page = PhoneAccountsPage()
+    accounts = [
+        AssignedAccount(
+            username=username,
+            device_id=device,
+            app_id="com.instagram.android",
+            config_path=Path(f"accounts/{username}/config.yml"),
+        )
+        for username, device in (("first_account", "phone-a"), ("second", "phone-b"))
+    ]
+
+    page.set_all_accounts(accounts)
+    page.search.setText("FIRST")
+
+    assert page.page_header.title.text() == "Accounts"
+    assert page.proxy_model.rowCount() == 1
+    assert page.proxy_model.index(0, page.model.USERNAME).data() == "first_account"
+    assert not page.device_context.isVisibleTo(page)
+    assert application is not None
+
+
+def test_phone_account_table_uses_final_dense_operator_columns():
+    application = QApplication.instance() or QApplication([])
+    page = PhoneAccountsPage()
+    account = AssignedAccount(
+        username="real_account",
+        device_id="phone-a",
+        app_id="com.instagram.android",
+        config_path=Path("accounts/real_account/config.yml"),
+    )
+    page.set_phone(DeviceRecord("phone-a", "Rack One", True), [account])
+
+    assert page.model.HEADERS == (
+        "Start Hour",
+        "End Hour",
+        "Username",
+        "Followers",
+        "Following",
+        "Followed",
+        "Unfollowed",
+        "Story",
+        "Like",
+        "Comment",
+        "DM",
+        "Posted",
+        "Status",
+    )
+    assert page.table.verticalHeader().defaultSectionSize() == 34
+    assert page.table.columnWidth(page.model.STATUS) == 96
+    assert page.model.index(0, page.model.STATUS).data() == "—"
+    assert (
+        page.model.index(0, page.model.STATUS).data(Qt.TextAlignmentRole)
+        == Qt.AlignCenter
+    )
     assert application is not None

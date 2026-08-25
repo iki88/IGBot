@@ -67,6 +67,26 @@ class DeviceInventoryService:
         state["deleted"] = [item for item in state["deleted"] if item != serial]
         self._save_state(state)
 
+    def add_account(self, username: str, password: str, serial: str):
+        if serial not in {entry["serial"] for entry in self._load_state()["devices"]}:
+            raise ValueError(
+                "The selected phone is not in the managed device inventory."
+            )
+        return self._account_assignments.create_account(
+            username,
+            password,
+            serial,
+            self._workspace_root / "config-examples",
+        )
+
+    def account_configuration(self, account):
+        return self._account_assignments.load_configuration(account.config_path)
+
+    def update_account_configuration(self, account, username, password, app_id):
+        return self._account_assignments.update_configuration(
+            account, username, password, app_id
+        )
+
     def rename_device(self, serial: str, phone_name: str) -> None:
         state = self._load_state()
         for entry in state["devices"]:

@@ -8,8 +8,12 @@ from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
 from IGBot.services.device_inventory_service import DeviceInventoryService
 from IGBot.ui.controllers.device_controller import DeviceController
+from IGBot.ui.pages.account_page import AccountPage
+from IGBot.ui.pages.activity_log_page import ActivityLogPage
 from IGBot.ui.pages.devices_page import DevicesPage
+from IGBot.ui.pages.global_settings_page import GlobalSettingsPage
 from IGBot.ui.pages.phone_accounts_page import PhoneAccountsPage
+from IGBot.ui.widgets.add_account_dialog import AddAccountDialog
 from IGBot.ui.widgets.confirmation_dialog import ConfirmationDialog
 from IGBot.ui.widgets.error_dialog import ErrorDialog
 from IGBot.ui.widgets.live_log_panel import LiveLogPanel
@@ -28,6 +32,8 @@ class MainWindow(QMainWindow):
         self.resize(1440, 900)
         self.setMinimumSize(960, 640)
         self._managed_phone_serial: str | None = None
+        self._workspace_context = "devices"
+        self._account_return_context = "devices"
 
         service = device_service or DeviceInventoryService.for_workspace(Path.cwd())
         self.device_controller = DeviceController(service, self)
@@ -37,6 +43,10 @@ class MainWindow(QMainWindow):
         self.devices_page = DevicesPage(self.device_controller, self)
         self.phone_accounts_page = PhoneAccountsPage(self)
         self.live_log = LiveLogPanel(self)
+        self.account_page = AccountPage(self)
+        self.activity_log_page = ActivityLogPage(self.live_log, self)
+        self.global_settings_page = GlobalSettingsPage(Path.cwd(), self)
+        self.devices_page.add_device_button.hide()
 
         self._build_shell()
         self._connect_signals()
@@ -47,6 +57,9 @@ class MainWindow(QMainWindow):
 
         self.pages.addWidget(self.devices_page)
         self.pages.addWidget(self.phone_accounts_page)
+        self.pages.addWidget(self.account_page)
+        self.pages.addWidget(self.activity_log_page)
+        self.pages.addWidget(self.global_settings_page)
 
         content_splitter = QSplitter(Qt.Vertical, self)
         content_splitter.setObjectName("contentSplitter")
@@ -73,6 +86,9 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self.sidebar.page_selected.connect(self._navigate_to_page)
         self.toolbar.refresh_requested.connect(self.device_controller.refresh)
+        self.toolbar.add_device_requested.connect(self.devices_page._show_add_device)
+        self.toolbar.add_account_requested.connect(self._show_add_account_dialog)
+        self.toolbar.save_requested.connect(self._save_account_configuration)
         self.device_controller.refresh_started.connect(
             lambda: self.statusBar().showMessage("Discovering Android devices…")
         )
@@ -84,6 +100,7 @@ class MainWindow(QMainWindow):
             lambda _: self.toolbar.set_refreshing(False)
         )
         self.device_controller.devices_changed.connect(self._sync_phone_accounts)
+        self.device_controller.devices_changed.connect(self._sync_global_accounts)
         self.device_controller.discovery_failed.connect(
             lambda message: self.statusBar().showMessage(message)
         )
@@ -97,6 +114,8 @@ class MainWindow(QMainWindow):
             self._open_phone_accounts
         )
         self.phone_accounts_page.back_requested.connect(self._open_devices)
+        self.phone_accounts_page.account_open_requested.connect(self._open_account)
+        self.account_page.back_requested.connect(self._return_from_account)
         self.phone_accounts_page.rename_requested.connect(
             self.device_controller.rename_device
         )
@@ -119,9 +138,30 @@ class MainWindow(QMainWindow):
         self.device_controller.archived_accounts_ready.connect(self._open_archived)
         self.device_controller.transfer_failed.connect(self._show_transfer_error)
         self.device_controller.archive_failed.connect(self._show_archive_error)
+        self.device_controller.archive_completed.connect(
+            self._return_after_account_action
+        )
         self.device_controller.restore_failed.connect(self._show_restore_error)
+        self.device_controller.restore_completed.connect(
+            self._return_after_account_action
+        )
         self.device_controller.account_deletion_failed.connect(
             self._show_delete_account_error
+        )
+        self.device_controller.archived_account_deleted.connect(
+            self._return_after_account_action
+        )
+        self.device_controller.account_creation_failed.connect(
+            self._show_add_account_error
+        )
+        self.device_controller.account_configuration_ready.connect(
+            self._show_account_configuration
+        )
+        self.device_controller.account_configuration_saved.connect(
+            self._on_account_configuration_saved
+        )
+        self.device_controller.account_configuration_failed.connect(
+            self._show_account_configuration_error
         )
         self.devices_page.notification_requested.connect(self.statusBar().showMessage)
 
@@ -134,31 +174,165 @@ class MainWindow(QMainWindow):
         self, device: DeviceRecord, accounts: list[AssignedAccount]
     ) -> None:
         self.phone_accounts_page.set_phone(device, accounts)
+        self.phone_accounts_page.options_button.hide()
         self._managed_phone_serial = device.serial
+        self._workspace_context = "phone"
         self.pages.setCurrentWidget(self.phone_accounts_page)
         self.toolbar.set_context_title("Phone accounts")
+        self.toolbar.set_context("phone", self.phone_accounts_page.options_menu)
+        self.live_log.show()
         self.statusBar().showMessage(f"Managing accounts for {device.serial}")
 
     def _open_devices(self) -> None:
         self._managed_phone_serial = None
+        self._workspace_context = "devices"
         self.pages.setCurrentWidget(self.devices_page)
         self.toolbar.set_context_title("Device management")
+        self.toolbar.set_context("devices")
+        self.live_log.show()
 
     def _navigate_to_page(self, page_index: int) -> None:
         if page_index == 0:
             self._open_devices()
         elif page_index == 1:
+            self._open_accounts()
+        elif page_index == 2:
             self.device_controller.load_archived_accounts()
+        elif page_index == 3:
+            self._open_activity_log()
+        elif page_index == 4:
+            self._open_global_settings()
+
+    def _open_accounts(self) -> None:
+        self._managed_phone_serial = None
+        self._workspace_context = "accounts"
+        accounts = [
+            account
+            for device in self.device_controller.managed_devices
+            for account in device.accounts
+        ]
+        self.phone_accounts_page.set_all_accounts(accounts)
+        self.pages.setCurrentWidget(self.phone_accounts_page)
+        self.toolbar.set_context_title("All accounts")
+        self.toolbar.set_context("accounts")
+        self.live_log.show()
 
     def _open_archived(self, accounts: list[AssignedAccount]) -> None:
         self._managed_phone_serial = None
+        self._workspace_context = "archived"
         self.phone_accounts_page.set_archived(accounts)
         self.pages.setCurrentWidget(self.phone_accounts_page)
         self.toolbar.set_context_title("Archived accounts")
+        self.toolbar.set_context("archived")
+        self.live_log.show()
+
+    def _open_account(self, account: AssignedAccount) -> None:
+        self._account_return_context = self._workspace_context
+        device = next(
+            (
+                item
+                for item in self.device_controller.managed_devices
+                if item.serial == account.device_id
+            ),
+            None,
+        )
+        phone_name = device.phone_name if device else ""
+        self.account_page.set_account(account, phone_name)
+        if hasattr(self.device_controller._service, "account_configuration"):
+            self.device_controller.load_account_configuration(account)
+        self.pages.setCurrentWidget(self.account_page)
+        self.toolbar.set_context_title(account.username)
+        self.toolbar.set_context(
+            "account", self.phone_accounts_page.build_account_options(account)
+        )
+        self.live_log.show()
+
+    def _show_account_configuration(self, account, configuration) -> None:
+        current = self.account_page.account
+        if current is not None and current.config_path == account.config_path:
+            self.account_page.set_configuration(configuration)
+
+    def _save_account_configuration(self) -> None:
+        account = self.account_page.account
+        if account is not None:
+            self.device_controller.save_account_configuration(
+                account,
+                self.account_page.username.text(),
+                self.account_page.password.text(),
+                self.account_page.application_id.text(),
+            )
+
+    def _on_account_configuration_saved(self, account) -> None:
+        current = self.account_page.account
+        if current is not None and current.config_path == account.config_path:
+            self.account_page.account = account
+            self.account_page.page_header.title.setText(account.username)
+            self.toolbar.set_context_title(account.username)
+            self.toolbar.set_context(
+                "account", self.phone_accounts_page.build_account_options(account)
+            )
+            self.statusBar().showMessage("Account changes saved.", 3000)
+
+    def _show_account_configuration_error(self, message: str) -> None:
+        ErrorDialog("Account Configuration Error", message, self).exec()
+
+    def _return_from_account(self) -> None:
+        if self._account_return_context == "archived":
+            self.device_controller.load_archived_accounts()
+        elif self._account_return_context == "accounts":
+            self._open_accounts()
+        elif self._managed_phone_serial:
+            self.device_controller.open_phone_accounts(self._managed_phone_serial)
+        else:
+            self._open_devices()
+
+    def _return_after_account_action(self, result) -> None:
+        if self.pages.currentWidget() is self.account_page:
+            self._return_from_account()
+
+    def _open_activity_log(self) -> None:
+        self._managed_phone_serial = None
+        self._workspace_context = "activity"
+        self.pages.setCurrentWidget(self.activity_log_page)
+        self.toolbar.set_context_title("Activity log")
+        self.toolbar.set_context("activity")
+        self.live_log.hide()
+
+    def _open_global_settings(self) -> None:
+        self._managed_phone_serial = None
+        self._workspace_context = "settings"
+        self.pages.setCurrentWidget(self.global_settings_page)
+        self.toolbar.set_context_title("Global settings")
+        self.toolbar.set_context("settings")
+        self.live_log.show()
 
     def _delete_managed_device(self, serial: str) -> None:
         if self.devices_page._confirm_delete(serial):
             self.device_controller.delete_device(serial)
+
+    def _show_add_account_dialog(self) -> None:
+        device = next(
+            (
+                item
+                for item in self.device_controller.managed_devices
+                if item.serial == self._managed_phone_serial
+            ),
+            None,
+        )
+        if device is None:
+            self._show_add_account_error(
+                "The selected phone is not in the managed inventory."
+            )
+            return
+
+        dialog = AddAccountDialog(device, self)
+        if dialog.exec():
+            self.device_controller.add_account(
+                dialog.username.text().strip(), dialog.password.text(), device.serial
+            )
+
+    def _show_add_account_error(self, message: str) -> None:
+        ErrorDialog("Add Account Failed", message, self).exec()
 
     def _show_transfer_dialog(self, username: str, source_serial: str) -> None:
         dialog = TransferAccountDialog(
@@ -262,6 +436,16 @@ class MainWindow(QMainWindow):
             self._open_devices()
             return
         self.phone_accounts_page.set_phone(device, list(device.accounts))
+        self.phone_accounts_page.options_button.hide()
+
+    def _sync_global_accounts(self, devices: list[DeviceRecord]) -> None:
+        if (
+            self._workspace_context == "accounts"
+            and self.pages.currentWidget() is not self.account_page
+        ):
+            self.phone_accounts_page.set_all_accounts(
+                [account for device in devices for account in device.accounts]
+            )
 
     def closeEvent(self, event) -> None:
         self.live_log.detach_logging()

@@ -1,5 +1,5 @@
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 
 
 def phone_icon() -> QIcon:
@@ -34,6 +34,23 @@ def archive_icon(color: str = "#9AA7B3") -> QIcon:
     painter.drawRoundedRect(QRectF(3, 4, 14, 4), 1, 1)
     painter.drawRoundedRect(QRectF(4, 8, 12, 9), 1, 1)
     painter.drawLine(8, 11, 12, 11)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def eye_icon(color: str = "#9AA7B3") -> QIcon:
+    """Return a compact eye glyph for the phone-view toolbar action."""
+    pixmap = _canvas()
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setBrush(Qt.NoBrush)
+    painter.setPen(QPen(QColor(color), 1.5))
+    outline = QPainterPath()
+    outline.moveTo(2.5, 10)
+    outline.cubicTo(6, 4, 14, 4, 17.5, 10)
+    outline.cubicTo(14, 16, 6, 16, 2.5, 10)
+    painter.drawPath(outline)
+    painter.drawEllipse(QRectF(7.25, 7.25, 5.5, 5.5))
     painter.end()
     return QIcon(pixmap)
 

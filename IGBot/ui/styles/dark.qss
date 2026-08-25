@@ -7,6 +7,9 @@
 QMainWindow,
 QWidget#devicesPage,
 QWidget#phoneAccountsPage,
+QWidget#accountPage,
+QWidget#activityLogPage,
+QWidget#globalSettingsPage,
 QStackedWidget {
     background-color: #11161C;
 }
@@ -60,8 +63,8 @@ QToolBar#topToolbar {
     background-color: #181F27;
     border: 0;
     border-bottom: 1px solid #27303b;
-    padding: 7px 14px;
-    spacing: 8px;
+    padding: 6px 12px;
+    spacing: 6px;
 }
 
 QToolBar#topToolbar QToolButton {
@@ -69,8 +72,14 @@ QToolBar#topToolbar QToolButton {
     border: 1px solid #303a47;
     border-radius: 5px;
     color: #c8d1dc;
-    min-height: 28px;
-    padding: 0 10px;
+    min-height: 27px;
+    padding: 0 8px;
+}
+
+QToolBar#topToolbar QToolButton:disabled {
+    background-color: #1c242d;
+    border-color: #303a46;
+    color: #8290a0;
 }
 
 QToolBar#topToolbar QToolButton:pressed {
@@ -218,6 +227,10 @@ QTableView#accountsTable::item {
     padding: 0 9px;
 }
 
+QTableView#accountsTable::item {
+    padding: 0 6px;
+}
+
 QTableView#deviceTable::item:selected,
 QTableView#accountsTable::item:selected {
     background-color: #173b66;
@@ -312,6 +325,7 @@ QPlainTextEdit#liveLogOutput {
 
 QDialog#confirmationDialog,
 QDialog#addDeviceDialog,
+QDialog#addAccountDialog,
 QDialog#inputDialog,
 QDialog#transferAccountDialog {
     background-color: #181F27;
@@ -400,6 +414,27 @@ QMenu::item {
 }
 
 QMenu::item:selected { background-color: #173b66; }
+
+QTabWidget#accountTabs::pane {
+    background-color: #181F27;
+    border: 1px solid #2C3643;
+    border-radius: 5px;
+    top: -1px;
+}
+
+QTabWidget#accountTabs QTabBar::tab {
+    background-color: #151b23;
+    border: 1px solid #2C3643;
+    border-bottom: 0;
+    color: #9AA7B3;
+    min-height: 32px;
+    padding: 0 13px;
+}
+
+QTabWidget#accountTabs QTabBar::tab:selected {
+    background-color: #202A36;
+    color: #F2F5F7;
+}
 
 QToolTip {
     background-color: #202934;
