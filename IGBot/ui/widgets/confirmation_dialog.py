@@ -18,6 +18,7 @@ class ConfirmationDialog(QDialog):
         message: str,
         detail: str,
         parent: QWidget | None = None,
+        confirm_text: str = "Delete",
     ) -> None:
         super().__init__(parent)
         self.setObjectName("confirmationDialog")
@@ -38,7 +39,7 @@ class ConfirmationDialog(QDialog):
         cancel_button = QPushButton("Cancel", self)
         cancel_button.setObjectName("secondaryButton")
         cancel_button.clicked.connect(self.reject)
-        delete_button = QPushButton("Delete", self)
+        delete_button = QPushButton(confirm_text, self)
         delete_button.setObjectName("dangerButton")
         delete_button.clicked.connect(self.accept)
         cancel_button.setDefault(True)
@@ -65,5 +66,8 @@ class ConfirmationDialog(QDialog):
         message: str,
         detail: str,
         parent: QWidget | None = None,
+        confirm_text: str = "Delete",
     ) -> bool:
-        return cls(title, message, detail, parent).exec() == QDialog.Accepted
+        return (
+            cls(title, message, detail, parent, confirm_text).exec() == QDialog.Accepted
+        )

@@ -45,6 +45,12 @@ class DeviceController(QObject):
     unmanaged_devices_ready = Signal(list)
     archived_accounts_ready = Signal(list)
     device_folder_ready = Signal(str)
+    account_transfer_requested = Signal(str, str, str)
+    transfer_failed = Signal(str)
+    archive_completed = Signal(object)
+    archive_failed = Signal(object)
+    restore_failed = Signal(str)
+    account_deletion_failed = Signal(str)
 
     def __init__(
         self,
@@ -127,6 +133,120 @@ class DeviceController(QObject):
         )
         task.signals.failed.connect(self._on_operation_failed)
         self._start_task(task)
+
+    @property
+    def managed_devices(self) -> list[DeviceRecord]:
+        return list(self._records.values())
+
+    @Slot(str, str, str)
+    def request_account_transfer(
+        self, username: str, source_serial: str, destination_serial: str
+    ) -> None:
+        self.account_transfer_requested.emit(
+            username, source_serial, destination_serial
+        )
+        managed_serials = set(self._records)
+        source = self._records.get(source_serial)
+        destination = self._records.get(destination_serial)
+        task = _ServiceTask(
+            lambda: self._service.transfer_service.transfer(
+                username, source_serial, destination_serial, managed_serials
+            )
+        )
+        task.signals.completed.connect(
+            lambda _: self._on_transfer_completed(username, source, destination)
+        )
+        task.signals.failed.connect(self.transfer_failed)
+        self._start_task(task)
+
+    def _on_transfer_completed(self, username: str, source, destination) -> None:
+        source_name = source.phone_name or source.serial if source else "Unknown"
+        destination_name = (
+            destination.phone_name or destination.serial if destination else "Unknown"
+        )
+        logger.info(
+            "Transferred account %s: %s → %s", username, source_name, destination_name
+        )
+        self.refresh()
+
+    @Slot(str, str)
+    def request_account_archive(self, username: str, source_serial: str) -> None:
+        task = _ServiceTask(
+            lambda: self._service.archive_service.archive(username, source_serial)
+        )
+        task.signals.completed.connect(self._on_archive_completed)
+        task.signals.failed.connect(self._on_archive_task_failed)
+        self._start_task(task)
+
+    @Slot(object)
+    def _on_archive_completed(self, result) -> None:
+        if result.valid:
+            source = self._records.get(result.source_serial)
+            source_name = (
+                source.phone_name or source.serial if source else result.source_serial
+            )
+            logger.info(
+                "Archived account %s: %s → Archived", result.username, source_name
+            )
+            self.archive_completed.emit(result)
+            self.refresh()
+        else:
+            self.archive_failed.emit(result)
+
+    @Slot(str)
+    def _on_archive_task_failed(self, message: str) -> None:
+        self.archive_failed.emit(message)
+
+    @Slot(str, str)
+    def request_account_restore(self, username: str, destination_serial: str) -> None:
+        managed_serials = set(self._records)
+        task = _ServiceTask(
+            lambda: self._service.archive_service.restore(
+                username, destination_serial, managed_serials
+            )
+        )
+        task.signals.completed.connect(self._on_restore_completed)
+        task.signals.failed.connect(self.restore_failed)
+        self._start_task(task)
+
+    @Slot(object)
+    def _on_restore_completed(self, result) -> None:
+        if not result.valid:
+            self.restore_failed.emit(result.error or "Account restoration failed.")
+            return
+
+        destination = self._records.get(result.destination_serial)
+        destination_name = (
+            destination.phone_name or destination.serial
+            if destination
+            else result.destination_serial
+        )
+        logger.info(
+            "Restored account %s: Archived → %s", result.username, destination_name
+        )
+        self.refresh()
+        self.load_archived_accounts()
+
+    @Slot(str)
+    def delete_archived_account(self, username: str) -> None:
+        task = _ServiceTask(
+            lambda: self._service.archive_service.delete_archived(username)
+        )
+        task.signals.completed.connect(self._on_archived_account_deleted)
+        task.signals.failed.connect(self.account_deletion_failed)
+        self._start_task(task)
+
+    @Slot(object)
+    def _on_archived_account_deleted(self, result) -> None:
+        if not result.valid:
+            self.account_deletion_failed.emit(
+                result.error or "Archived account deletion failed."
+            )
+            return
+
+        logger.info("Deleted archived account %s: Archived → Deleted", result.username)
+        self.refresh()
+        self.load_archived_accounts()
 
     def _run_and_refresh(self, operation: Callable[[], object]) -> None:
         task = _ServiceTask(operation)

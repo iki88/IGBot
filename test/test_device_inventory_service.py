@@ -4,6 +4,7 @@ import pytest
 
 from IGBot.core.phone_manager import DeviceDiscoveryResult
 from IGBot.services.account_assignment_service import AccountAssignmentService
+from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
 from IGBot.services.device_inventory_service import DeviceInventoryService
 
 
@@ -217,3 +218,40 @@ def test_archived_container_reads_only_real_archived_accounts(tmp_path):
     accounts = service.archived_accounts()
 
     assert [account.username for account in accounts] == ["real_account"]
+
+
+def test_archived_workspace_reads_reserved_account_assignments(tmp_path):
+    service = _service(tmp_path)
+    account = tmp_path / "accounts" / "archived_account"
+    account.mkdir()
+    (account / "config.yml").write_text(
+        f"username: real_account\ndevice: {ARCHIVED_ACCOUNTS}\n",
+        encoding="utf-8",
+    )
+
+    accounts = service.archived_accounts()
+
+    assert [item.username for item in accounts] == ["real_account"]
+
+
+def test_archiving_removes_account_from_phone_and_updates_counts(tmp_path, mocker):
+    service = _service(tmp_path)
+    service._save_state(
+        {"devices": [{"serial": "phone-a", "phone_name": "T1"}], "deleted": []}
+    )
+    account = tmp_path / "accounts" / "real_account"
+    account.mkdir()
+    (account / "config.yml").write_text(
+        "username: real_account\ndevice: phone-a\n", encoding="utf-8"
+    )
+    mocker.patch(
+        "IGBot.services.device_inventory_service.PhoneManager.discover_devices",
+        return_value=DeviceDiscoveryResult(["phone-a"]),
+    )
+    assert len(service.refresh().devices[0].accounts) == 1
+
+    result = service.archive_service.archive("real_account", "phone-a")
+
+    assert result.valid
+    assert len(service.refresh().devices[0].accounts) == 0
+    assert [item.username for item in service.archived_accounts()] == ["real_account"]

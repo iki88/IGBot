@@ -1,10 +1,13 @@
-from PySide6.QtCore import Signal
+from pathlib import Path
+
+from PySide6.QtCore import QSortFilterProxyModel, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QMenu,
     QPushButton,
     QStyle,
@@ -27,6 +30,11 @@ class PhoneAccountsPage(QWidget):
     rename_requested = Signal(str, str)
     folder_requested = Signal(str)
     delete_requested = Signal(str)
+    transfer_requested = Signal(str, str)
+    archive_requested = Signal(str, str)
+    restore_requested = Signal(str)
+    account_delete_requested = Signal(str)
+    account_folder_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -66,9 +74,22 @@ class PhoneAccountsPage(QWidget):
         self.device_context = self._build_device_context()
 
         self.model = PhoneAccountsModel(self)
+        self.proxy_model = QSortFilterProxyModel(self)
+        self.proxy_model.setSourceModel(self.model)
+        self.proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
+        self.proxy_model.setFilterKeyColumn(
+            PhoneAccountsModel.HEADERS.index("Instagram Account")
+        )
+        self.search = QLineEdit(self)
+        self.search.setObjectName("deviceSearch")
+        self.search.setPlaceholderText("Search by Instagram username")
+        self.search.setClearButtonEnabled(True)
+        self.search.setMaximumWidth(350)
+        self.search.textChanged.connect(self.proxy_model.setFilterFixedString)
+        self.search.hide()
         self.table = QTableView(self)
         self.table.setObjectName("accountsTable")
-        self.table.setModel(self.model)
+        self.table.setModel(self.proxy_model)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -88,6 +109,8 @@ class PhoneAccountsPage(QWidget):
         self.table.setColumnWidth(
             PhoneAccountsModel.HEADERS.index("Application ID"), 210
         )
+        self.table.setColumnWidth(PhoneAccountsModel.HEADERS.index("Actions"), 140)
+        self.table.clicked.connect(self._handle_account_action)
 
         self.empty_state = EmptyState(
             self.style().standardIcon(QStyle.SP_FileDialogListView),
@@ -123,6 +146,7 @@ class PhoneAccountsPage(QWidget):
         card.setObjectName("contentCard")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(14, 14, 14, 14)
+        card_layout.addWidget(self.search)
         card_layout.addWidget(self.table, 1)
         card_layout.addWidget(self.empty_state, 1)
 
@@ -135,6 +159,8 @@ class PhoneAccountsPage(QWidget):
 
     def set_phone(self, device: DeviceRecord, accounts: list[AssignedAccount]) -> None:
         self._serial = device.serial
+        self.search.clear()
+        self.search.hide()
         self.options_button.show()
         self.page_header.title.setText("Phone Accounts")
         self.page_header.subtitle.setText(
@@ -160,6 +186,8 @@ class PhoneAccountsPage(QWidget):
 
     def set_archived(self, accounts: list[AssignedAccount]) -> None:
         self._serial = ""
+        self.search.clear()
+        self.search.show()
         self.options_button.hide()
         self.page_header.title.setText("Archived Accounts")
         self.page_header.subtitle.setText("Accounts stored in the Archived container.")
@@ -190,3 +218,43 @@ class PhoneAccountsPage(QWidget):
     def _delete_device(self) -> None:
         if self._serial:
             self.delete_requested.emit(self._serial)
+
+    def _handle_account_action(self, index) -> None:
+        if index.column() != PhoneAccountsModel.HEADERS.index("Actions"):
+            return
+
+        menu = self._build_account_options(index)
+        position = self.table.visualRect(index).bottomLeft()
+        menu.exec(self.table.viewport().mapToGlobal(position))
+
+    def _build_account_options(self, index) -> QMenu:
+        username = index.data(Qt.UserRole)
+        configuration_column = PhoneAccountsModel.HEADERS.index("Configuration")
+        config_path = index.siblingAtColumn(configuration_column).data(Qt.ToolTipRole)
+        menu = QMenu(self.table)
+
+        if self._serial:
+            menu.addAction(
+                "Transfer Account",
+                lambda: self.transfer_requested.emit(username, self._serial),
+            )
+            menu.addAction(
+                "Archive Account",
+                lambda: self.archive_requested.emit(username, self._serial),
+            )
+        else:
+            menu.addAction(
+                "Restore Account", lambda: self.restore_requested.emit(username)
+            )
+
+        menu.addAction(
+            "Open Account Folder",
+            lambda: self.account_folder_requested.emit(str(Path(config_path).parent)),
+        )
+
+        if not self._serial:
+            menu.addAction(
+                "Delete Account", lambda: self.account_delete_requested.emit(username)
+            )
+
+        return menu

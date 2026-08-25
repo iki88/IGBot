@@ -16,6 +16,11 @@ class AccountAssignmentService:
     def __init__(self, accounts_directory: Path) -> None:
         self._accounts_directory = accounts_directory
 
+    @property
+    def accounts_directory(self) -> Path:
+        """Return the centralized root used to locate account configurations."""
+        return self._accounts_directory
+
     def load_by_device(self) -> dict[str, tuple[AssignedAccount, ...]]:
         assignments: dict[str, list[AssignedAccount]] = {}
         if not self._accounts_directory.is_dir():

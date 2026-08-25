@@ -9,7 +9,7 @@ _ROOT_INDEX = QModelIndex()
 class PhoneAccountsModel(QAbstractTableModel):
     """Read-only model of real InstaAddict accounts assigned to one phone."""
 
-    HEADERS = ("Instagram Account", "Application ID", "Configuration")
+    HEADERS = ("Instagram Account", "Application ID", "Configuration", "Actions")
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -29,12 +29,15 @@ class PhoneAccountsModel(QAbstractTableModel):
             return str(account.config_path)
         if role == Qt.FontRole and index.column() in (1, 2):
             return QFont("Cascadia Mono", 9)
+        if role == Qt.UserRole:
+            return account.username
         if role != Qt.DisplayRole:
             return None
         return (
             account.username,
             account.app_id,
             f"{account.config_path.parent.name}/{account.config_path.name}",
+            "Account Options",
         )[index.column()]
 
     def headerData(

@@ -6,6 +6,8 @@ from tempfile import NamedTemporaryFile
 from IGBot.core.device import DeviceFleetSnapshot, DeviceRecord
 from IGBot.core.phone_manager import PhoneManager
 from IGBot.services.account_assignment_service import AccountAssignmentService
+from IGBot.services.archive_service import ARCHIVED_ACCOUNTS, ArchiveService
+from IGBot.services.transfer_service import TransferService
 
 
 class DeviceInventoryService:
@@ -19,6 +21,8 @@ class DeviceInventoryService:
     ) -> None:
         self._inventory_path = inventory_path
         self._account_assignments = account_assignments
+        self.transfer_service = TransferService(account_assignments)
+        self.archive_service = ArchiveService(account_assignments)
         self._workspace_root = workspace_root or inventory_path.parent.parent
 
     @classmethod
@@ -80,10 +84,12 @@ class DeviceInventoryService:
         return directory
 
     def archived_accounts(self):
+        accounts = list(
+            self._account_assignments.load_by_device().get(ARCHIVED_ACCOUNTS, ())
+        )
         archived_directory = self._workspace_root / "archived"
         if not archived_directory.is_dir():
-            return ()
-        accounts = []
+            return tuple(accounts)
         for config_path in sorted(archived_directory.glob("*/config.y*ml")):
             account = self._account_assignments._load_account(config_path)
             if account is not None:

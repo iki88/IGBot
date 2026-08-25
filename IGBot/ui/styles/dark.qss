@@ -312,7 +312,8 @@ QPlainTextEdit#liveLogOutput {
 
 QDialog#confirmationDialog,
 QDialog#addDeviceDialog,
-QDialog#inputDialog {
+QDialog#inputDialog,
+QDialog#transferAccountDialog {
     background-color: #181F27;
     border: 1px solid #2C3643;
     border-radius: 9px;
