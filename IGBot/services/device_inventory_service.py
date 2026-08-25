@@ -15,9 +15,11 @@ class DeviceInventoryService:
         self,
         inventory_path: Path,
         account_assignments: AccountAssignmentService,
+        workspace_root: Path | None = None,
     ) -> None:
         self._inventory_path = inventory_path
         self._account_assignments = account_assignments
+        self._workspace_root = workspace_root or inventory_path.parent.parent
 
     @classmethod
     def for_workspace(cls, workspace_root: Path) -> "DeviceInventoryService":
@@ -28,6 +30,7 @@ class DeviceInventoryService:
         return cls(
             inventory_path=data_directory / "devices.json",
             account_assignments=AccountAssignmentService(workspace_root / "accounts"),
+            workspace_root=workspace_root,
         )
 
     def refresh(self) -> DeviceFleetSnapshot:
@@ -40,20 +43,62 @@ class DeviceInventoryService:
 
         connected = set(discovery.devices)
         state = self._load_state()
-        deleted = set(state["deleted"])
-        known_serials = [entry["serial"] for entry in state["devices"]]
-
-        for serial in discovery.devices:
-            if serial not in known_serials and serial not in deleted:
-                state["devices"].append({"serial": serial, "phone_name": ""})
-                known_serials.append(serial)
-
-        state["deleted"] = sorted(deleted)
+        state["deleted"] = sorted(set(state["deleted"]))
         self._save_state(state)
         return DeviceFleetSnapshot(devices=self._records_from_state(state, connected))
 
+    def unmanaged_devices(self) -> tuple[str, ...]:
+        discovery = PhoneManager.discover_devices()
+        if discovery.error:
+            raise RuntimeError(discovery.error)
+        managed = {entry["serial"] for entry in self._load_state()["devices"]}
+        return tuple(serial for serial in discovery.devices if serial not in managed)
+
+    def add_device(self, serial: str, phone_name: str = "") -> None:
+        serial = serial.strip()
+        if not serial or serial not in self.unmanaged_devices():
+            raise ValueError("Select a connected Android device that is not managed.")
+        state = self._load_state()
+        state["devices"].append({"serial": serial, "phone_name": phone_name.strip()})
+        state["deleted"] = [item for item in state["deleted"] if item != serial]
+        self._save_state(state)
+
+    def rename_device(self, serial: str, phone_name: str) -> None:
+        state = self._load_state()
+        for entry in state["devices"]:
+            if entry["serial"] == serial:
+                entry["phone_name"] = phone_name.strip()
+                self._save_state(state)
+                return
+        raise ValueError(f"Device {serial} is not in the inventory")
+
+    def device_directory(self, serial: str) -> Path:
+        if serial not in {entry["serial"] for entry in self._load_state()["devices"]}:
+            raise ValueError(f"Device {serial} is not in the inventory")
+        directory = self._workspace_root / "phones" / serial
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def archived_accounts(self):
+        archived_directory = self._workspace_root / "archived"
+        if not archived_directory.is_dir():
+            return ()
+        accounts = []
+        for config_path in sorted(archived_directory.glob("*/config.y*ml")):
+            account = self._account_assignments._load_account(config_path)
+            if account is not None:
+                accounts.append(account)
+        return tuple(accounts)
+
     def delete(self, serial: str) -> None:
-        self._account_assignments.unassign_device(serial)
+        assigned_accounts = self._account_assignments.load_by_device().get(serial, ())
+        if assigned_accounts:
+            raise RuntimeError(
+                "This device currently contains assigned accounts.\n\n"
+                "Move or archive all accounts before deleting this device.\n\n"
+                "Device deletion for populated devices will be enabled in Sprint 4B "
+                "after account transfer and archival are implemented."
+            )
         state = self._load_state()
         state["devices"] = [
             entry for entry in state["devices"] if entry["serial"] != serial

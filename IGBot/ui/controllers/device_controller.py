@@ -42,6 +42,9 @@ class DeviceController(QObject):
     deletion_started = Signal(str)
     device_deleted = Signal(str)
     operation_failed = Signal(str)
+    unmanaged_devices_ready = Signal(list)
+    archived_accounts_ready = Signal(list)
+    device_folder_ready = Signal(str)
 
     def __init__(
         self,
@@ -87,6 +90,47 @@ class DeviceController(QObject):
         self.deletion_started.emit(serial)
         task = _ServiceTask(lambda: self._service.delete(serial))
         task.signals.completed.connect(lambda _: self._on_delete_completed(serial))
+        task.signals.failed.connect(self._on_operation_failed)
+        self._start_task(task)
+
+    @Slot()
+    def load_unmanaged_devices(self) -> None:
+        task = _ServiceTask(self._service.unmanaged_devices)
+        task.signals.completed.connect(
+            lambda devices: self.unmanaged_devices_ready.emit(list(devices))
+        )
+        task.signals.failed.connect(self._on_operation_failed)
+        self._start_task(task)
+
+    @Slot(str, str)
+    def add_device(self, serial: str, phone_name: str) -> None:
+        self._run_and_refresh(lambda: self._service.add_device(serial, phone_name))
+
+    @Slot(str, str)
+    def rename_device(self, serial: str, phone_name: str) -> None:
+        self._run_and_refresh(lambda: self._service.rename_device(serial, phone_name))
+
+    @Slot(str)
+    def open_device_folder(self, serial: str) -> None:
+        task = _ServiceTask(lambda: self._service.device_directory(serial))
+        task.signals.completed.connect(
+            lambda directory: self.device_folder_ready.emit(str(directory))
+        )
+        task.signals.failed.connect(self._on_operation_failed)
+        self._start_task(task)
+
+    @Slot()
+    def load_archived_accounts(self) -> None:
+        task = _ServiceTask(self._service.archived_accounts)
+        task.signals.completed.connect(
+            lambda accounts: self.archived_accounts_ready.emit(list(accounts))
+        )
+        task.signals.failed.connect(self._on_operation_failed)
+        self._start_task(task)
+
+    def _run_and_refresh(self, operation: Callable[[], object]) -> None:
+        task = _ServiceTask(operation)
+        task.signals.completed.connect(lambda _: self.refresh())
         task.signals.failed.connect(self._on_operation_failed)
         self._start_task(task)
 

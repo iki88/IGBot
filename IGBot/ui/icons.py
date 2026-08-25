@@ -24,6 +24,20 @@ def copy_icon(color: str = "#9caaba") -> QIcon:
     return QIcon(pixmap)
 
 
+def archive_icon(color: str = "#9AA7B3") -> QIcon:
+    """Return an archive glyph matching the application's phone icon weight."""
+    pixmap = _canvas()
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setBrush(Qt.NoBrush)
+    painter.setPen(QPen(QColor(color), 1.6))
+    painter.drawRoundedRect(QRectF(3, 4, 14, 4), 1, 1)
+    painter.drawRoundedRect(QRectF(4, 8, 12, 9), 1, 1)
+    painter.drawLine(8, 11, 12, 11)
+    painter.end()
+    return QIcon(pixmap)
+
+
 def _phone_pixmap(color: str) -> QPixmap:
     pixmap = _canvas()
     painter = QPainter(pixmap)

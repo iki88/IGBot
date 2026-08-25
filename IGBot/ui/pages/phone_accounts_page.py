@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMenu,
     QPushButton,
     QStyle,
     QTableView,
@@ -16,12 +17,16 @@ from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.ui.models.phone_accounts_model import PhoneAccountsModel
 from IGBot.ui.widgets.empty_state import EmptyState
 from IGBot.ui.widgets.page_header import PageHeader
+from IGBot.ui.widgets.text_input_dialog import TextInputDialog
 
 
 class PhoneAccountsPage(QWidget):
     """Workspace for real InstaAddict accounts assigned to one phone."""
 
     back_requested = Signal()
+    rename_requested = Signal(str, str)
+    folder_requested = Signal(str)
+    delete_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -38,6 +43,16 @@ class PhoneAccountsPage(QWidget):
             self,
         )
         self.page_header.add_action_widget(self.back_button)
+        self._serial = ""
+        self.options_button = QPushButton("Device Options", self)
+        self.options_button.setObjectName("secondaryButton")
+        self.options_menu = QMenu(self.options_button)
+        self.options_menu.addAction("Rename Device", self._rename_device)
+        self.options_menu.addAction("Open Device Folder", self._open_device_folder)
+        self.options_menu.addSeparator()
+        self.options_menu.addAction("Delete Device", self._delete_device)
+        self.options_button.setMenu(self.options_menu)
+        self.page_header.add_action_widget(self.options_button)
 
         self.connection_dot = QLabel("●", self)
         self.connection_dot.setObjectName("connectionDot")
@@ -119,6 +134,16 @@ class PhoneAccountsPage(QWidget):
         layout.addWidget(card, 1)
 
     def set_phone(self, device: DeviceRecord, accounts: list[AssignedAccount]) -> None:
+        self._serial = device.serial
+        self.options_button.show()
+        self.page_header.title.setText("Phone Accounts")
+        self.page_header.subtitle.setText(
+            "Accounts assigned through InstaAddict configuration."
+        )
+        self.connection_dot.show()
+        self.empty_state.set_content(
+            "No accounts assigned", "No Instagram accounts assigned to this phone."
+        )
         self.phone_name.setText(device.phone_name or "Unnamed phone")
         self.phone_serial.setText(device.serial)
         self.connection_dot.setProperty("connected", device.connected)
@@ -132,3 +157,36 @@ class PhoneAccountsPage(QWidget):
         has_accounts = bool(accounts)
         self.table.setVisible(has_accounts)
         self.empty_state.setVisible(not has_accounts)
+
+    def set_archived(self, accounts: list[AssignedAccount]) -> None:
+        self._serial = ""
+        self.options_button.hide()
+        self.page_header.title.setText("Archived Accounts")
+        self.page_header.subtitle.setText("Accounts stored in the Archived container.")
+        self.phone_name.setText("Archived")
+        self.phone_serial.clear()
+        self.connection_dot.hide()
+        count = len(accounts)
+        noun = "account" if count == 1 else "accounts"
+        self.account_summary.setText(f"{count} {noun}")
+        self.model.set_accounts(accounts)
+        self.table.setVisible(bool(accounts))
+        self.empty_state.set_content(
+            "No archived accounts", "No Instagram accounts have been archived."
+        )
+        self.empty_state.setVisible(not accounts)
+
+    def _rename_device(self) -> None:
+        phone_name, accepted = TextInputDialog.get_text(
+            "Rename Device", "CUSTOM PHONE NAME", self.phone_name.text(), self
+        )
+        if accepted and self._serial:
+            self.rename_requested.emit(self._serial, phone_name)
+
+    def _open_device_folder(self) -> None:
+        if self._serial:
+            self.folder_requested.emit(self._serial)
+
+    def _delete_device(self) -> None:
+        if self._serial:
+            self.delete_requested.emit(self._serial)

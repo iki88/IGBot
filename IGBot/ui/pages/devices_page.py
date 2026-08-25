@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QPushButton,
     QStyle,
     QTableView,
     QVBoxLayout,
@@ -23,6 +24,7 @@ from IGBot.ui.models.device_table_model import (
     DeviceFilterProxyModel,
     DeviceTableModel,
 )
+from IGBot.ui.widgets.add_device_dialog import AddDeviceDialog
 from IGBot.ui.widgets.confirmation_dialog import ConfirmationDialog
 from IGBot.ui.widgets.device_actions_delegate import DeviceActionsDelegate
 from IGBot.ui.widgets.device_id_delegate import DeviceIdDelegate
@@ -50,6 +52,13 @@ class DevicesPage(QWidget):
             "Monitor connectivity and manage phone account assignments.",
             self,
         )
+        self.add_device_button = QPushButton("Add Device", self)
+        self.add_device_button.setObjectName("primaryButton")
+        self.add_device_button.setIcon(
+            self.style().standardIcon(QStyle.SP_FileDialogNewFolder)
+        )
+        self.add_device_button.clicked.connect(self._show_add_device)
+        self.page_header.add_action_widget(self.add_device_button)
 
         self.search = QLineEdit(self)
         self.search.setObjectName("deviceSearch")
@@ -162,6 +171,11 @@ class DevicesPage(QWidget):
     def _on_refresh_started(self) -> None:
         self.error_banner.hide()
 
+    def _show_add_device(self) -> None:
+        dialog = AddDeviceDialog(self._controller, self)
+        if dialog.exec():
+            self._controller.add_device(dialog.serial, dialog.phone_name.text())
+
     def _set_devices(self, devices: list[DeviceRecord]) -> None:
         self.table.setEnabled(True)
         self._devices = devices
@@ -252,6 +266,6 @@ class DevicesPage(QWidget):
         detail = (
             "The phone will remain removed even while connected through ADB."
             if title == "Delete Device?"
-            else "Device metadata and all account assignments will be removed."
+            else "Only devices without assigned accounts can be removed."
         )
         return ConfirmationDialog.confirm(title, text, detail, self)

@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from IGBot.ui.icons import phone_icon
+from IGBot.ui.icons import archive_icon, phone_icon
+from IGBot.ui.version import APPLICATION_VERSION
 
 
 class NavigationSidebar(QWidget):
@@ -23,7 +24,7 @@ class NavigationSidebar(QWidget):
 
         brand = QLabel("IGBot", self)
         brand.setObjectName("brandLabel")
-        product = QLabel("OPERATIONS CONSOLE", self)
+        product = QLabel(f"Version {APPLICATION_VERSION}", self)
         product.setObjectName("brandCaption")
 
         workspace = QLabel("WORKSPACE", self)
@@ -34,6 +35,8 @@ class NavigationSidebar(QWidget):
         self.navigation.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         devices = QListWidgetItem(phone_icon(), "Devices")
         self.navigation.addItem(devices)
+        archived = QListWidgetItem(archive_icon(), "Archived")
+        self.navigation.addItem(archived)
         self.navigation.setCurrentRow(0)
         self.navigation.itemClicked.connect(
             lambda item: self.page_selected.emit(self.navigation.row(item))

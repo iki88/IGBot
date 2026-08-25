@@ -1,5 +1,5 @@
 * {
-    color: #d8dee9;
+    color: #F2F5F7;
     font-family: "Segoe UI";
     font-size: 13px;
 }
@@ -8,12 +8,12 @@ QMainWindow,
 QWidget#devicesPage,
 QWidget#phoneAccountsPage,
 QStackedWidget {
-    background-color: #0b0f14;
+    background-color: #11161C;
 }
 
 QWidget#navigationSidebar {
-    background-color: #11161d;
-    border-right: 1px solid #27303b;
+    background-color: #181F27;
+    border-right: 1px solid #2C3643;
 }
 
 QLabel#brandLabel {
@@ -24,9 +24,9 @@ QLabel#brandLabel {
 }
 
 QLabel#brandCaption {
-    color: #5f6b7a;
-    font-size: 9px;
-    font-weight: 700;
+    color: #9AA7B3;
+    font-size: 11px;
+    font-weight: 500;
     padding: 0 7px;
 }
 
@@ -57,7 +57,7 @@ QListWidget#navigationList::item:selected {
 }
 
 QToolBar#topToolbar {
-    background-color: #11161d;
+    background-color: #181F27;
     border: 0;
     border-bottom: 1px solid #27303b;
     padding: 7px 14px;
@@ -98,35 +98,35 @@ QLabel#pageSubtitle {
 }
 
 QFrame#contentCard {
-    background-color: #11161d;
-    border: 1px solid #27303b;
+    background-color: #181F27;
+    border: 1px solid #2C3643;
     border-radius: 8px;
 }
 
 QPushButton {
-    min-height: 30px;
+    min-height: 34px;
     padding: 0 12px;
 }
 
 QPushButton#primaryButton {
-    background-color: #1769aa;
-    border: 1px solid #2d82c7;
+    background-color: #2F80ED;
+    border: 1px solid #2F80ED;
     border-radius: 5px;
     color: #ffffff;
     font-weight: 600;
 }
 
-QPushButton#primaryButton:pressed { background-color: #14598f; }
+QPushButton#primaryButton:pressed { background-color: #2469C5; }
 
 QPushButton#primaryButton:disabled {
-    background-color: #18202a;
-    border-color: #2b3541;
-    color: #657283;
+    background-color: #27313C;
+    border-color: #394654;
+    color: #9AA7B3;
 }
 
 QPushButton#secondaryButton {
-    background-color: #19212b;
-    border: 1px solid #344150;
+    background-color: #202A36;
+    border: 1px solid #2C3643;
     border-radius: 5px;
     color: #cbd4df;
     font-weight: 600;
@@ -151,8 +151,8 @@ QPushButton#tertiaryButton:pressed {
 }
 
 QPushButton#dangerButton {
-    background-color: #b52b33;
-    border: 1px solid #d6454d;
+    background-color: #D9534F;
+    border: 1px solid #D9534F;
     border-radius: 5px;
     color: #ffffff;
     font-weight: 600;
@@ -224,7 +224,7 @@ QTableView#accountsTable::item:selected {
 }
 
 QHeaderView::section {
-    background-color: #151b23;
+    background-color: #202A36;
     border: 0;
     border-bottom: 1px solid #303a47;
     color: #8492a3;
@@ -310,7 +310,62 @@ QPlainTextEdit#liveLogOutput {
     selection-background-color: #1769aa;
 }
 
-QDialog#confirmationDialog { background-color: #11161d; }
+QDialog#confirmationDialog,
+QDialog#addDeviceDialog,
+QDialog#inputDialog {
+    background-color: #181F27;
+    border: 1px solid #2C3643;
+    border-radius: 9px;
+}
+
+QLabel#dialogSubtitle {
+    color: #9AA7B3;
+    font-size: 12px;
+}
+
+QLabel#dialogFieldLabel {
+    color: #9AA7B3;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+QLabel#dialogHint {
+    color: #9AA7B3;
+    font-size: 12px;
+    padding: 3px 0;
+}
+
+QLineEdit#dialogInput {
+    background-color: #11161C;
+    border: 1px solid #2C3643;
+    border-radius: 6px;
+    color: #F2F5F7;
+    min-height: 38px;
+    padding: 0 11px;
+    selection-background-color: #2F80ED;
+}
+
+QLineEdit#dialogInput:focus { border-color: #2F80ED; }
+
+QListWidget#dialogDeviceList {
+    background-color: #11161C;
+    border: 1px solid #2C3643;
+    border-radius: 6px;
+    color: #F2F5F7;
+    outline: 0;
+    padding: 5px;
+}
+
+QListWidget#dialogDeviceList::item {
+    border-radius: 4px;
+    min-height: 35px;
+    padding: 0 9px;
+}
+
+QListWidget#dialogDeviceList::item:selected {
+    background-color: #2F80ED;
+    color: #F2F5F7;
+}
 
 QLabel#dialogTitle {
     color: #f2f5f8;

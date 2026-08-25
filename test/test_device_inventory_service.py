@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from IGBot.core.phone_manager import DeviceDiscoveryResult
 from IGBot.services.account_assignment_service import AccountAssignmentService
 from IGBot.services.device_inventory_service import DeviceInventoryService
@@ -18,6 +20,15 @@ def test_refresh_preserves_manual_order_and_marks_disconnected_phone_offline(
     tmp_path, mocker
 ):
     service = _service(tmp_path)
+    service._save_state(
+        {
+            "devices": [
+                {"serial": "phone-b", "phone_name": ""},
+                {"serial": "phone-a", "phone_name": ""},
+            ],
+            "deleted": [],
+        }
+    )
     discover = mocker.patch(
         "IGBot.services.device_inventory_service.PhoneManager.discover_devices",
         side_effect=[
@@ -52,6 +63,9 @@ def test_refresh_counts_only_real_assigned_accounts(tmp_path, mocker):
         inventory_path=tmp_path / "devices.json",
         account_assignments=AccountAssignmentService(accounts_directory),
     )
+    service._save_state(
+        {"devices": [{"serial": "phone-a", "phone_name": ""}], "deleted": []}
+    )
     mocker.patch(
         "IGBot.services.device_inventory_service.PhoneManager.discover_devices",
         return_value=DeviceDiscoveryResult(["phone-a"]),
@@ -64,7 +78,7 @@ def test_refresh_counts_only_real_assigned_accounts(tmp_path, mocker):
     ]
 
 
-def test_delete_permanently_removes_phone_and_account_assignments(tmp_path, mocker):
+def test_delete_blocks_populated_phone_without_modifying_account_data(tmp_path, mocker):
     accounts_directory = tmp_path / "accounts"
     account_directory = accounts_directory / "assigned"
     account_directory.mkdir(parents=True)
@@ -77,6 +91,9 @@ def test_delete_permanently_removes_phone_and_account_assignments(tmp_path, mock
         inventory_path=tmp_path / "data" / "devices.json",
         account_assignments=AccountAssignmentService(accounts_directory),
     )
+    service._save_state(
+        {"devices": [{"serial": "phone-a", "phone_name": ""}], "deleted": []}
+    )
     mocker.patch(
         "IGBot.services.device_inventory_service.PhoneManager.discover_devices",
         side_effect=[
@@ -87,19 +104,40 @@ def test_delete_permanently_removes_phone_and_account_assignments(tmp_path, mock
         ],
     )
     service.refresh()
-    service.delete("phone-a")
-    while_connected = service.refresh()
-    after_disconnect = service.refresh()
-    after_reconnect = service.refresh()
+    original_config = config_path.read_bytes()
 
-    assert while_connected.devices == ()
-    assert after_disconnect.devices == ()
-    assert after_reconnect.devices == ()
+    with pytest.raises(RuntimeError, match="currently contains assigned accounts"):
+        service.delete("phone-a")
+
+    saved = json.loads((tmp_path / "data" / "devices.json").read_text())
+    assert [device["serial"] for device in saved["devices"]] == ["phone-a"]
+    assert saved["deleted"] == []
+    assert config_path.read_bytes() == original_config
+
+
+def test_delete_permanently_removes_empty_phone(tmp_path, mocker):
+    service = _service(tmp_path)
+    service._save_state(
+        {"devices": [{"serial": "phone-a", "phone_name": ""}], "deleted": []}
+    )
+    mocker.patch(
+        "IGBot.services.device_inventory_service.PhoneManager.discover_devices",
+        side_effect=[
+            DeviceDiscoveryResult(["phone-a"]),
+            DeviceDiscoveryResult(["phone-a"]),
+            DeviceDiscoveryResult([]),
+            DeviceDiscoveryResult(["phone-a"]),
+        ],
+    )
+
+    service.refresh()
+    service.delete("phone-a")
+
+    assert service.refresh().devices == ()
+    assert service.refresh().devices == ()
+    assert service.refresh().devices == ()
     saved = json.loads((tmp_path / "data" / "devices.json").read_text())
     assert saved["deleted"] == ["phone-a"]
-    config = config_path.read_text(encoding="utf-8")
-    assert "device:" not in config
-    assert "username: real_account" in config
 
 
 def test_legacy_suppression_is_migrated_to_permanent_deletion(tmp_path, mocker):
@@ -120,3 +158,62 @@ def test_legacy_suppression_is_migrated_to_permanent_deletion(tmp_path, mocker):
     assert snapshot.devices == ()
     saved = json.loads(inventory_path.read_text(encoding="utf-8"))
     assert saved == {"devices": [], "deleted": ["phone-a"]}
+
+
+def test_connected_devices_require_explicit_onboarding(tmp_path, mocker):
+    service = _service(tmp_path)
+    mocker.patch(
+        "IGBot.services.device_inventory_service.PhoneManager.discover_devices",
+        return_value=DeviceDiscoveryResult(["phone-a", "phone-b"]),
+    )
+
+    assert service.refresh().devices == ()
+    assert service.unmanaged_devices() == ("phone-a", "phone-b")
+
+    service.add_device("phone-a", "Office 01")
+
+    snapshot = service.refresh()
+    assert [(item.serial, item.phone_name) for item in snapshot.devices] == [
+        ("phone-a", "Office 01")
+    ]
+    assert service.unmanaged_devices() == ("phone-b",)
+
+
+def test_rename_persists_without_changing_device_identifier(tmp_path, mocker):
+    service = _service(tmp_path)
+    mocker.patch(
+        "IGBot.services.device_inventory_service.PhoneManager.discover_devices",
+        return_value=DeviceDiscoveryResult(["phone-a"]),
+    )
+    service.add_device("phone-a", "Original")
+
+    service.rename_device("phone-a", "Samsung Office")
+
+    device = service.refresh().devices[0]
+    assert device.serial == "phone-a"
+    assert device.phone_name == "Samsung Office"
+
+
+def test_device_folder_uses_stable_serial(tmp_path, mocker):
+    service = _service(tmp_path)
+    mocker.patch(
+        "IGBot.services.device_inventory_service.PhoneManager.discover_devices",
+        return_value=DeviceDiscoveryResult(["phone-a"]),
+    )
+    service.add_device("phone-a", "Office")
+
+    directory = service.device_directory("phone-a")
+
+    assert directory == tmp_path / "phones" / "phone-a"
+    assert directory.is_dir()
+
+
+def test_archived_container_reads_only_real_archived_accounts(tmp_path):
+    service = _service(tmp_path)
+    archived = tmp_path / "archived" / "real_account"
+    archived.mkdir(parents=True)
+    (archived / "config.yml").write_text("username: real_account\n", encoding="utf-8")
+
+    accounts = service.archived_accounts()
+
+    assert [account.username for account in accounts] == ["real_account"]

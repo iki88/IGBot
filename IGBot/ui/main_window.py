@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMainWindow, QSplitter, QStackedWidget
 
 from IGBot.core.device import AssignedAccount, DeviceRecord
@@ -92,6 +93,17 @@ class MainWindow(QMainWindow):
             self._open_phone_accounts
         )
         self.phone_accounts_page.back_requested.connect(self._open_devices)
+        self.phone_accounts_page.rename_requested.connect(
+            self.device_controller.rename_device
+        )
+        self.phone_accounts_page.folder_requested.connect(
+            self.device_controller.open_device_folder
+        )
+        self.phone_accounts_page.delete_requested.connect(self._delete_managed_device)
+        self.device_controller.device_folder_ready.connect(
+            lambda directory: QDesktopServices.openUrl(QUrl.fromLocalFile(directory))
+        )
+        self.device_controller.archived_accounts_ready.connect(self._open_archived)
         self.devices_page.notification_requested.connect(self.statusBar().showMessage)
 
     def _show_device_count(self, devices: list[DeviceRecord]) -> None:
@@ -116,6 +128,18 @@ class MainWindow(QMainWindow):
     def _navigate_to_page(self, page_index: int) -> None:
         if page_index == 0:
             self._open_devices()
+        elif page_index == 1:
+            self.device_controller.load_archived_accounts()
+
+    def _open_archived(self, accounts: list[AssignedAccount]) -> None:
+        self._managed_phone_serial = None
+        self.phone_accounts_page.set_archived(accounts)
+        self.pages.setCurrentWidget(self.phone_accounts_page)
+        self.toolbar.set_context_title("Archived accounts")
+
+    def _delete_managed_device(self, serial: str) -> None:
+        if self.devices_page._confirm_delete(serial):
+            self.device_controller.delete_device(serial)
 
     def _sync_phone_accounts(self, devices: list[DeviceRecord]) -> None:
         if self._managed_phone_serial is None:
