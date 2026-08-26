@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QMainWindow, QSplitter, QStackedWidget
+from PySide6.QtWidgets import QDialog, QMainWindow, QSplitter, QStackedWidget
 
 from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
@@ -18,6 +18,7 @@ from IGBot.ui.widgets.confirmation_dialog import ConfirmationDialog
 from IGBot.ui.widgets.error_dialog import ErrorDialog
 from IGBot.ui.widgets.live_log_panel import LiveLogPanel
 from IGBot.ui.widgets.navigation_sidebar import NavigationSidebar
+from IGBot.ui.widgets.package_selection_dialog import PackageSelectionDialog
 from IGBot.ui.widgets.top_toolbar import TopToolbar
 from IGBot.ui.widgets.transfer_account_dialog import TransferAccountDialog
 
@@ -89,6 +90,7 @@ class MainWindow(QMainWindow):
         self.toolbar.add_device_requested.connect(self.devices_page._show_add_device)
         self.toolbar.add_account_requested.connect(self._show_add_account_dialog)
         self.toolbar.save_requested.connect(self._save_account_configuration)
+        self.toolbar.view_phone_requested.connect(self._view_phone)
         self.device_controller.refresh_started.connect(
             lambda: self.statusBar().showMessage("Discovering Android devices…")
         )
@@ -116,6 +118,10 @@ class MainWindow(QMainWindow):
         self.phone_accounts_page.back_requested.connect(self._open_devices)
         self.phone_accounts_page.account_open_requested.connect(self._open_account)
         self.account_page.back_requested.connect(self._return_from_account)
+        self.account_page.dirty_changed.connect(self._set_account_dirty)
+        self.account_page.package_detection_requested.connect(
+            self._detect_foreground_package
+        )
         self.phone_accounts_page.rename_requested.connect(
             self.device_controller.rename_device
         )
@@ -163,12 +169,48 @@ class MainWindow(QMainWindow):
         self.device_controller.account_configuration_failed.connect(
             self._show_account_configuration_error
         )
+        self.device_controller.installed_packages_ready.connect(
+            self._show_package_selection
+        )
+        self.device_controller.installed_packages_failed.connect(
+            self._show_account_configuration_error
+        )
+        self.device_controller.foreground_package_ready.connect(
+            self.account_page.set_application_id
+        )
+        self.device_controller.foreground_package_failed.connect(
+            self._show_account_configuration_error
+        )
+        self.device_controller.phone_view_failed.connect(self._show_phone_view_error)
+        self.device_controller.phone_view_ready.connect(
+            lambda result: self.statusBar().showMessage(
+                ("Phone view already open." if result.reused else "Phone view opened."),
+                3000,
+            )
+        )
         self.devices_page.notification_requested.connect(self.statusBar().showMessage)
 
     def _show_device_count(self, devices: list[DeviceRecord]) -> None:
         total = len(devices)
         connected = sum(device.connected for device in devices)
         self.statusBar().showMessage(f"{total} phones · {connected} connected")
+
+    def _view_phone(self) -> None:
+        if self._workspace_context == "phone" and self._managed_phone_serial:
+            serials = (self._managed_phone_serial,)
+        elif self._workspace_context == "devices":
+            serials = self.devices_page.selected_device_serials()
+        else:
+            serials = ()
+        if len(serials) != 1:
+            self._show_phone_view_error(
+                "Select exactly one managed phone before viewing it."
+            )
+            return
+        self.device_controller.view_phone(serials[0])
+
+    def _show_phone_view_error(self, message: str) -> None:
+        ErrorDialog("View Phone", message, self).exec()
 
     def _open_phone_accounts(
         self, device: DeviceRecord, accounts: list[AssignedAccount]
@@ -255,23 +297,51 @@ class MainWindow(QMainWindow):
     def _save_account_configuration(self) -> None:
         account = self.account_page.account
         if account is not None:
+            try:
+                settings = self.account_page.configuration_values()
+            except ValueError as error:
+                self._show_account_configuration_error(str(error))
+                return
             self.device_controller.save_account_configuration(
                 account,
                 self.account_page.username.text(),
                 self.account_page.password.text(),
                 self.account_page.application_id.text(),
+                settings,
             )
 
     def _on_account_configuration_saved(self, account) -> None:
         current = self.account_page.account
-        if current is not None and current.config_path == account.config_path:
+        if current is not None:
             self.account_page.account = account
             self.account_page.page_header.title.setText(account.username)
             self.toolbar.set_context_title(account.username)
             self.toolbar.set_context(
                 "account", self.phone_accounts_page.build_account_options(account)
             )
+            self.account_page.mark_clean()
             self.statusBar().showMessage("Account changes saved.", 3000)
+
+    def _set_account_dirty(self, dirty: bool) -> None:
+        account = self.account_page.account
+        if account is not None:
+            suffix = " *" if dirty else ""
+            self.account_page.page_header.title.setText(account.username + suffix)
+
+    def _load_installed_packages(self) -> None:
+        account = self.account_page.account
+        if account is not None:
+            self.device_controller.load_installed_packages(account.device_id)
+
+    def _detect_foreground_package(self) -> None:
+        account = self.account_page.account
+        if account is not None:
+            self.device_controller.detect_foreground_package(account.device_id)
+
+    def _show_package_selection(self, packages: list[str]) -> None:
+        dialog = PackageSelectionDialog(packages, self)
+        if dialog.exec() == QDialog.Accepted and dialog.selected_package:
+            self.account_page.set_application_id(dialog.selected_package)
 
     def _show_account_configuration_error(self, message: str) -> None:
         ErrorDialog("Account Configuration Error", message, self).exec()

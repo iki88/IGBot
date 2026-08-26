@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from IGBot.core.device import DeviceRecord
@@ -95,6 +97,76 @@ def test_transfer_updates_only_existing_device_assignment(tmp_path):
         "# preserve comment\nusername: real_account\ndevice: phone-b # assigned\n"
         "app-id: com.instagram.android\n"
     )
+
+
+def test_transfer_supports_quoted_assignment_and_transfer_back(tmp_path):
+    service = _service(tmp_path, [("account", "real_account", '"phone-a"')])
+    config_path = tmp_path / "accounts" / "account" / "config.yml"
+
+    service.transfer("real_account", "phone-a", "phone-b", {"phone-a", "phone-b"})
+    service.transfer("real_account", "phone-b", "phone-a", {"phone-a", "phone-b"})
+
+    assert 'device: "phone-a"' in config_path.read_text(encoding="utf-8")
+
+
+def test_transfer_rejects_missing_assignment(tmp_path):
+    service = _service(tmp_path, [("account", "real_account", "phone-a")])
+    config_path = tmp_path / "accounts" / "account" / "config.yml"
+    config_path.write_text("username: real_account\n", encoding="utf-8")
+    (config_path.parent / "account.json").write_text(
+        json.dumps(
+            {
+                "username": "real_account",
+                "password": "secret",
+                "assigned_device_id": "phone-a",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="not assigned"):
+        service.transfer("real_account", "phone-a", "phone-b", {"phone-a", "phone-b"})
+
+
+def test_transfer_creates_missing_metadata_from_existing_account(tmp_path):
+    service = _service(tmp_path, [("account", "real_account", '"phone-a"')])
+    metadata_path = tmp_path / "accounts" / "account" / "account.json"
+
+    service.transfer("real_account", "phone-a", "phone-b", {"phone-a", "phone-b"})
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata["username"] == "real_account"
+    assert metadata["password"] == ""
+    assert metadata["assigned_device_id"] == "phone-b"
+    assert metadata["created_at"]
+
+
+def test_transfer_synchronizes_metadata_without_moving_directory(tmp_path):
+    service = _service(tmp_path, [("account", "real_account", '"phone-a"')])
+    account_directory = tmp_path / "accounts" / "account"
+    metadata_path = account_directory / "account.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "username": "real_account",
+                "password": "secret",
+                "assigned_device_id": "stale-device",
+                "created_at": "2026-08-26T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service.transfer("real_account", "phone-a", "phone-b", {"phone-a", "phone-b"})
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata["assigned_device_id"] == "phone-b"
+    assert metadata["password"] == "secret"
+    assert account_directory.is_dir()
+    assert len(list((tmp_path / "accounts").iterdir())) == 1
+    assignments = service._account_assignments.load_by_device()
+    assert [account.username for account in assignments["phone-b"]] == ["real_account"]
 
 
 def test_transfer_rejects_duplicate_destination_without_writing(tmp_path):

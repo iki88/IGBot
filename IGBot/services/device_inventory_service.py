@@ -25,6 +25,10 @@ class DeviceInventoryService:
         self.archive_service = ArchiveService(account_assignments)
         self._workspace_root = workspace_root or inventory_path.parent.parent
 
+    @property
+    def workspace_root(self) -> Path:
+        return self._workspace_root
+
     @classmethod
     def for_workspace(cls, workspace_root: Path) -> "DeviceInventoryService":
         local_app_data = os.environ.get("LOCALAPPDATA")
@@ -82,10 +86,22 @@ class DeviceInventoryService:
     def account_configuration(self, account):
         return self._account_assignments.load_configuration(account.config_path)
 
-    def update_account_configuration(self, account, username, password, app_id):
+    def update_account_configuration(
+        self, account, username, password, app_id, settings=None
+    ):
         return self._account_assignments.update_configuration(
-            account, username, password, app_id
+            account, username, password, app_id, settings
         )
+
+    def installed_packages(self, serial: str):
+        from IGBot.services.android_package_service import AndroidPackageService
+
+        return AndroidPackageService.installed_packages(serial)
+
+    def foreground_package(self, serial: str):
+        from IGBot.services.android_package_service import AndroidPackageService
+
+        return AndroidPackageService.foreground_package(serial)
 
     def rename_device(self, serial: str, phone_name: str) -> None:
         state = self._load_state()

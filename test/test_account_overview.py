@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -45,14 +46,28 @@ def test_overview_masks_password_and_disables_future_operations(tmp_path):
         for button in (
             page.login_button,
             page.logout_button,
-            page.detect_app_id_button,
-            page.load_app_ids_button,
         )
     )
+    assert page.detect_app_id_button.isEnabled()
+    assert not hasattr(page, "load_app_ids_button")
     page.password_toggle.setChecked(True)
     assert page.password.echoMode() == QLineEdit.Normal
-    assert page.password_toggle.text() == "Hide"
+    assert page.password_toggle.toolTip() == "Hide password"
     assert application is not None
+
+
+def test_detect_button_emits_detection_request_and_updates_field(tmp_path):
+    QApplication.instance() or QApplication([])
+    page = AccountPage()
+    requests = []
+    page.package_detection_requested.connect(lambda: requests.append(True))
+
+    page.detect_app_id_button.click()
+    page.set_application_id("com.instagram.detected")
+
+    assert requests == [True]
+    assert page.application_id.text() == "com.instagram.detected"
+    assert page.is_dirty
 
 
 def test_save_preserves_comments_line_endings_and_unrelated_configuration(tmp_path):
@@ -62,21 +77,29 @@ def test_save_preserves_comments_line_endings_and_unrelated_configuration(tmp_pa
         account, "renamed.account", "new:password#2", "com.instagram.clone"
     )
 
-    content = account.config_path.read_bytes()
+    content = updated.config_path.read_bytes()
     parsed = yaml.safe_load(content)
     assert updated.username == "renamed.account"
-    assert parsed["password"] == "new:password#2"
+    assert updated.config_path.parent.name == "renamed.account"
+    assert not account.config_path.parent.exists()
+    assert "password" not in parsed
     assert parsed["app-id"] == "com.instagram.clone"
     assert parsed["device"] == "phone-a"
     assert parsed["screen-sleep"] is True
     assert b"# identity\r\n" in content
-    assert b"# secret\r\n" in content
     assert b"# assignment\r\n" in content
     assert b"# package\r\n" in content
     assert content.replace(b"\r\n", b"").find(b"\n") == -1
+    metadata = json.loads(
+        (updated.config_path.parent / "account.json").read_text(encoding="utf-8")
+    )
+    assert metadata["username"] == "renamed.account"
+    assert metadata["password"] == "new:password#2"
+    assert metadata["assigned_device_id"] == "phone-a"
+    assert metadata["created_at"]
 
 
-def test_save_adds_missing_password_without_changing_other_lines(tmp_path):
+def test_save_does_not_add_unsupported_password_key(tmp_path):
     service, account = _account(
         tmp_path,
         "username: original # identity\n"
@@ -88,17 +111,64 @@ def test_save_adds_missing_password_without_changing_other_lines(tmp_path):
 
     assert account.config_path.read_text(encoding="utf-8") == (
         "username: original # identity\n"
-        'password: "new-secret"\n'
         "device: phone-a\n"
         "app-id: com.instagram.android\n"
     )
+    metadata = json.loads(
+        (account.config_path.parent / "account.json").read_text(encoding="utf-8")
+    )
+    assert metadata["password"] == "new-secret"
+
+
+def test_credentials_persist_when_service_is_restarted(tmp_path):
+    service, account = _account(
+        tmp_path,
+        "username: original\ndevice: phone-a\napp-id: com.instagram.android\n",
+    )
+    service.update_configuration(
+        account, "original", "persistent-secret", account.app_id
+    )
+
+    restarted = AccountAssignmentService(service.accounts_directory)
+    configuration = restarted.load_configuration(account.config_path)
+
+    assert configuration["username"] == "original"
+    assert configuration["password"] == "persistent-secret"
+
+
+def test_detected_application_id_persists_after_restart(tmp_path):
+    service, account = _account(tmp_path)
+
+    updated = service.update_configuration(
+        account, "original", "secret", "com.instagram.detected"
+    )
+    restarted = AccountAssignmentService(service.accounts_directory)
+    configuration = restarted.load_configuration(updated.config_path)
+
+    assert configuration["app-id"] == "com.instagram.detected"
+    assert restarted.load_by_device()["phone-a"][0].app_id == "com.instagram.detected"
+
+
+def test_metadata_updates_preserve_created_timestamp_and_extension_fields(tmp_path):
+    service, account = _account(tmp_path)
+    updated = service.update_configuration(account, "original", "first", account.app_id)
+    metadata_path = updated.config_path.parent / "account.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["notes"] = "operator-owned metadata"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    service.update_configuration(updated, "original", "second", account.app_id)
+    saved = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    assert saved["password"] == "second"
+    assert saved["created_at"] == metadata["created_at"]
+    assert saved["notes"] == "operator-owned metadata"
 
 
 @pytest.mark.parametrize(
     ("username", "password", "app_id", "message"),
     (
         ("invalid name", "secret", "com.instagram.android", "username"),
-        ("original", "", "com.instagram.android", "password"),
         ("original", "secret", "invalid", "application ID"),
     ),
 )
@@ -127,6 +197,7 @@ def test_save_rejects_duplicate_username(tmp_path):
         service.update_configuration(
             account, "existing", "secret", "com.instagram.android"
         )
+    assert not (account.config_path.parent / "account.json").exists()
 
 
 def test_save_restores_original_after_verification_failure(tmp_path, mocker):

@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
 from IGBot.core.device import AssignedAccount, DeviceFleetSnapshot, DeviceRecord
+from IGBot.ui.controllers.device_controller import DeviceController
 from IGBot.ui.main_window import MainWindow
 from IGBot.ui.models.device_table_model import DeviceTableModel
 from IGBot.ui.pages.devices_page import DevicesPage
@@ -207,7 +208,7 @@ def test_account_navigation_uses_context_specific_toolbar(application):
     assert window.toolbar.start_action.isVisible()
     assert window.toolbar.stop_action.isVisible()
     assert window.toolbar.view_phone_action.isVisible()
-    assert not window.toolbar.view_phone_action.isEnabled()
+    assert window.toolbar.view_phone_action.isEnabled()
     assert not window.toolbar.save_action.isVisible()
 
     window._open_account(account)
@@ -248,10 +249,56 @@ def test_phone_toolbar_actions_use_compact_icons(application):
     ]
     assert all(action.isVisible() and not action.icon().isNull() for action in actions)
     assert window.toolbar.add_account_action.isEnabled()
-    assert all(not action.isEnabled() for action in actions[1:])
+    assert all(not action.isEnabled() for action in actions[1:3])
+    assert window.toolbar.view_phone_action.isEnabled()
     assert window.toolbar.iconSize().width() == 16
     assert not window.toolbar.options_button.icon().isNull()
     window.close()
+
+
+def test_detect_app_id_controller_updates_ui_and_writes_live_log(
+    application, mocker, caplog
+):
+    service = _DeviceService()
+    service.foreground_package = mocker.Mock(return_value="com.instagram.detected")
+    window = MainWindow(service)
+    account = AssignedAccount("account", "phone-a", "", Path("account/config.yml"))
+    window.device_controller._records = {
+        "phone-a": DeviceRecord("phone-a", "T1", True, (account,))
+    }
+    window._open_account(account)
+    started = mocker.patch.object(window.device_controller._thread_pool, "start")
+
+    with caplog.at_level("INFO"):
+        window.account_page.detect_app_id_button.click()
+        task = started.call_args.args[0]
+        task.run()
+
+    assert window.account_page.application_id.text() == "com.instagram.detected"
+    assert "Detect App ID started for phone-a" in caplog.text
+    assert (
+        "Foreground package detected for phone-a: com.instagram.detected" in caplog.text
+    )
+    window.close()
+
+
+def test_detect_app_id_failure_is_logged_and_emitted(application, mocker, caplog):
+    service = _DeviceService()
+    service.foreground_package = mocker.Mock(
+        side_effect=RuntimeError("No foreground package")
+    )
+    controller = DeviceController(service)
+    started = mocker.patch.object(controller._thread_pool, "start")
+    failures = []
+    controller.foreground_package_failed.connect(failures.append)
+
+    with caplog.at_level("ERROR"):
+        controller.detect_foreground_package("phone-a")
+        task = started.call_args.args[0]
+        task.run()
+
+    assert failures == ["No foreground package"]
+    assert "Detect App ID failed for phone-a: No foreground package" in caplog.text
 
 
 def test_archived_account_opens_shared_account_page(application):

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -45,12 +46,22 @@ def test_add_account_copies_templates_and_assigns_current_phone(tmp_path):
     config = yaml.safe_load((directory / "config.yml").read_text(encoding="utf-8"))
     assert account.username == "real_account"
     assert account.device_id == "phone-a"
+    assert account.app_id == ""
     assert config["username"] == "real_account"
-    assert config["password"] == "password:value#1"
+    assert "password" not in config
     assert config["device"] == "phone-a"
-    assert config["app-id"] == "com.instagram.android"
+    assert config["app-id"] == ""
     assert config["screen-sleep"] is True
     assert (directory / "filters.yml").is_file()
+    metadata = json.loads((directory / "account.json").read_text(encoding="utf-8"))
+    assert metadata["username"] == "real_account"
+    assert metadata["password"] == "password:value#1"
+    assert metadata["assigned_device_id"] == "phone-a"
+    assert metadata["created_at"]
+
+    restarted = AccountAssignmentService(tmp_path / "accounts")
+    restored = restarted.load_configuration(directory / "config.yml")
+    assert restored["password"] == "password:value#1"
 
 
 @pytest.mark.parametrize(

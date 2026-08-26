@@ -1,7 +1,7 @@
 * {
-    color: #F2F5F7;
+    color: #F4F7FA;
     font-family: "Segoe UI";
-    font-size: 13px;
+    font-size: 14px;
 }
 
 QMainWindow,
@@ -107,14 +107,15 @@ QLabel#pageSubtitle {
 }
 
 QFrame#contentCard {
-    background-color: #181F27;
-    border: 1px solid #2C3643;
+    background-color: #19212A;
+    border: 1px solid #354252;
     border-radius: 8px;
 }
 
 QPushButton {
-    min-height: 34px;
-    padding: 0 12px;
+    min-height: 35px;
+    padding: 0 13px;
+    font-weight: 600;
 }
 
 QPushButton#primaryButton {
@@ -351,16 +352,41 @@ QLabel#dialogHint {
 }
 
 QLineEdit#dialogInput {
-    background-color: #11161C;
-    border: 1px solid #2C3643;
+    background-color: #0E141B;
+    border: 1px solid #3A4858;
     border-radius: 6px;
     color: #F2F5F7;
-    min-height: 38px;
+    min-height: 39px;
     padding: 0 11px;
     selection-background-color: #2F80ED;
 }
 
-QLineEdit#dialogInput:focus { border-color: #2F80ED; }
+QLineEdit#dialogInput:focus {
+    border-color: #4A9AF5;
+    background-color: #101821;
+}
+
+QToolButton#configurationSectionHeader {
+    color: #F1F5F9;
+    border: 0;
+    font-size: 14px;
+    font-weight: 700;
+    min-height: 30px;
+    text-align: left;
+}
+
+QCheckBox#configurationSwitch::indicator {
+    width: 34px;
+    height: 18px;
+    border: 1px solid #526171;
+    border-radius: 9px;
+    background-color: #29333E;
+}
+
+QCheckBox#configurationSwitch::indicator:checked {
+    border-color: #2F80ED;
+    background-color: #2F80ED;
+}
 
 QListWidget#dialogDeviceList {
     background-color: #11161C;

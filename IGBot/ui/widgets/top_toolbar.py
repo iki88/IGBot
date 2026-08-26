@@ -1,5 +1,5 @@
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QLabel,
     QMenu,
@@ -20,6 +20,7 @@ class TopToolbar(QToolBar):
     add_device_requested = Signal()
     add_account_requested = Signal()
     save_requested = Signal()
+    view_phone_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Application", parent)
@@ -66,12 +67,12 @@ class TopToolbar(QToolBar):
         self.stop_action.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
         self.view_phone_action = QAction("View Phone", self)
         self.view_phone_action.setIcon(eye_icon())
-        self.view_phone_action.setToolTip("Phone viewing requires scrcpy integration.")
-        self.view_phone_action.setStatusTip(
-            "Phone viewing is unavailable until scrcpy is integrated."
-        )
+        self.view_phone_action.setToolTip("Open the selected Android phone with scrcpy")
+        self.view_phone_action.setStatusTip("View the selected Android phone")
+        self.view_phone_action.triggered.connect(self.view_phone_requested)
         self.save_action = QAction("Save Changes", self)
         self.save_action.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
+        self.save_action.setShortcut(QKeySequence.Save)
         self.save_action.triggered.connect(self.save_requested)
         self._future_actions = (
             self.add_account_action,
@@ -104,6 +105,7 @@ class TopToolbar(QToolBar):
     def set_context(self, context: str, options_menu: QMenu | None = None) -> None:
         self.refresh_action.setVisible(context == "devices")
         self.add_device_action.setVisible(context == "devices")
+        self.view_phone_action.setEnabled(context in {"devices", "phone"})
         self.add_account_action.setEnabled(context == "phone")
         self.save_action.setEnabled(context == "account")
         for action in self._future_actions:
@@ -119,6 +121,8 @@ class TopToolbar(QToolBar):
             ):
                 action.setVisible(True)
             self.options_button.setText("Device Options")
+        elif context == "devices":
+            self.view_phone_action.setVisible(True)
         elif context == "account":
             self.save_action.setVisible(True)
             self.options_button.setText("Account Options")

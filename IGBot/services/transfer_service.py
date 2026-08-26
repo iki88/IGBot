@@ -1,10 +1,11 @@
+import json
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 from atomicwrites import atomic_write
+from yaml.nodes import MappingNode
 
 from IGBot.core.device import AssignedAccount
 from IGBot.services.account_assignment_service import AccountAssignmentService
@@ -127,6 +128,12 @@ class TransferService:
             raise ValueError("The account configuration path is required.")
         config_path = result.config_path
         original = config_path.read_bytes()
+        metadata_path = (
+            config_path.parent / self._account_assignments.metadata.FILE_NAME
+        )
+        original_metadata = (
+            metadata_path.read_bytes() if metadata_path.is_file() else None
+        )
         try:
             content = original.decode("utf-8")
             parsed = yaml.safe_load(content)
@@ -144,17 +151,29 @@ class TransferService:
         if str(parsed.get("device") or "").strip() != result.source_serial:
             raise ValueError("The account assignment changed before transfer.")
 
-        pattern = re.compile(
-            r"(?m)^(device[ \t]*:[ \t]*)([^#\r\n]*?)([ \t]*(?:#[^\r\n]*)?)\r?$"
-        )
-        matches = list(pattern.finditer(content))
-        if len(matches) != 1 or matches[0].group(2).strip() != result.source_serial:
+        document = yaml.compose(content, Loader=yaml.SafeLoader)
+        if not isinstance(document, MappingNode):
+            raise TypeError("The account configuration must contain a YAML mapping.")
+        device_nodes = [
+            value_node
+            for key_node, value_node in document.value
+            if key_node.value == "device"
+        ]
+        if len(device_nodes) != 1:
             raise ValueError("The existing device assignment is missing or ambiguous.")
-        match = matches[0]
+        device_node = device_nodes[0]
+        original_scalar = content[
+            device_node.start_mark.index : device_node.end_mark.index
+        ]
+        replacement = (
+            json.dumps(result.destination_serial)
+            if original_scalar.startswith(('"', "'"))
+            else result.destination_serial
+        )
         updated = (
-            content[: match.start(2)]
-            + result.destination_serial
-            + content[match.end(2) :]
+            content[: device_node.start_mark.index]
+            + replacement
+            + content[device_node.end_mark.index :]
         )
         if config_path.read_bytes() != original:
             raise RuntimeError("The account configuration changed during transfer.")
@@ -175,8 +194,21 @@ class TransferService:
                 raise RuntimeError(
                     "The updated account assignment could not be verified."
                 )
-        except (OSError, yaml.YAMLError, RuntimeError) as error:
+            metadata = self._account_assignments.metadata.load(config_path.parent)
+            if metadata:
+                self._account_assignments.metadata.update_device(
+                    config_path.parent, result.destination_serial
+                )
+            else:
+                self._account_assignments.metadata.save(
+                    config_path.parent,
+                    result.username,
+                    str(parsed.get("password") or ""),
+                    result.destination_serial,
+                )
+        except (OSError, TypeError, yaml.YAMLError, RuntimeError) as error:
             self._write_atomic(config_path, original.decode("utf-8"))
+            self._account_assignments.metadata.restore(metadata_path, original_metadata)
             if config_path.read_bytes() != original:
                 raise RuntimeError(
                     "The original account configuration could not be restored."

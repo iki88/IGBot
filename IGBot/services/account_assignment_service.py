@@ -9,6 +9,7 @@ from atomicwrites import atomic_write
 from yaml.nodes import MappingNode
 
 from IGBot.core.device import AssignedAccount
+from IGBot.services.account_metadata_service import AccountMetadataService
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class AccountAssignmentService:
 
     def __init__(self, accounts_directory: Path) -> None:
         self._accounts_directory = accounts_directory
+        self.metadata = AccountMetadataService()
 
     @property
     def accounts_directory(self) -> Path:
@@ -44,10 +46,22 @@ class AccountAssignmentService:
         configuration = yaml.safe_load(config_path.read_bytes())
         if not isinstance(configuration, dict):
             raise TypeError("The account configuration must contain a YAML mapping.")
+        metadata = self.metadata.load(config_path.parent)
+        if metadata:
+            configuration = dict(configuration)
+            configuration["username"] = str(
+                metadata.get("username") or configuration.get("username") or ""
+            )
+            configuration["password"] = str(metadata.get("password") or "")
         return configuration
 
     def update_configuration(
-        self, account: AssignedAccount, username: str, password: str, app_id: str
+        self,
+        account: AssignedAccount,
+        username: str,
+        password: str,
+        app_id: str,
+        settings: dict | None = None,
     ) -> AssignedAccount:
         """Atomically update account fields while preserving YAML layout and comments."""
         username = username.strip()
@@ -68,6 +82,10 @@ class AccountAssignmentService:
                 "The account configuration is outside the managed accounts."
             )
         original = config_path.read_bytes()
+        metadata_path = config_path.parent / self.metadata.FILE_NAME
+        original_metadata = (
+            metadata_path.read_bytes() if metadata_path.is_file() else None
+        )
         content = original.decode("utf-8")
         configuration = self.load_configuration(config_path)
         if (
@@ -85,9 +103,48 @@ class AccountAssignmentService:
         document = yaml.compose(content, Loader=yaml.SafeLoader)
         if not isinstance(document, MappingNode):
             raise TypeError("The account configuration must contain a YAML mapping.")
+        settings = settings or {}
+        allowed_settings = {
+            "total-follows-limit",
+            "working-hours",
+            "shuffle-jobs",
+        }
+        if set(settings) - allowed_settings:
+            raise ValueError("The account configuration contains unsupported settings.")
+        for key, value in settings.items():
+            if key == "total-follows-limit" and not re.fullmatch(
+                r"\d+(?:-\d+)?", str(value)
+            ):
+                raise ValueError("Total follows limit must be a number or range.")
+            if key == "total-follows-limit":
+                parts = [int(part) for part in str(value).split("-")]
+                if len(parts) == 2 and parts[0] > parts[1]:
+                    raise ValueError(
+                        "Total follows limit minimum cannot exceed its maximum."
+                    )
+            if key == "working-hours" and (
+                not isinstance(value, list)
+                or any(
+                    not isinstance(window, str)
+                    or not re.fullmatch(
+                        r"\d{1,2}(?:\.\d{1,2})?-\d{1,2}(?:\.\d{1,2})?",
+                        window,
+                    )
+                    for window in value
+                )
+            ):
+                raise ValueError("Working hours must be a list of schedule windows.")
+            if key == "shuffle-jobs" and type(value) is not bool:
+                raise ValueError("Shuffle jobs must be a switch value.")
+
         fields = {}
+        obsolete_fields = []
         for key, value in document.value:
-            if key.value in {"username", "password", "app-id", "app_id"}:
+            if key.value == "password" or key.value.startswith(
+                ("igbot-follow-", "igbot-timer-")
+            ):
+                obsolete_fields.append((key, value))
+            if key.value in {"username", "app-id", "app_id"} | allowed_settings:
                 if key.value in fields:
                     raise ValueError(
                         f"The account configuration contains duplicate {key.value} fields."
@@ -98,9 +155,13 @@ class AccountAssignmentService:
             raise ValueError("The account configuration is missing required fields.")
 
         replacements = []
+        for key_node, value_node in obsolete_fields:
+            line_start = content.rfind("\n", 0, key_node.start_mark.index) + 1
+            line_end = content.find("\n", value_node.end_mark.index)
+            line_end = len(content) if line_end == -1 else line_end + 1
+            replacements.append((line_start, line_end, ""))
         for key, value in (
             ("username", username),
-            ("password", password),
             (app_key, app_id),
         ):
             node = fields.get(key)
@@ -112,21 +173,24 @@ class AccountAssignmentService:
                         json.dumps(value, ensure_ascii=False),
                     )
                 )
-        if "password" not in fields:
-            username_end = fields["username"].end_mark.index
-            line_end = content.find("\n", username_end)
+        missing_settings = []
+        for key, value in settings.items():
+            node = fields.get(key)
+            if node is None:
+                missing_settings.append((key, value))
+            elif configuration.get(key) != value:
+                replacements.append(
+                    (node.start_mark.index, node.end_mark.index, json.dumps(value))
+                )
+        if missing_settings:
             newline = "\r\n" if "\r\n" in content else "\n"
-            encoded = json.dumps(password, ensure_ascii=False)
-            if line_end == -1:
-                replacements.append(
-                    (len(content), len(content), f"{newline}password: {encoded}")
-                )
-            else:
-                replacements.append(
-                    (line_end + 1, line_end + 1, f"password: {encoded}{newline}")
-                )
-        if not replacements:
-            return account
+            prefix = "" if not content or content.endswith(("\n", "\r")) else newline
+            block = prefix + "# IGBot Account Configuration" + newline
+            block += "".join(
+                f"{key}: {json.dumps(value)}{newline}"
+                for key, value in missing_settings
+            )
+            replacements.append((len(content), len(content), block))
         updated = content
         for start, end, replacement in sorted(replacements, reverse=True):
             updated = updated[:start] + replacement + updated[end:]
@@ -145,11 +209,12 @@ class AccountAssignmentService:
                 parsed.get(key) != value
                 for key, value in (
                     ("username", username),
-                    ("password", password),
                     (app_key, app_id),
                 )
             ):
                 raise RuntimeError("The saved account values could not be verified.")
+            if any(parsed.get(key) != value for key, value in settings.items()):
+                raise RuntimeError("The saved account settings could not be verified.")
         except (OSError, RuntimeError, yaml.YAMLError) as error:
             self._write_configuration(config_path, content)
             if config_path.read_bytes() != original:
@@ -162,7 +227,33 @@ class AccountAssignmentService:
         updated_account = self._load_account(config_path)
         if updated_account is None:
             raise RuntimeError("The saved account configuration could not be loaded.")
-        return updated_account
+        old_directory = config_path.parent
+        new_directory = root / username
+        if (
+            old_directory.resolve() != new_directory.resolve()
+            and new_directory.exists()
+        ):
+            raise ValueError("An account directory with this username already exists.")
+        renamed = False
+        try:
+            self.metadata.save(old_directory, username, password, account.device_id)
+            if old_directory.resolve() != new_directory.resolve():
+                old_directory.rename(new_directory)
+                renamed = True
+            updated_account = self._load_account(new_directory / config_path.name)
+            if updated_account is None:
+                raise RuntimeError(
+                    "The renamed account configuration could not be loaded."
+                )
+            return updated_account
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            if renamed:
+                new_directory.rename(old_directory)
+            self._write_configuration(config_path, content)
+            self.metadata.restore(metadata_path, original_metadata)
+            raise RuntimeError(
+                "Account metadata update failed; the original account was restored."
+            ) from error
 
     @staticmethod
     def _write_configuration(path: Path, content: str) -> None:
@@ -221,14 +312,12 @@ class AccountAssignmentService:
             config_path = account_directory / "config.yml"
             content = config_path.read_text(encoding="utf-8")
             encoded_username = json.dumps(username, ensure_ascii=False)
-            encoded_password = json.dumps(password, ensure_ascii=False)
             encoded_device = json.dumps(device_id, ensure_ascii=False)
             content, username_count = re.subn(
                 r"(?m)^(username[ \t]*:[ \t]*)[^#\r\n]*([ \t]*#.*)?$",
                 lambda match: (
                     f"{match.group(1)}{encoded_username}"
                     f"{' ' + match.group(2).lstrip() if match.group(2) else ''}"
-                    f"\npassword: {encoded_password}"
                 ),
                 content,
                 count=1,
@@ -239,7 +328,21 @@ class AccountAssignmentService:
                 content,
                 count=1,
             )
-            if username_count != 1 or device_count != 1:
+            content, app_id_count = re.subn(
+                r"(?m)^(app[-_]id[ \t]*:[ \t]*)[^#\r\n]*([ \t]*#.*)?$",
+                lambda match: (
+                    f'{match.group(1)}""'
+                    f"{' ' + match.group(2).lstrip() if match.group(2) else ''}"
+                ),
+                content,
+                count=1,
+            )
+            content = re.sub(
+                r"(?m)^password[ \t]*:[^\r\n]*(?:\r?\n|$)",
+                "",
+                content,
+            )
+            if username_count != 1 or device_count != 1 or app_id_count != 1:
                 raise RuntimeError(
                     "The account template is missing required configuration."
                 )
@@ -251,12 +354,12 @@ class AccountAssignmentService:
             if (
                 not isinstance(config, dict)
                 or config.get("username") != username
-                or config.get("password") != password
                 or config.get("device") != device_id
             ):
                 raise RuntimeError(
                     "The new account configuration could not be verified."
                 )
+            self.metadata.save(account_directory, username, password, device_id)
 
             account = self._load_account(config_path)
             if account is None:
@@ -313,9 +416,7 @@ class AccountAssignmentService:
 
         device_id = str(config.get("device") or "").strip()
         username = str(config.get("username") or config_path.parent.name).strip()
-        app_id = str(
-            config.get("app-id") or config.get("app_id") or "com.instagram.android"
-        ).strip()
+        app_id = str(config.get("app-id") or config.get("app_id") or "").strip()
         return AssignedAccount(
             username=username,
             device_id=device_id,

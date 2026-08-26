@@ -49,11 +49,40 @@ This roadmap is the single source of truth for IGBot project progress. Preserve 
 - App Cloner application ID configuration and clearly disabled future account controls.
 - Atomic, verified account settings updates preserving YAML formatting and comments.
 
+### Sprint 5.4
+
+- Reusable Follow configuration interface with validation and dirty-state tracking.
+- Atomic Follow settings persistence preserving existing YAML content.
+- Read-only Android application package selector.
+- Account Save Changes keyboard shortcut.
+
+### Sprint 5.5
+
+- Account Timer configuration with exact multi-schedule value preservation.
+- Reusable scheduling, randomization, daily behaviour, and warmup sections.
+- Timer validation integrated with atomic account configuration saving.
+- Follow and Timer bindings verified against the engine configuration vocabulary.
+- Obsolete IGBot-only YAML mappings removed during atomic account saves.
+
+### Sprint 5.5.1
+
+- IGBot-owned account metadata with persistent account credentials.
+- Atomic credential editing and account-directory rename handling.
+- Embedded password visibility control and refined account-page presentation.
+- Foreground Android application ID detection with deferred saving.
+
+### Sprint 5.6
+
+- Managed scrcpy phone viewing from Devices and Phone workspaces.
+- One scrcpy session per Android device with automatic process cleanup.
+- Connected, authorized-device validation and bundled-tool discovery.
+- Complete foreground Application ID detection with deferred persistence and Live Log diagnostics.
+
 ## Missing Features From Old Bot
 
 ### UI
 
-- [ ] View Phone using scrcpy.
+- [x] View Phone using scrcpy.
 - [ ] Status indicators.
 
 ### Devices
@@ -73,8 +102,8 @@ This roadmap is the single source of truth for IGBot project progress. Preserve 
 
 ### Automation
 
-- [ ] Timer.
-- [ ] Follow.
+- [x] Timer configuration interface (execution not implemented).
+- [x] Follow configuration interface (execution not implemented).
 - [ ] Unfollow.
 - [ ] Like.
 - [ ] Comment.
@@ -92,10 +121,6 @@ This roadmap is the single source of truth for IGBot project progress. Preserve 
 - [ ] Live automation monitor.
 
 ## Planned Sprints
-
-### Sprint 5.4
-
-Global Settings functionality.
 
 ### Sprint 6
 

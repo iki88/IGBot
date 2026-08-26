@@ -227,6 +227,10 @@ class DevicesPage(QWidget):
         if proxy_index.isValid():
             self._controller.open_phone_accounts(proxy_index.data(Qt.UserRole))
 
+    def selected_device_serials(self) -> tuple[str, ...]:
+        rows = self.table.selectionModel().selectedRows()
+        return tuple(index.data(Qt.UserRole) for index in rows if index.isValid())
+
     def _handle_row_action(self, action: str, serial: str) -> None:
         if action == "manage":
             self._controller.open_phone_accounts(serial)

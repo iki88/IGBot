@@ -1,10 +1,12 @@
 import logging
 from collections.abc import Callable
+from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 
 from IGBot.core.device import AssignedAccount, DeviceFleetSnapshot, DeviceRecord
 from IGBot.services.device_inventory_service import DeviceInventoryService
+from IGBot.services.scrcpy_service import ScrcpyService
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -58,11 +60,18 @@ class DeviceController(QObject):
     account_configuration_ready = Signal(object, object)
     account_configuration_saved = Signal(object)
     account_configuration_failed = Signal(str)
+    installed_packages_ready = Signal(list)
+    installed_packages_failed = Signal(str)
+    foreground_package_ready = Signal(str)
+    foreground_package_failed = Signal(str)
+    phone_view_ready = Signal(object)
+    phone_view_failed = Signal(str)
 
     def __init__(
         self,
         service: DeviceInventoryService,
         parent: QObject | None = None,
+        scrcpy_service: ScrcpyService | None = None,
     ) -> None:
         super().__init__(parent)
         self._service = service
@@ -70,6 +79,12 @@ class DeviceController(QObject):
         self._refreshing = False
         self._records: dict[str, DeviceRecord] = {}
         self._tasks: set[_ServiceTask] = set()
+        workspace_root = getattr(service, "workspace_root", Path.cwd())
+        self._scrcpy = scrcpy_service or ScrcpyService(workspace_root)
+        self._scrcpy_cleanup_timer = QTimer(self)
+        self._scrcpy_cleanup_timer.setInterval(1000)
+        self._scrcpy_cleanup_timer.timeout.connect(self._scrcpy.cleanup)
+        self._scrcpy_cleanup_timer.start()
 
     @Slot()
     def refresh(self) -> None:
@@ -155,16 +170,66 @@ class DeviceController(QObject):
         self._start_task(task)
 
     def save_account_configuration(
-        self, account: AssignedAccount, username: str, password: str, app_id: str
+        self,
+        account: AssignedAccount,
+        username: str,
+        password: str,
+        app_id: str,
+        settings: dict | None = None,
     ) -> None:
         task = _ServiceTask(
             lambda: self._service.update_account_configuration(
-                account, username, password, app_id
+                account, username, password, app_id, settings
             )
         )
         task.signals.completed.connect(self._on_account_configuration_saved)
         task.signals.failed.connect(self.account_configuration_failed)
         self._start_task(task)
+
+    def load_installed_packages(self, serial: str) -> None:
+        task = _ServiceTask(lambda: self._service.installed_packages(serial))
+        task.signals.completed.connect(
+            lambda packages: self.installed_packages_ready.emit(list(packages))
+        )
+        task.signals.failed.connect(self.installed_packages_failed)
+        self._start_task(task)
+
+    def detect_foreground_package(self, serial: str) -> None:
+        logger.info("Detect App ID started for %s", serial)
+        task = _ServiceTask(lambda: self._service.foreground_package(serial))
+        task.signals.completed.connect(
+            lambda package: self._on_foreground_package_ready(serial, package)
+        )
+        task.signals.failed.connect(
+            lambda message: self._on_foreground_package_failed(serial, message)
+        )
+        self._start_task(task)
+
+    def _on_foreground_package_ready(self, serial: str, package: str) -> None:
+        logger.info("Foreground package detected for %s: %s", serial, package)
+        self.foreground_package_ready.emit(package)
+
+    def _on_foreground_package_failed(self, serial: str, message: str) -> None:
+        logger.error("Detect App ID failed for %s: %s", serial, message)
+        self.foreground_package_failed.emit(message)
+
+    @Slot(str)
+    def view_phone(self, serial: str) -> None:
+        if serial not in self._records:
+            self.phone_view_failed.emit(
+                "Select exactly one managed phone before viewing it."
+            )
+            return
+        task = _ServiceTask(lambda: self._scrcpy.launch(serial))
+        task.signals.completed.connect(self._on_phone_view_ready)
+        task.signals.failed.connect(self.phone_view_failed)
+        self._start_task(task)
+
+    @Slot(object)
+    def _on_phone_view_ready(self, result) -> None:
+        action = "Reused" if result.reused else "Opened"
+        logger.info("%s scrcpy view for %s", action, result.serial)
+        self.phone_view_ready.emit(result)
 
     def _on_account_configuration_saved(self, account: AssignedAccount) -> None:
         logger.info("Saved account configuration for %s", account.username)
