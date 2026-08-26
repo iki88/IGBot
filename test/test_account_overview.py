@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLineEdit
 
 from IGBot.core.device import AssignedAccount
@@ -68,6 +70,36 @@ def test_detect_button_emits_detection_request_and_updates_field(tmp_path):
     assert requests == [True]
     assert page.application_id.text() == "com.instagram.detected"
     assert page.is_dirty
+
+
+def test_application_id_remains_editable_after_detection_and_supports_paste():
+    application = QApplication.instance() or QApplication([])
+    page = AccountPage()
+    page.set_application_id("com.instagram.detected")
+
+    assert not page.application_id.isReadOnly()
+    page.application_id.setFocus()
+    QTest.keyClick(page.application_id, Qt.Key_A, Qt.ControlModifier)
+    QTest.keyClicks(page.application_id, "com.instagram.manual")
+    assert page.application_id.text() == "com.instagram.manual"
+
+    application.clipboard().setText("com.instagram.pasted")
+    QTest.keyClick(page.application_id, Qt.Key_A, Qt.ControlModifier)
+    QTest.keyClick(page.application_id, Qt.Key_V, Qt.ControlModifier)
+    assert page.application_id.text() == "com.instagram.pasted"
+
+
+def test_manually_entered_application_id_persists_after_restart(tmp_path):
+    service, account = _account(tmp_path)
+
+    updated = service.update_configuration(
+        account, "original", "secret", "com.instagram.manual"
+    )
+    restarted = AccountAssignmentService(service.accounts_directory)
+
+    assert restarted.load_configuration(updated.config_path)["app-id"] == (
+        "com.instagram.manual"
+    )
 
 
 def test_save_preserves_comments_line_endings_and_unrelated_configuration(tmp_path):
