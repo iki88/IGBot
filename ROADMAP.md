@@ -78,18 +78,51 @@ This roadmap is the single source of truth for IGBot project progress. Preserve 
 - Connected, authorized-device validation and bundled-tool discovery.
 - Complete foreground Application ID detection with deferred persistence and Live Log diagnostics.
 
+### Sprint 5.7
+
+- Isolated InstaAddict account runtime orchestration.
+- Responsive Start and graceful Stop controls with lifecycle states.
+- Runtime output forwarding to Live Log and concurrent-session-ready workers.
+
+### Sprint 5.7.4
+
+- One persistent Phone Scheduler worker per managed Android phone.
+- Sequential timer discovery and account selection with disabled-session handling.
+- Waiting scheduler lifecycle, scheduling decision logs, and phone-scoped Start/Stop.
+
+### Sprint 5.8
+
+- Engine-compatible Unfollow configuration interface.
+- Unfollow modes, limits, behaviour, file targets, validation, and status indicator.
+
+### Sprint 5.9
+
+- Engine-compatible Like configuration interface.
+- Like interaction, limits, media behaviour, post files, validation, and status indicator.
+
+### Sprint 5.10
+
+- Engine-compatible Story configuration interface.
+- Story session settings, limits, validation, dirty state, and status indicator.
+
+### Sprint 5.11
+
+- Engine-compatible Direct Message configuration interface.
+- DM limits, recipient filtering, message-bank editing, validation, and status indicator.
+- Transparent atomic persistence across config.yml, filters.yml, and pm_list.txt.
+
 ## Missing Features From Old Bot
 
 ### UI
 
 - [x] View Phone using scrcpy.
-- [ ] Status indicators.
+- [x] Runtime status indicators.
 
 ### Devices
 
 - [ ] Today dialog.
-- [ ] Start device.
-- [ ] Stop device.
+- [x] Start phone scheduler.
+- [x] Stop phone scheduler and active account runtime.
 - [ ] Device statistics.
 
 ### Accounts
@@ -104,18 +137,18 @@ This roadmap is the single source of truth for IGBot project progress. Preserve 
 
 - [x] Timer configuration interface (execution not implemented).
 - [x] Follow configuration interface (execution not implemented).
-- [ ] Unfollow.
-- [ ] Like.
+- [x] Unfollow configuration interface (execution not implemented).
+- [x] Like configuration interface (execution not implemented).
 - [ ] Comment.
-- [ ] Story.
-- [ ] DM.
+- [x] Story configuration interface (execution not implemented).
+- [x] DM configuration interface (execution not implemented).
 - [ ] Post.
 - [ ] Reels.
 - [ ] Share.
 
 ### Global
 
-- [ ] Scheduler.
+- [x] Phone Scheduler lifecycle and timer-selection foundation.
 - [ ] Session history.
 - [ ] Session queue.
 - [ ] Live automation monitor.

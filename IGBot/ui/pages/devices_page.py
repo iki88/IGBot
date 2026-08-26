@@ -38,6 +38,7 @@ class DevicesPage(QWidget):
     """Fleet management workspace backed by the persistent device inventory."""
 
     notification_requested = Signal(str, int)
+    runtime_start_requested = Signal(str)
 
     def __init__(
         self, controller: DeviceController, parent: QWidget | None = None
@@ -232,7 +233,9 @@ class DevicesPage(QWidget):
         return tuple(index.data(Qt.UserRole) for index in rows if index.isValid())
 
     def _handle_row_action(self, action: str, serial: str) -> None:
-        if action == "manage":
+        if action == "start":
+            self.runtime_start_requested.emit(serial)
+        elif action == "manage":
             self._controller.open_phone_accounts(serial)
         elif action == "delete" and self._confirm_delete(serial):
             self._controller.delete_device(serial)

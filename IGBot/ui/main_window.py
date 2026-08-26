@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
@@ -5,9 +6,11 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QDialog, QMainWindow, QSplitter, QStackedWidget
 
 from IGBot.core.device import AssignedAccount, DeviceRecord
+from IGBot.core.session_engine import SessionState
 from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
 from IGBot.services.device_inventory_service import DeviceInventoryService
 from IGBot.ui.controllers.device_controller import DeviceController
+from IGBot.ui.controllers.session_controller import SessionController
 from IGBot.ui.pages.account_page import AccountPage
 from IGBot.ui.pages.activity_log_page import ActivityLogPage
 from IGBot.ui.pages.devices_page import DevicesPage
@@ -21,6 +24,9 @@ from IGBot.ui.widgets.navigation_sidebar import NavigationSidebar
 from IGBot.ui.widgets.package_selection_dialog import PackageSelectionDialog
 from IGBot.ui.widgets.top_toolbar import TopToolbar
 from IGBot.ui.widgets.transfer_account_dialog import TransferAccountDialog
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class MainWindow(QMainWindow):
@@ -38,6 +44,9 @@ class MainWindow(QMainWindow):
 
         service = device_service or DeviceInventoryService.for_workspace(Path.cwd())
         self.device_controller = DeviceController(service, self)
+        self.session_controller = SessionController(
+            getattr(service, "workspace_root", Path.cwd()), self
+        )
         self.sidebar = NavigationSidebar(self)
         self.toolbar = TopToolbar(self)
         self.pages = QStackedWidget(self)
@@ -91,6 +100,17 @@ class MainWindow(QMainWindow):
         self.toolbar.add_account_requested.connect(self._show_add_account_dialog)
         self.toolbar.save_requested.connect(self._save_account_configuration)
         self.toolbar.view_phone_requested.connect(self._view_phone)
+        self.toolbar.start_requested.connect(self._start_phone_scheduler)
+        self.toolbar.stop_requested.connect(self._stop_phone_scheduler)
+        self.devices_page.runtime_start_requested.connect(self._start_device_accounts)
+        self.phone_accounts_page.active_account_changed.connect(
+            self._update_runtime_toolbar
+        )
+        self.session_controller.state_changed.connect(self._runtime_state_changed)
+        self.session_controller.account_state_changed.connect(
+            self._account_runtime_state_changed
+        )
+        self.session_controller.operation_failed.connect(self._show_runtime_error)
         self.device_controller.refresh_started.connect(
             lambda: self.statusBar().showMessage("Discovering Android devices…")
         )
@@ -212,6 +232,76 @@ class MainWindow(QMainWindow):
     def _show_phone_view_error(self, message: str) -> None:
         ErrorDialog("View Phone", message, self).exec()
 
+    def _start_phone_scheduler(self) -> None:
+        logger.info("Start clicked in Phone workspace")
+        if not self._managed_phone_serial:
+            self._report_runtime_error("No managed phone is open.")
+            return
+        device = next(
+            (
+                item
+                for item in self.device_controller.managed_devices
+                if item.serial == self._managed_phone_serial
+            ),
+            None,
+        )
+        if device is None:
+            self._report_runtime_error(
+                "The open phone is not in the managed inventory."
+            )
+            return
+        self.session_controller.start(device)
+
+    def _start_device_accounts(self, serial: str) -> None:
+        logger.info("Start clicked for phone %s", serial)
+        device = next(
+            (
+                item
+                for item in self.device_controller.managed_devices
+                if item.serial == serial
+            ),
+            None,
+        )
+        if device is None:
+            self._report_runtime_error(
+                "The selected phone is not in the managed inventory."
+            )
+            return
+        self.session_controller.start(device)
+
+    def _stop_phone_scheduler(self) -> None:
+        logger.info("Stop clicked in Phone workspace")
+        if not self._managed_phone_serial:
+            self._report_runtime_error("No managed phone is open.")
+            return
+        self.session_controller.stop(self._managed_phone_serial)
+
+    def _update_runtime_toolbar(self, account) -> None:
+        if self._workspace_context != "phone" or not self._managed_phone_serial:
+            self.toolbar.set_runtime_controls(False, False)
+            return
+        state = self.session_controller.state_for(self._managed_phone_serial)
+        self.toolbar.set_runtime_controls(
+            state in {SessionState.IDLE, SessionState.STOPPED, SessionState.ERROR},
+            state
+            in {SessionState.STARTING, SessionState.RUNNING, SessionState.WAITING},
+        )
+
+    def _runtime_state_changed(self, serial: str, status: str) -> None:
+        self._update_runtime_toolbar(None)
+        self.statusBar().showMessage(f"{serial}: {status}", 3000)
+
+    def _account_runtime_state_changed(self, username: str, status: str) -> None:
+        self.phone_accounts_page.set_runtime_status(username, status)
+        self.statusBar().showMessage(f"{username}: {status}", 3000)
+
+    def _show_runtime_error(self, message: str) -> None:
+        ErrorDialog("Account Runtime", message, self).exec()
+
+    def _report_runtime_error(self, message: str) -> None:
+        logger.error("Account runtime validation failed: %s", message)
+        self._show_runtime_error(message)
+
     def _open_phone_accounts(
         self, device: DeviceRecord, accounts: list[AssignedAccount]
     ) -> None:
@@ -222,6 +312,7 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentWidget(self.phone_accounts_page)
         self.toolbar.set_context_title("Phone accounts")
         self.toolbar.set_context("phone", self.phone_accounts_page.options_menu)
+        self._update_runtime_toolbar(None)
         self.live_log.show()
         self.statusBar().showMessage(f"Managing accounts for {device.serial}")
 
@@ -518,5 +609,6 @@ class MainWindow(QMainWindow):
             )
 
     def closeEvent(self, event) -> None:
+        self.session_controller.stop_all()
         self.live_log.detach_logging()
         super().closeEvent(event)

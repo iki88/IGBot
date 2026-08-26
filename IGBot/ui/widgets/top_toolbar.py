@@ -21,6 +21,8 @@ class TopToolbar(QToolBar):
     add_account_requested = Signal()
     save_requested = Signal()
     view_phone_requested = Signal()
+    start_requested = Signal()
+    stop_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Application", parent)
@@ -63,8 +65,14 @@ class TopToolbar(QToolBar):
         )
         self.start_action = QAction("Start", self)
         self.start_action.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.start_action.setToolTip("Start this phone's scheduler")
+        self.start_action.setStatusTip("Start the persistent scheduler for this phone")
+        self.start_action.triggered.connect(self.start_requested)
         self.stop_action = QAction("Stop", self)
         self.stop_action.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
+        self.stop_action.setToolTip("Stop this phone's scheduler")
+        self.stop_action.setStatusTip("Stop the phone scheduler and active session")
+        self.stop_action.triggered.connect(self.stop_requested)
         self.view_phone_action = QAction("View Phone", self)
         self.view_phone_action.setIcon(eye_icon())
         self.view_phone_action.setToolTip("Open the selected Android phone with scrcpy")
@@ -131,3 +139,7 @@ class TopToolbar(QToolBar):
         self.options_action.setVisible(
             context in {"phone", "account"} and options_menu is not None
         )
+
+    def set_runtime_controls(self, can_start: bool, can_stop: bool) -> None:
+        self.start_action.setEnabled(can_start)
+        self.stop_action.setEnabled(can_stop)

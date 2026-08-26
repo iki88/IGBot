@@ -37,6 +37,7 @@ class PhoneAccountsPage(QWidget):
     account_delete_requested = Signal(str)
     account_folder_requested = Signal(str)
     account_open_requested = Signal(object)
+    active_account_changed = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -103,6 +104,7 @@ class PhoneAccountsPage(QWidget):
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self._configure_columns()
         self.table.doubleClicked.connect(self._open_account)
+        self.table.selectionModel().selectionChanged.connect(self._selection_changed)
 
         self.empty_state = EmptyState(
             self.style().standardIcon(QStyle.SP_FileDialogListView),
@@ -175,6 +177,12 @@ class PhoneAccountsPage(QWidget):
         layout.addWidget(card, 1)
 
     def set_phone(self, device: DeviceRecord, accounts: list[AssignedAccount]) -> None:
+        selected = self.selected_account()
+        selected_path = (
+            selected.config_path.resolve()
+            if selected is not None and self._serial == device.serial
+            else None
+        )
         self._serial = device.serial
         self.device_context.show()
         self.search.clear()
@@ -198,6 +206,14 @@ class PhoneAccountsPage(QWidget):
         noun = "account" if count == 1 else "accounts"
         self.account_summary.setText(f"{count} {noun}")
         self.model.set_accounts(accounts)
+        if selected_path is not None:
+            for row, account in enumerate(accounts):
+                if account.config_path.resolve() == selected_path:
+                    source_index = self.model.index(row, 0)
+                    self.table.selectRow(
+                        self.proxy_model.mapFromSource(source_index).row()
+                    )
+                    break
         has_accounts = bool(accounts)
         self.table.setVisible(has_accounts)
         self.empty_state.setVisible(not has_accounts)
@@ -259,6 +275,18 @@ class PhoneAccountsPage(QWidget):
         account = self.model.account_at(source_index.row())
         if account is not None:
             self.account_open_requested.emit(account)
+
+    def selected_account(self) -> AssignedAccount | None:
+        rows = self.table.selectionModel().selectedRows()
+        if len(rows) != 1:
+            return None
+        return self.model.account_at(self.proxy_model.mapToSource(rows[0]).row())
+
+    def _selection_changed(self) -> None:
+        self.active_account_changed.emit(self.selected_account())
+
+    def set_runtime_status(self, username: str, status: str) -> None:
+        self.model.set_runtime_status(username, status)
 
     def build_account_options(self, account: AssignedAccount) -> QMenu:
         username = account.username

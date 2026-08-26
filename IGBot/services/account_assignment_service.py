@@ -53,6 +53,16 @@ class AccountAssignmentService:
                 metadata.get("username") or configuration.get("username") or ""
             )
             configuration["password"] = str(metadata.get("password") or "")
+        filters_path = config_path.parent / "filters.yml"
+        if filters_path.is_file():
+            filters = yaml.safe_load(filters_path.read_bytes())
+            if isinstance(filters, dict) and "pm_to_private_or_empty" in filters:
+                configuration["pm_to_private_or_empty"] = filters[
+                    "pm_to_private_or_empty"
+                ]
+        messages_path = config_path.parent / "pm_list.txt"
+        if messages_path.is_file():
+            configuration["pm_list.txt"] = messages_path.read_text(encoding="utf-8")
         return configuration
 
     def update_configuration(
@@ -103,11 +113,46 @@ class AccountAssignmentService:
         document = yaml.compose(content, Loader=yaml.SafeLoader)
         if not isinstance(document, MappingNode):
             raise TypeError("The account configuration must contain a YAML mapping.")
-        settings = settings or {}
+        settings = dict(settings or {})
+        filter_settings = {}
+        if "pm_to_private_or_empty" in settings:
+            filter_settings["pm_to_private_or_empty"] = settings.pop(
+                "pm_to_private_or_empty"
+            )
+        messages_marker = object()
+        messages = settings.pop("pm_list.txt", messages_marker)
         allowed_settings = {
             "total-follows-limit",
             "working-hours",
             "shuffle-jobs",
+            "unfollow",
+            "unfollow-non-followers",
+            "unfollow-any-non-followers",
+            "unfollow-any-followers",
+            "unfollow-any",
+            "min-following",
+            "sort-followers-newest-to-oldest",
+            "unfollow-delay",
+            "total-unfollows-limit",
+            "delete-removed-followers",
+            "unfollow-from-file",
+            "remove-followers-from-file",
+            "likes-count",
+            "likes-percentage",
+            "total-likes-limit",
+            "end-if-likes-limit-reached",
+            "carousel-count",
+            "carousel-percentage",
+            "watch-photo-time",
+            "watch-video-time",
+            "posts-from-file",
+            "stories-count",
+            "stories-percentage",
+            "total-watches-limit",
+            "end-if-watches-limit-reached",
+            "pm-percentage",
+            "total-pm-limit",
+            "end-if-pm-limit-reached",
         }
         if set(settings) - allowed_settings:
             raise ValueError("The account configuration contains unsupported settings.")
@@ -136,6 +181,92 @@ class AccountAssignmentService:
                 raise ValueError("Working hours must be a list of schedule windows.")
             if key == "shuffle-jobs" and type(value) is not bool:
                 raise ValueError("Shuffle jobs must be a switch value.")
+            unfollow_ranges = {
+                "unfollow",
+                "unfollow-non-followers",
+                "unfollow-any-non-followers",
+                "unfollow-any-followers",
+                "unfollow-any",
+                "total-unfollows-limit",
+            }
+            if key in unfollow_ranges and not re.fullmatch(r"\d+(?:-\d+)?", str(value)):
+                raise ValueError(f"{key} must be a number or range.")
+            if key in unfollow_ranges and "-" in str(value):
+                minimum, maximum = (int(part) for part in str(value).split("-", 1))
+                if minimum > maximum:
+                    raise ValueError(f"{key} minimum cannot exceed its maximum.")
+            if key == "min-following" and (type(value) is not int or value < 0):
+                raise ValueError("Minimum following must be a non-negative number.")
+            if key == "unfollow-delay" and not re.fullmatch(r"\d+", str(value)):
+                raise ValueError(
+                    "Unfollow delay must be a non-negative number of days."
+                )
+            if (
+                key
+                in {
+                    "sort-followers-newest-to-oldest",
+                    "delete-removed-followers",
+                }
+                and type(value) is not bool
+            ):
+                raise ValueError(f"{key} must be a switch value.")
+            if key in {"unfollow-from-file", "remove-followers-from-file"} and (
+                not isinstance(value, list)
+                or any(not isinstance(item, str) or not item.strip() for item in value)
+            ):
+                raise ValueError(f"{key} must be a list of file entries.")
+            interaction_ranges = {
+                "likes-count",
+                "likes-percentage",
+                "total-likes-limit",
+                "carousel-count",
+                "carousel-percentage",
+                "watch-photo-time",
+                "watch-video-time",
+                "stories-count",
+                "stories-percentage",
+                "total-watches-limit",
+                "pm-percentage",
+                "total-pm-limit",
+            }
+            if key in interaction_ranges and not re.fullmatch(
+                r"\d+(?:-\d+)?", str(value)
+            ):
+                raise ValueError(f"{key} must be a number or range.")
+            if key in interaction_ranges and "-" in str(value):
+                minimum, maximum = (int(part) for part in str(value).split("-", 1))
+                if minimum > maximum:
+                    raise ValueError(f"{key} minimum cannot exceed its maximum.")
+            if (
+                key
+                in {
+                    "likes-percentage",
+                    "carousel-percentage",
+                    "stories-percentage",
+                    "pm-percentage",
+                }
+                and max(int(part) for part in str(value).split("-")) > 100
+            ):
+                raise ValueError(f"{key} cannot exceed 100.")
+            if (
+                key
+                in {
+                    "end-if-likes-limit-reached",
+                    "end-if-watches-limit-reached",
+                    "end-if-pm-limit-reached",
+                }
+                and type(value) is not bool
+            ):
+                raise ValueError(f"{key} must be a switch value.")
+            if key == "posts-from-file" and (
+                not isinstance(value, list)
+                or any(not isinstance(item, str) or not item.strip() for item in value)
+            ):
+                raise ValueError("posts-from-file must be a list of file entries.")
+        if any(type(value) is not bool for value in filter_settings.values()):
+            raise ValueError("DM filter settings must be switch values.")
+        if messages is not messages_marker and not isinstance(messages, str):
+            raise ValueError("The direct message list must be text.")
 
         fields = {}
         obsolete_fields = []
@@ -224,6 +355,32 @@ class AccountAssignmentService:
             raise RuntimeError(
                 "Account configuration verification failed; the original was restored."
             ) from error
+        filters_path = config_path.parent / "filters.yml"
+        messages_path = config_path.parent / "pm_list.txt"
+        original_filters = filters_path.read_bytes() if filters_path.is_file() else None
+        original_messages = (
+            messages_path.read_bytes() if messages_path.is_file() else None
+        )
+        try:
+            if filter_settings:
+                self._update_yaml_fields(filters_path, filter_settings)
+            if messages is not messages_marker:
+                if messages:
+                    self._write_configuration(messages_path, messages)
+                    if messages_path.read_text(encoding="utf-8") != messages:
+                        raise RuntimeError(
+                            "The direct message list could not be verified."
+                        )
+                elif messages_path.exists():
+                    messages_path.unlink()
+        except (OSError, RuntimeError, TypeError, ValueError, yaml.YAMLError) as error:
+            self._write_configuration(config_path, content)
+            self._restore_file(filters_path, original_filters)
+            self._restore_file(messages_path, original_messages)
+            raise RuntimeError(
+                "DM configuration update failed; the original files were restored."
+            ) from error
+
         updated_account = self._load_account(config_path)
         if updated_account is None:
             raise RuntimeError("The saved account configuration could not be loaded.")
@@ -251,6 +408,8 @@ class AccountAssignmentService:
                 new_directory.rename(old_directory)
             self._write_configuration(config_path, content)
             self.metadata.restore(metadata_path, original_metadata)
+            self._restore_file(filters_path, original_filters)
+            self._restore_file(messages_path, original_messages)
             raise RuntimeError(
                 "Account metadata update failed; the original account was restored."
             ) from error
@@ -259,6 +418,67 @@ class AccountAssignmentService:
     def _write_configuration(path: Path, content: str) -> None:
         with atomic_write(path, overwrite=True, encoding="utf-8", newline="") as output:
             output.write(content)
+
+    @classmethod
+    def _update_yaml_fields(cls, path: Path, values: dict[str, object]) -> None:
+        original = path.read_bytes() if path.is_file() else None
+        content = original.decode("utf-8") if original is not None else ""
+        parsed = yaml.safe_load(content) if content else {}
+        if not isinstance(parsed, dict):
+            raise TypeError(f"{path.name} must contain a YAML mapping.")
+        document = yaml.compose(content, Loader=yaml.SafeLoader) if content else None
+        fields = {}
+        if isinstance(document, MappingNode):
+            for key_node, value_node in document.value:
+                if key_node.value in values:
+                    if key_node.value in fields:
+                        raise ValueError(
+                            f"{path.name} contains duplicate {key_node.value} fields."
+                        )
+                    fields[key_node.value] = value_node
+
+        replacements = []
+        missing = []
+        for key, value in values.items():
+            node = fields.get(key)
+            if node is None:
+                missing.append((key, value))
+            elif parsed.get(key) != value:
+                replacements.append(
+                    (node.start_mark.index, node.end_mark.index, json.dumps(value))
+                )
+        if missing:
+            newline = "\r\n" if "\r\n" in content else "\n"
+            prefix = "" if not content or content.endswith(("\n", "\r")) else newline
+            replacements.append(
+                (
+                    len(content),
+                    len(content),
+                    prefix
+                    + "".join(
+                        f"{key}: {json.dumps(value)}{newline}" for key, value in missing
+                    ),
+                )
+            )
+        updated = content
+        for start, end, replacement in sorted(replacements, reverse=True):
+            updated = updated[:start] + replacement + updated[end:]
+        cls._write_configuration(path, updated)
+        verified = yaml.safe_load(path.read_bytes())
+        if not isinstance(verified, dict) or any(
+            verified.get(key) != value for key, value in values.items()
+        ):
+            cls._restore_file(path, original)
+            raise RuntimeError(f"The saved {path.name} values could not be verified.")
+
+    @classmethod
+    def _restore_file(cls, path: Path, original: bytes | None) -> None:
+        if original is None:
+            if path.exists():
+                path.unlink()
+            return
+        with atomic_write(path, overwrite=True, mode="wb") as output:
+            output.write(original)
 
     def create_account(
         self,

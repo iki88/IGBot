@@ -213,7 +213,7 @@ def test_phone_account_table_uses_final_dense_operator_columns():
     )
     assert page.table.verticalHeader().defaultSectionSize() == 34
     assert page.table.columnWidth(page.model.STATUS) == 96
-    assert page.model.index(0, page.model.STATUS).data() == "—"
+    assert page.model.index(0, page.model.STATUS).data() == "Idle"
     assert (
         page.model.index(0, page.model.STATUS).data(Qt.TextAlignmentRole)
         == Qt.AlignCenter

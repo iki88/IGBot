@@ -17,8 +17,12 @@ from PySide6.QtWidgets import (
 from IGBot.core.device import AssignedAccount
 from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
 from IGBot.ui.icons import eye_icon
+from IGBot.ui.pages.dm_configuration_page import DMConfigurationPage
 from IGBot.ui.pages.follow_configuration_page import FollowConfigurationPage
+from IGBot.ui.pages.like_configuration_page import LikeConfigurationPage
+from IGBot.ui.pages.story_configuration_page import StoryConfigurationPage
 from IGBot.ui.pages.timer_configuration_page import TimerConfigurationPage
+from IGBot.ui.pages.unfollow_configuration_page import UnfollowConfigurationPage
 from IGBot.ui.widgets.page_header import PageHeader
 
 
@@ -68,7 +72,24 @@ class AccountPage(QWidget):
         self.follow_page.changed.connect(self._mark_dirty)
         self.follow_page.changed.connect(self.update_follow_tab_indicator)
         self.tabs.addTab(self.follow_page, "Follow")
-        for name in self.TABS[3:]:
+        self.unfollow_page = UnfollowConfigurationPage(self.tabs)
+        self.unfollow_page.changed.connect(self._mark_dirty)
+        self.unfollow_page.changed.connect(self.update_unfollow_tab_indicator)
+        self.tabs.addTab(self.unfollow_page, "Unfollow")
+        self.like_page = LikeConfigurationPage(self.tabs)
+        self.like_page.changed.connect(self._mark_dirty)
+        self.like_page.changed.connect(self.update_like_tab_indicator)
+        self.tabs.addTab(self.like_page, "Like")
+        self.tabs.addTab(QWidget(self.tabs), "Comment")
+        self.story_page = StoryConfigurationPage(self.tabs)
+        self.story_page.changed.connect(self._mark_dirty)
+        self.story_page.changed.connect(self.update_story_tab_indicator)
+        self.tabs.addTab(self.story_page, "Story")
+        self.dm_page = DMConfigurationPage(self.tabs)
+        self.dm_page.changed.connect(self._mark_dirty)
+        self.dm_page.changed.connect(self.update_dm_tab_indicator)
+        self.tabs.addTab(self.dm_page, "DM")
+        for name in self.TABS[8:]:
             self.tabs.addTab(QWidget(self.tabs), name)
 
         layout = QVBoxLayout(self)
@@ -172,13 +193,25 @@ class AccountPage(QWidget):
         )
         self.follow_page.set_configuration(configuration)
         self.timer_page.set_configuration(configuration)
+        self.unfollow_page.set_configuration(configuration)
+        self.like_page.set_configuration(configuration)
+        self.story_page.set_configuration(configuration)
+        self.dm_page.set_configuration(configuration)
         self.update_follow_tab_indicator()
+        self.update_unfollow_tab_indicator()
+        self.update_like_tab_indicator()
+        self.update_story_tab_indicator()
+        self.update_dm_tab_indicator()
         self._loading = False
         self.mark_clean()
 
     def configuration_values(self) -> dict:
         values = self.follow_page.values()
         values.update(self.timer_page.values())
+        values.update(self.unfollow_page.values())
+        values.update(self.like_page.values())
+        values.update(self.story_page.values())
+        values.update(self.dm_page.values())
         return values
 
     def set_application_id(self, package: str) -> None:
@@ -200,6 +233,34 @@ class AccountPage(QWidget):
         self.tabs.setTabText(2, f"{'●' if enabled else '○'} Follow")
         self.tabs.tabBar().setTabTextColor(
             2, QColor("#43c86b" if enabled else "#788697")
+        )
+
+    def update_unfollow_tab_indicator(self) -> None:
+        enabled = self.unfollow_page.status.text() == "● Enabled"
+        self.tabs.setTabText(3, f"{'●' if enabled else '○'} Unfollow")
+        self.tabs.tabBar().setTabTextColor(
+            3, QColor("#43c86b" if enabled else "#788697")
+        )
+
+    def update_like_tab_indicator(self) -> None:
+        enabled = self.like_page.status.text() == "● Enabled"
+        self.tabs.setTabText(4, f"{'●' if enabled else '○'} Like")
+        self.tabs.tabBar().setTabTextColor(
+            4, QColor("#43c86b" if enabled else "#788697")
+        )
+
+    def update_story_tab_indicator(self) -> None:
+        enabled = self.story_page.enabled.isChecked()
+        self.tabs.setTabText(6, f"{'●' if enabled else '○'} Story")
+        self.tabs.tabBar().setTabTextColor(
+            6, QColor("#43c86b" if enabled else "#788697")
+        )
+
+    def update_dm_tab_indicator(self) -> None:
+        enabled = self.dm_page.enabled.isChecked()
+        self.tabs.setTabText(7, f"{'●' if enabled else '○'} DM")
+        self.tabs.tabBar().setTabTextColor(
+            7, QColor("#43c86b" if enabled else "#788697")
         )
 
     def set_account(self, account: AssignedAccount, phone_name: str = "") -> None:

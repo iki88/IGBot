@@ -30,6 +30,7 @@ class PhoneAccountsModel(QAbstractTableModel):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._accounts: list[AssignedAccount] = []
+        self._statuses: dict[str, str] = {}
 
     def rowCount(self, parent=_ROOT_INDEX) -> int:
         return 0 if parent.isValid() else len(self._accounts)
@@ -59,7 +60,11 @@ class PhoneAccountsModel(QAbstractTableModel):
             return account.device_id
         if role != Qt.DisplayRole:
             return None
-        return account.username if index.column() == self.USERNAME else "—"
+        if index.column() == self.USERNAME:
+            return account.username
+        if index.column() == self.STATUS:
+            return self._statuses.get(str(account.config_path.resolve()), "Idle")
+        return "—"
 
     def headerData(
         self, section: int, orientation: Qt.Orientation, role=Qt.DisplayRole
@@ -83,3 +88,10 @@ class PhoneAccountsModel(QAbstractTableModel):
         if 0 <= row < len(self._accounts):
             return self._accounts[row]
         return None
+
+    def set_runtime_status(self, username: str, status: str) -> None:
+        for row, account in enumerate(self._accounts):
+            if account.username == username:
+                self._statuses[str(account.config_path.resolve())] = status
+                index = self.index(row, self.STATUS)
+                self.dataChanged.emit(index, index, [Qt.DisplayRole])

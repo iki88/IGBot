@@ -24,7 +24,7 @@ class DeviceActionsDelegate(QStyledItemDelegate):
 
     action_requested = Signal(str, str)
     _BUTTONS = (
-        _ActionButton("start", "Start", 70, QStyle.SP_MediaPlay, enabled=False),
+        _ActionButton("start", "Start", 70, QStyle.SP_MediaPlay),
         _ActionButton("manage", "Manage", 82, QStyle.SP_DirOpenIcon),
         _ActionButton("delete", "", 42, QStyle.SP_TrashIcon),
     )
@@ -121,7 +121,7 @@ class DeviceActionsDelegate(QStyledItemDelegate):
             if rect.contains(event.pos()):
                 tooltip = {
                     "manage": "Open phone accounts",
-                    "start": "Available when session orchestration is implemented",
+                    "start": "Start the persistent scheduler for this phone",
                     "delete": "Remove phone from IGBot",
                 }[button.action]
                 QToolTip.showText(event.globalPos(), tooltip, view)

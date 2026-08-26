@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
 from IGBot.core.device import AssignedAccount, DeviceFleetSnapshot, DeviceRecord
+from IGBot.core.session_engine import SessionState
 from IGBot.ui.controllers.device_controller import DeviceController
 from IGBot.ui.main_window import MainWindow
 from IGBot.ui.models.device_table_model import DeviceTableModel
@@ -128,13 +129,13 @@ def test_delete_requires_both_confirmations(devices_page, mocker):
     assert dialogs.call_count == 2
 
 
-def test_start_action_is_present_and_disabled():
+def test_start_action_is_present_and_enabled():
     start = next(
         button for button in DeviceActionsDelegate._BUTTONS if button.action == "start"
     )
 
     assert start.text == "Start"
-    assert start.enabled is False
+    assert start.enabled is True
 
 
 def test_action_order_is_start_manage_delete():
@@ -143,6 +144,16 @@ def test_action_order_is_start_manage_delete():
         "manage",
         "delete",
     ]
+
+
+def test_device_start_action_routes_to_runtime_signal(devices_page):
+    page, _ = devices_page
+    requested = []
+    page.runtime_start_requested.connect(requested.append)
+
+    page._handle_row_action("start", "serial-alpha")
+
+    assert requested == ["serial-alpha"]
 
 
 def test_sidebar_devices_item_returns_from_phone_accounts(application):
@@ -249,10 +260,96 @@ def test_phone_toolbar_actions_use_compact_icons(application):
     ]
     assert all(action.isVisible() and not action.icon().isNull() for action in actions)
     assert window.toolbar.add_account_action.isEnabled()
-    assert all(not action.isEnabled() for action in actions[1:3])
+    assert not window.toolbar.today_action.isEnabled()
+    assert window.toolbar.start_action.isEnabled()
+    assert not window.toolbar.stop_action.isEnabled()
     assert window.toolbar.view_phone_action.isEnabled()
     assert window.toolbar.iconSize().width() == 16
     assert not window.toolbar.options_button.icon().isNull()
+    window.close()
+
+
+def test_phone_start_action_starts_phone_scheduler_without_account_selection(
+    application, mocker
+):
+    account = AssignedAccount(
+        "active_account",
+        "phone-a",
+        "com.instagram.android",
+        Path("accounts/active_account/config.yml"),
+    )
+    device = DeviceRecord("phone-a", "Rack One", True, (account,))
+    service = _DeviceService()
+    mocker.patch.object(service, "refresh", return_value=DeviceFleetSnapshot((device,)))
+    window = MainWindow(service)
+    application.processEvents()
+    window.device_controller._records = {device.serial: device}
+    window._open_phone_accounts(device, [account])
+    start = mocker.patch.object(window.session_controller, "start")
+    error = mocker.patch.object(window, "_show_runtime_error")
+
+    assert window.toolbar.start_action.isEnabled()
+
+    window.toolbar.start_action.trigger()
+    application.processEvents()
+
+    start.assert_called_once_with(device)
+    error.assert_not_called()
+    assert "Start clicked in Phone workspace" in window.live_log.output.toPlainText()
+    window.close()
+
+
+def test_device_row_start_calls_session_controller_for_real_accounts(
+    application, mocker
+):
+    account = AssignedAccount(
+        "active_account",
+        "phone-a",
+        "com.instagram.android",
+        Path("accounts/active_account/config.yml"),
+    )
+    device = DeviceRecord("phone-a", "Rack One", True, (account,))
+    service = _DeviceService()
+    mocker.patch.object(service, "refresh", return_value=DeviceFleetSnapshot((device,)))
+    window = MainWindow(service)
+    application.processEvents()
+    window.device_controller._records = {device.serial: device}
+    start = mocker.patch.object(window.session_controller, "start")
+
+    window.devices_page.runtime_start_requested.emit("phone-a")
+    application.processEvents()
+
+    start.assert_called_once_with(device)
+    assert "Start clicked for phone phone-a" in window.live_log.output.toPlainText()
+    assert window.toolbar.start_action.toolTip() == "Start this phone's scheduler"
+    window.close()
+
+
+def test_phone_stop_action_calls_session_controller_and_logs(application, mocker):
+    account = AssignedAccount(
+        "active_account",
+        "phone-a",
+        "com.instagram.android",
+        Path("accounts/active_account/config.yml"),
+    )
+    device = DeviceRecord("phone-a", "Rack One", True, (account,))
+    service = _DeviceService()
+    mocker.patch.object(service, "refresh", return_value=DeviceFleetSnapshot((device,)))
+    window = MainWindow(service)
+    application.processEvents()
+    window._open_phone_accounts(device, [account])
+    mocker.patch.object(
+        window.session_controller, "state_for", return_value=SessionState.RUNNING
+    )
+    stop = mocker.patch.object(window.session_controller, "stop")
+    window._update_runtime_toolbar(None)
+
+    assert window.toolbar.stop_action.isEnabled()
+    window.toolbar.stop_action.trigger()
+    application.processEvents()
+
+    stop.assert_called_once_with("phone-a")
+    assert "Stop clicked in Phone workspace" in window.live_log.output.toPlainText()
     window.close()
 
 
