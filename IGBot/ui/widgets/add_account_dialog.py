@@ -1,5 +1,6 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -15,7 +16,12 @@ from IGBot.core.device import DeviceRecord
 class AddAccountDialog(QDialog):
     """Collect credentials for the phone already open in the current workspace."""
 
-    def __init__(self, device: DeviceRecord, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        device: DeviceRecord,
+        templates: tuple[str, ...] = (),
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("addAccountDialog")
         self.setWindowTitle("Add Account")
@@ -41,6 +47,14 @@ class AddAccountDialog(QDialog):
         self.password.setObjectName("dialogInput")
         self.password.setEchoMode(QLineEdit.Password)
         self.password.setPlaceholderText("Instagram password")
+
+        template_label = QLabel("TEMPLATE (OPTIONAL)", self)
+        template_label.setObjectName("dialogFieldLabel")
+        self.template = QComboBox(self)
+        self.template.setObjectName("dialogInput")
+        self.template.addItem("None", "")
+        for name in templates:
+            self.template.addItem(name, name)
 
         self.add_button = QPushButton("Add Account", self)
         self.add_button.setObjectName("primaryButton")
@@ -69,6 +83,9 @@ class AddAccountDialog(QDialog):
         layout.addSpacing(5)
         layout.addWidget(password_label)
         layout.addWidget(self.password)
+        layout.addSpacing(5)
+        layout.addWidget(template_label)
+        layout.addWidget(self.template)
         layout.addLayout(actions)
 
         self.username.textChanged.connect(self._update_submit)
@@ -78,3 +95,6 @@ class AddAccountDialog(QDialog):
         self.add_button.setEnabled(
             bool(self.username.text().strip()) and bool(self.password.text())
         )
+
+    def selected_template(self) -> str:
+        return str(self.template.currentData() or "")

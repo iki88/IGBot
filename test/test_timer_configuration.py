@@ -92,7 +92,7 @@ def test_timer_validation_highlights_invalid_schedule():
         assert "hours from 0 to 24" in str(error)
     else:
         raise AssertionError("Invalid schedule was accepted")
-    assert "D9534F" in page.start_hours.styleSheet()
+    assert "EF4444" in page.start_hours.styleSheet()
 
 
 def test_timer_rejects_reversed_pause_range():

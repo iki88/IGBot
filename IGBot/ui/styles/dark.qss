@@ -10,8 +10,31 @@ QWidget#phoneAccountsPage,
 QWidget#accountPage,
 QWidget#activityLogPage,
 QWidget#globalSettingsPage,
+QWidget#templatesPage,
 QStackedWidget {
     background-color: #11161C;
+}
+
+QListWidget#configurationList {
+    background-color: #0b1016;
+    border: 1px solid #28323e;
+    border-radius: 6px;
+    color: #cbd4df;
+    outline: 0;
+    padding: 4px;
+    selection-background-color: #173b66;
+    selection-color: #f3f7fb;
+}
+
+QListWidget#configurationList::item {
+    border-bottom: 1px solid #1c242e;
+    min-height: 38px;
+    padding: 0 10px;
+}
+
+QListWidget#configurationList::item:selected {
+    background-color: #173b66;
+    color: #f3f7fb;
 }
 
 QWidget#navigationSidebar {
@@ -56,7 +79,7 @@ QListWidget#navigationList::item {
 
 QListWidget#navigationList::item:selected {
     background-color: #173b66;
-    color: #ffffff;
+    color: #F9FAFB;
 }
 
 QToolBar#topToolbar {
@@ -122,7 +145,7 @@ QPushButton#primaryButton {
     background-color: #2F80ED;
     border: 1px solid #2F80ED;
     border-radius: 5px;
-    color: #ffffff;
+    color: #F9FAFB;
     font-weight: 600;
 }
 
@@ -164,7 +187,7 @@ QPushButton#dangerButton {
     background-color: #D9534F;
     border: 1px solid #D9534F;
     border-radius: 5px;
-    color: #ffffff;
+    color: #F9FAFB;
     font-weight: 600;
 }
 
@@ -509,3 +532,196 @@ QScrollBar::handle:horizontal {
 
 QScrollBar::add-line:horizontal,
 QScrollBar::sub-line:horizontal { width: 0; }
+
+/* Sprint 5.15 visual identity. Shared controls inherit this palette. */
+QMainWindow,
+QWidget#devicesPage,
+QWidget#phoneAccountsPage,
+QWidget#accountPage,
+QWidget#activityLogPage,
+QWidget#globalSettingsPage,
+QWidget#templatesPage,
+QStackedWidget,
+QScrollArea,
+QScrollArea > QWidget > QWidget,
+QAbstractScrollArea::viewport {
+    background-color: #18181B;
+}
+
+* {
+    color: #F9FAFB;
+    font-family: "Segoe UI Variable", "Segoe UI";
+    font-size: 14px;
+}
+
+QLabel:disabled,
+QPushButton:disabled,
+QToolButton:disabled,
+QCheckBox:disabled,
+QRadioButton:disabled {
+    color: #52525B;
+}
+
+QWidget#navigationSidebar,
+QToolBar#topToolbar,
+QDialog#confirmationDialog,
+QDialog#addDeviceDialog,
+QDialog#addAccountDialog,
+QDialog#inputDialog,
+QDialog#transferAccountDialog {
+    background-color: #27272A;
+    border-color: #3F3F46;
+}
+
+QFrame#contentCard,
+QFrame#deviceContext,
+QLabel#summaryText,
+QMenu,
+QToolTip {
+    background-color: #27272A;
+    border-color: #3F3F46;
+}
+
+QLabel#pageTitle,
+QLabel#dialogTitle,
+QLabel#deviceContextTitle,
+QLabel#emptyStateTitle,
+QLabel#brandLabel {
+    color: #F9FAFB;
+}
+
+QLabel#pageSubtitle,
+QLabel#dialogSubtitle,
+QLabel#dialogFieldLabel,
+QLabel#dialogHint,
+QLabel#brandCaption,
+QLabel#emptyStateDescription,
+QLabel#deviceContextSerial {
+    color: #A1A1AA;
+}
+
+QPushButton#primaryButton {
+    background-color: #3B82F6;
+    border-color: #3B82F6;
+    color: #F9FAFB;
+}
+QPushButton#primaryButton:hover { background-color: #4B8EF7; border-color: #60A5FA; }
+QPushButton#primaryButton:pressed { background-color: #2563EB; border-color: #2563EB; }
+QPushButton#primaryButton:disabled { background-color: #27272A; border-color: #3F3F46; color: #52525B; }
+
+QPushButton#secondaryButton,
+QToolBar#topToolbar QToolButton {
+    background-color: #27272A;
+    border-color: #3F3F46;
+    color: #F9FAFB;
+}
+QPushButton#secondaryButton:hover,
+QToolBar#topToolbar QToolButton:hover { background-color: #3F3F46; border-color: #52525B; }
+QPushButton#secondaryButton:pressed,
+QToolBar#topToolbar QToolButton:pressed { background-color: #18181B; border-color: #3B82F6; }
+
+QPushButton#dangerButton { background-color: #EF4444; border-color: #EF4444; color: #F9FAFB; }
+QPushButton#dangerButton:hover { background-color: #F05252; border-color: #F87171; }
+QPushButton#dangerButton:pressed { background-color: #DC2626; border-color: #DC2626; }
+
+QLineEdit,
+QPlainTextEdit,
+QTextEdit,
+QSpinBox,
+QDoubleSpinBox,
+QComboBox,
+QListWidget#configurationList,
+QListWidget#dialogDeviceList {
+    background-color: #27272A;
+    border: 1px solid #3F3F46;
+    border-radius: 6px;
+    color: #F9FAFB;
+    selection-background-color: #3B82F6;
+    selection-color: #F9FAFB;
+}
+
+QLineEdit,
+QSpinBox,
+QDoubleSpinBox,
+QComboBox { min-height: 35px; padding: 0 10px; }
+QPlainTextEdit, QTextEdit { padding: 8px 10px; }
+
+QLineEdit:hover,
+QPlainTextEdit:hover,
+QTextEdit:hover,
+QSpinBox:hover,
+QDoubleSpinBox:hover,
+QComboBox:hover { border-color: #52525B; }
+
+QLineEdit:focus,
+QPlainTextEdit:focus,
+QTextEdit:focus,
+QSpinBox:focus,
+QDoubleSpinBox:focus,
+QComboBox:focus { border: 1px solid #3B82F6; background-color: #27272A; }
+
+QLineEdit:disabled,
+QPlainTextEdit:disabled,
+QTextEdit:disabled,
+QSpinBox:disabled,
+QDoubleSpinBox:disabled,
+QComboBox:disabled { background-color: #18181B; border-color: #27272A; color: #52525B; }
+
+QComboBox QAbstractItemView { background-color: #27272A; border: 1px solid #3F3F46; selection-background-color: #3B82F6; }
+
+QCheckBox,
+QRadioButton { color: #F9FAFB; spacing: 8px; }
+QCheckBox::indicator,
+QRadioButton::indicator { width: 17px; height: 17px; border: 1px solid #52525B; background-color: #27272A; }
+QCheckBox::indicator { border-radius: 4px; }
+QRadioButton::indicator { border-radius: 9px; }
+QCheckBox::indicator:hover,
+QRadioButton::indicator:hover { border-color: #3B82F6; }
+QCheckBox::indicator:checked,
+QRadioButton::indicator:checked { background-color: #3B82F6; border-color: #3B82F6; }
+
+QCheckBox#configurationSwitch::indicator { width: 36px; height: 20px; border-radius: 10px; background-color: #3F3F46; border-color: #52525B; }
+QCheckBox#configurationSwitch::indicator:hover { border-color: #A1A1AA; }
+QCheckBox#configurationSwitch::indicator:checked { background-color: #3B82F6; border-color: #60A5FA; }
+
+QTabWidget#accountTabs::pane { background-color: #18181B; border-color: #3F3F46; }
+QTabWidget#accountTabs QTabBar::tab { background-color: #18181B; border-color: #3F3F46; color: #A1A1AA; font-weight: 600; }
+QTabWidget#accountTabs QTabBar::tab:hover { background-color: #27272A; color: #F9FAFB; }
+QTabWidget#accountTabs QTabBar::tab:selected { background-color: #27272A; border-bottom: 3px solid #3B82F6; color: #F9FAFB; }
+
+QTableView#deviceTable,
+QTableView#accountsTable { background-color: #18181B; alternate-background-color: #202023; border-color: #3F3F46; color: #F9FAFB; gridline-color: #27272A; selection-background-color: #1D4ED8; }
+QTableView#deviceTable::item:hover,
+QTableView#accountsTable::item:hover { background-color: #27272A; }
+QTableView#deviceTable::item:selected,
+QTableView#accountsTable::item:selected { background-color: #1D4ED8; color: #F9FAFB; }
+QHeaderView::section { background-color: #27272A; border-color: #3F3F46; color: #A1A1AA; }
+
+QToolButton#configurationSectionHeader { color: #F9FAFB; font-weight: 700; }
+QToolButton#configurationSectionHeader:hover { background: transparent; }
+
+QPushButton#linkButton {
+    background: transparent;
+    border: 0;
+    color: #60A5FA;
+    font-weight: 600;
+    min-height: 28px;
+    padding: 0 4px;
+    text-align: left;
+}
+QPushButton#linkButton:hover { color: #93C5FD; text-decoration: underline; }
+QPushButton#linkButton:pressed { color: #3B82F6; }
+
+QLabel#mutedLabel { color: #A1A1AA; font-size: 12px; }
+
+QLabel#connectionDot[connected="true"] { color: #22C55E; }
+QLabel#connectionDot { color: #EF4444; }
+QLabel#connectedSummary { color: #22C55E; border-color: #166534; background-color: #1A2E21; }
+QLabel#offlineSummary { color: #EF4444; border-color: #7F1D1D; background-color: #321C1C; }
+QLabel#errorBanner { color: #FCA5A5; border-color: #EF4444; background-color: #321C1C; }
+QLabel[status="warning"] { color: #F59E0B; }
+
+QWidget#liveLogPanel,
+QPlainTextEdit#liveLogOutput,
+QStatusBar { background-color: #18181B; border-color: #3F3F46; }
+QPlainTextEdit#liveLogOutput { color: #A1A1AA; }

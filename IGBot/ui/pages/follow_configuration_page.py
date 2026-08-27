@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
 from IGBot.ui.widgets.configuration_widgets import (
     CheckboxGroup,
     CollapsibleSection,
@@ -43,8 +44,11 @@ class FollowConfigurationPage(QScrollArea):
         "word_filter": "filter-word-search",
     }
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, include_sources: bool = True) -> None:
         super().__init__(parent)
+        self._loading = False
+        self._limit_present = False
+        self._limit_edited = False
         self.setWidgetResizable(True)
         container = QWidget(self)
         layout = QVBoxLayout(container)
@@ -63,15 +67,6 @@ class FollowConfigurationPage(QScrollArea):
         section.body_layout.addLayout(row)
         layout.addWidget(section)
 
-        self.methods = CheckboxGroup(
-            {
-                self.KEYS["followers"]: "Follow User's Followers",
-                self.KEYS["likers"]: "Follow User's Likers",
-                self.KEYS["specific"]: "Follow Specific Users",
-                self.KEYS["keyword"]: "Follow Accounts Using Keyword Search",
-            },
-            container,
-        )
         self.behaviour = CheckboxGroup(
             {
                 self.KEYS["visit"]: "Visit Target Profile",
@@ -104,7 +99,6 @@ class FollowConfigurationPage(QScrollArea):
             container,
         )
         for title, widget in (
-            ("Method", self.methods),
             ("Behaviour", self.behaviour),
             ("Limits", self.limits),
             ("Additional Settings", self.safety),
@@ -114,22 +108,30 @@ class FollowConfigurationPage(QScrollArea):
             if title == "Limits":
                 section.body_layout.addWidget(self.auto_increment)
             layout.addWidget(section)
+        self.sources = AudienceSourcesPage(container)
+        self.sources.setObjectName("moduleSources")
+        self.sources.setVisible(include_sources)
+        layout.addWidget(self.sources)
         layout.addStretch()
         self.setWidget(container)
-        self.methods.changed.connect(self.changed)
         self.behaviour.changed.connect(self.changed)
-        self.limits.changed.connect(self.changed)
+        self.limits.changed.connect(self._limits_changed)
         self.safety.changed.connect(self.changed)
         self.auto_increment.toggled.connect(self.changed)
+        self.sources.changed.connect(self.changed)
 
     def _enabled_changed(self, enabled: bool) -> None:
         self.status.setText("● Enabled" if enabled else "● Disabled")
-        self.status.setStyleSheet(f"color: {'#43c86b' if enabled else '#788697'}")
+        self.status.setStyleSheet(f"color: {'#22C55E' if enabled else '#A1A1AA'}")
         self.changed.emit()
 
     def set_configuration(self, configuration: dict) -> None:
-        self.enabled.setChecked(False)
-        self.methods.set_values({})
+        self._loading = True
+        self._limit_present = "total-follows-limit" in configuration
+        self._limit_edited = False
+        self.enabled.setChecked(
+            str(configuration.get("follow-percentage") or "0") not in {"", "0"}
+        )
         self.behaviour.set_values({})
         self.auto_increment.setChecked(False)
         self.safety.set_values({})
@@ -143,6 +145,8 @@ class FollowConfigurationPage(QScrollArea):
             limits[self.KEYS["minimum"]] = 0
             limits[self.KEYS["maximum"]] = 0
         self.limits.set_values(limits)
+        self.sources.set_configuration(configuration)
+        self._loading = False
 
     def values(self) -> dict:
         values = self.limits.values()
@@ -156,4 +160,14 @@ class FollowConfigurationPage(QScrollArea):
         if min_delay > max_delay:
             raise ValueError("Minimum delay cannot exceed maximum delay.")
         total_limit = str(minimum) if minimum == maximum else f"{minimum}-{maximum}"
-        return {"total-follows-limit": total_limit}
+        if not self._limit_present and not self._limit_edited:
+            return {"follow-percentage": "1" if self.enabled.isChecked() else "0"}
+        return {
+            "total-follows-limit": total_limit,
+            "follow-percentage": "1" if self.enabled.isChecked() else "0",
+        }
+
+    def _limits_changed(self) -> None:
+        if not self._loading:
+            self._limit_edited = True
+            self.changed.emit()

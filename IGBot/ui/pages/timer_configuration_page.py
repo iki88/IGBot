@@ -156,7 +156,7 @@ class TimerConfigurationPage(QScrollArea):
         invalid = []
         for editor in (self.start_hours, self.end_hours):
             valid = self._valid_hours(editor.text())
-            editor.setStyleSheet("" if valid else "border: 1px solid #D9534F;")
+            editor.setStyleSheet("" if valid else "border: 1px solid #EF4444;")
             if not valid:
                 invalid.append(editor)
         if invalid:
@@ -173,8 +173,8 @@ class TimerConfigurationPage(QScrollArea):
             value.strip() for value in self.end_hours.text().split(",") if value.strip()
         ]
         if len(starts) != len(ends):
-            self.start_hours.setStyleSheet("border: 1px solid #D9534F;")
-            self.end_hours.setStyleSheet("border: 1px solid #D9534F;")
+            self.start_hours.setStyleSheet("border: 1px solid #EF4444;")
+            self.end_hours.setStyleSheet("border: 1px solid #EF4444;")
             raise ValueError(
                 "Start Hour and End Hour must contain the same number of values."
             )
@@ -187,8 +187,8 @@ class TimerConfigurationPage(QScrollArea):
         minimum_pause.setStyleSheet("")
         maximum_pause.setStyleSheet("")
         if minimum_pause.value() > maximum_pause.value():
-            minimum_pause.setStyleSheet("border: 1px solid #D9534F;")
-            maximum_pause.setStyleSheet("border: 1px solid #D9534F;")
+            minimum_pause.setStyleSheet("border: 1px solid #EF4444;")
+            maximum_pause.setStyleSheet("border: 1px solid #EF4444;")
             minimum_pause.setFocus()
             raise ValueError("Minimum Pause cannot exceed Maximum Pause.")
         return values

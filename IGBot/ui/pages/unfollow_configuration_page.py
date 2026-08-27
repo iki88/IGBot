@@ -24,8 +24,9 @@ class UnfollowConfigurationPage(QScrollArea):
         "unfollow-any": "Any account",
     }
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, include_file_targets: bool = True) -> None:
         super().__init__(parent)
+        self.include_file_targets = include_file_targets
         self._present_keys: set[str] = set()
         self.setWidgetResizable(True)
         container = QWidget(self)
@@ -77,7 +78,10 @@ class UnfollowConfigurationPage(QScrollArea):
             },
             container,
         )
-        self._add_section(layout, "File Targets", self.files, container)
+        self.files_section = self._add_section(
+            layout, "File Targets", self.files, container
+        )
+        self.files_section.setVisible(include_file_targets)
         layout.addStretch()
         self.setWidget(container)
 
@@ -95,6 +99,7 @@ class UnfollowConfigurationPage(QScrollArea):
         section = CollapsibleSection(title, parent)
         section.body_layout.addWidget(widget)
         layout.addWidget(section)
+        return section
 
     def set_configuration(self, configuration: dict) -> None:
         keys = set(self.RANGE_KEYS) | {
@@ -119,7 +124,8 @@ class UnfollowConfigurationPage(QScrollArea):
         values.update(self.limits.values())
         values.update(self.numeric.values())
         values.update(self.behaviour.values())
-        values.update(self.files.values())
+        if self.include_file_targets:
+            values.update(self.files.values())
         result = {}
         numeric_keys = set(self.numeric.controls)
         for key, value in values.items():
@@ -147,4 +153,4 @@ class UnfollowConfigurationPage(QScrollArea):
             control.toPlainText().strip() for control in self.files.controls.values()
         )
         self.status.setText("● Enabled" if enabled else "● Disabled")
-        self.status.setStyleSheet(f"color: {'#43c86b' if enabled else '#788697'}")
+        self.status.setStyleSheet(f"color: {'#22C55E' if enabled else '#A1A1AA'}")

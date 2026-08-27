@@ -5,13 +5,13 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 def phone_icon() -> QIcon:
     """Return a compact phone glyph suitable for primary navigation."""
     icon = QIcon()
-    icon.addPixmap(_phone_pixmap("#9caaba"), QIcon.Normal, QIcon.Off)
-    icon.addPixmap(_phone_pixmap("#f3f7fb"), QIcon.Selected, QIcon.Off)
-    icon.addPixmap(_phone_pixmap("#f3f7fb"), QIcon.Active, QIcon.Off)
+    icon.addPixmap(_phone_pixmap("#A1A1AA"), QIcon.Normal, QIcon.Off)
+    icon.addPixmap(_phone_pixmap("#F9FAFB"), QIcon.Selected, QIcon.Off)
+    icon.addPixmap(_phone_pixmap("#F9FAFB"), QIcon.Active, QIcon.Off)
     return icon
 
 
-def copy_icon(color: str = "#9caaba") -> QIcon:
+def copy_icon(color: str = "#A1A1AA") -> QIcon:
     """Return a small copy glyph without relying on a platform icon theme."""
     pixmap = _canvas()
     painter = QPainter(pixmap)
@@ -24,7 +24,7 @@ def copy_icon(color: str = "#9caaba") -> QIcon:
     return QIcon(pixmap)
 
 
-def archive_icon(color: str = "#9AA7B3") -> QIcon:
+def archive_icon(color: str = "#A1A1AA") -> QIcon:
     """Return an archive glyph matching the application's phone icon weight."""
     pixmap = _canvas()
     painter = QPainter(pixmap)
@@ -38,7 +38,7 @@ def archive_icon(color: str = "#9AA7B3") -> QIcon:
     return QIcon(pixmap)
 
 
-def eye_icon(color: str = "#9AA7B3") -> QIcon:
+def eye_icon(color: str = "#A1A1AA") -> QIcon:
     """Return a compact eye glyph for the phone-view toolbar action."""
     pixmap = _canvas()
     painter = QPainter(pixmap)

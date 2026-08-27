@@ -1,11 +1,13 @@
 import json
 import os
+import shutil
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from IGBot.core.device import DeviceFleetSnapshot, DeviceRecord
 from IGBot.core.phone_manager import PhoneManager
 from IGBot.services.account_assignment_service import AccountAssignmentService
+from IGBot.services.account_template_service import AccountTemplateService
 from IGBot.services.archive_service import ARCHIVED_ACCOUNTS, ArchiveService
 from IGBot.services.transfer_service import TransferService
 
@@ -24,6 +26,9 @@ class DeviceInventoryService:
         self.transfer_service = TransferService(account_assignments)
         self.archive_service = ArchiveService(account_assignments)
         self._workspace_root = workspace_root or inventory_path.parent.parent
+        self.template_service = AccountTemplateService(
+            self._workspace_root / "templates"
+        )
 
     @property
     def workspace_root(self) -> Path:
@@ -71,17 +76,29 @@ class DeviceInventoryService:
         state["deleted"] = [item for item in state["deleted"] if item != serial]
         self._save_state(state)
 
-    def add_account(self, username: str, password: str, serial: str):
+    def add_account(
+        self, username: str, password: str, serial: str, template_name: str = ""
+    ):
         if serial not in {entry["serial"] for entry in self._load_state()["devices"]}:
             raise ValueError(
                 "The selected phone is not in the managed device inventory."
             )
-        return self._account_assignments.create_account(
+        account = self._account_assignments.create_account(
             username,
             password,
             serial,
             self._workspace_root / "config-examples",
         )
+        if template_name:
+            try:
+                self.template_service.apply(template_name, account.config_path.parent)
+                account = self._account_assignments._load_account(account.config_path)
+                if account is None:
+                    raise RuntimeError("The templated account could not be loaded.")
+            except Exception:
+                shutil.rmtree(account.config_path.parent)
+                raise
+        return account
 
     def account_configuration(self, account):
         return self._account_assignments.load_configuration(account.config_path)

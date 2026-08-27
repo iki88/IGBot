@@ -47,7 +47,12 @@ class NavigationSidebar(QWidget):
                 "Activity Log",
             )
         )
-        self.navigation.setMaximumHeight(168)
+        self.navigation.addItem(
+            QListWidgetItem(
+                self.style().standardIcon(QStyle.SP_FileDialogListView), "Templates"
+            )
+        )
+        self.navigation.setMaximumHeight(212)
         self.navigation.setCurrentRow(0)
         self.navigation.itemClicked.connect(self._select_workspace)
 
@@ -86,4 +91,4 @@ class NavigationSidebar(QWidget):
 
     def _select_settings(self, item: QListWidgetItem) -> None:
         self.navigation.clearSelection()
-        self.page_selected.emit(4 + self.settings_navigation.row(item))
+        self.page_selected.emit(5 + self.settings_navigation.row(item))

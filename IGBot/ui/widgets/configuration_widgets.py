@@ -24,9 +24,8 @@ class CollapsibleSection(QFrame):
         self.toggle = QToolButton(self)
         self.toggle.setObjectName("configurationSectionHeader")
         self.toggle.setText(title)
-        self.toggle.setCheckable(True)
-        self.toggle.setChecked(True)
-        self.toggle.setArrowType(Qt.DownArrow)
+        self.toggle.setCheckable(False)
+        self.toggle.setArrowType(Qt.NoArrow)
         self.toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.body = QWidget(self)
         self.body_layout = QVBoxLayout(self.body)
@@ -35,11 +34,6 @@ class CollapsibleSection(QFrame):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.addWidget(self.toggle)
         layout.addWidget(self.body)
-        self.toggle.toggled.connect(self._set_expanded)
-
-    def _set_expanded(self, expanded: bool) -> None:
-        self.body.setVisible(expanded)
-        self.toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
 
 
 class CheckboxGroup(QWidget):
@@ -131,7 +125,7 @@ class RangeSettings(QWidget):
             if valid and "-" in value:
                 minimum, maximum = (int(part) for part in value.split("-", 1))
                 valid = minimum <= maximum
-            control.setStyleSheet("" if valid else "border: 1px solid #D9534F;")
+            control.setStyleSheet("" if valid else "border: 1px solid #EF4444;")
             if not valid:
                 control.setFocus()
                 raise ValueError(f"{key} must be a number or ascending range.")

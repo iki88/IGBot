@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 
 from IGBot.core.device import AssignedAccount, DeviceFleetSnapshot, DeviceRecord
+from IGBot.services.account_template_service import AccountTemplateService
 from IGBot.services.device_inventory_service import DeviceInventoryService
 from IGBot.services.scrcpy_service import ScrcpyService
 
@@ -66,6 +67,11 @@ class DeviceController(QObject):
     foreground_package_failed = Signal(str)
     phone_view_ready = Signal(object)
     phone_view_failed = Signal(str)
+    templates_changed = Signal(object)
+    template_configuration_ready = Signal(str, object)
+    template_saved = Signal(str)
+    template_applied = Signal(object)
+    template_operation_failed = Signal(str)
 
     def __init__(
         self,
@@ -80,6 +86,15 @@ class DeviceController(QObject):
         self._records: dict[str, DeviceRecord] = {}
         self._tasks: set[_ServiceTask] = set()
         workspace_root = getattr(service, "workspace_root", Path.cwd())
+        if not isinstance(workspace_root, (str, Path)):
+            workspace_root = Path.cwd()
+        workspace_root = Path(workspace_root)
+        template_service = getattr(service, "template_service", None)
+        self._templates = (
+            template_service
+            if isinstance(template_service, AccountTemplateService)
+            else AccountTemplateService(workspace_root / "templates")
+        )
         self._scrcpy = scrcpy_service or ScrcpyService(workspace_root)
         self._scrcpy_cleanup_timer = QTimer(self)
         self._scrcpy_cleanup_timer.setInterval(1000)
@@ -138,14 +153,75 @@ class DeviceController(QObject):
     def rename_device(self, serial: str, phone_name: str) -> None:
         self._run_and_refresh(lambda: self._service.rename_device(serial, phone_name))
 
-    @Slot(str, str, str)
-    def add_account(self, username: str, password: str, serial: str) -> None:
+    @Slot(str, str, str, str)
+    def add_account(
+        self, username: str, password: str, serial: str, template_name: str = ""
+    ) -> None:
         task = _ServiceTask(
-            lambda: self._service.add_account(username, password, serial)
+            lambda: self._service.add_account(username, password, serial, template_name)
         )
         task.signals.completed.connect(self._on_account_created)
         task.signals.failed.connect(self.account_creation_failed)
         self._start_task(task)
+
+    def load_templates(self) -> None:
+        task = _ServiceTask(self._templates.list_templates)
+        task.signals.completed.connect(self.templates_changed)
+        task.signals.failed.connect(self.template_operation_failed)
+        self._start_task(task)
+
+    def create_template(self, name: str) -> None:
+        task = _ServiceTask(lambda: self._templates.create(name))
+        task.signals.completed.connect(self._on_template_created)
+        task.signals.failed.connect(self.template_operation_failed)
+        self._start_task(task)
+
+    def rename_template(self, name: str, new_name: str) -> None:
+        self._run_template_change(lambda: self._templates.rename(name, new_name))
+
+    def delete_template(self, name: str) -> None:
+        self._run_template_change(lambda: self._templates.delete(name))
+
+    def load_template_configuration(self, name: str) -> None:
+        task = _ServiceTask(lambda: self._templates.load(name))
+        task.signals.completed.connect(
+            lambda values: self.template_configuration_ready.emit(name, values)
+        )
+        task.signals.failed.connect(self.template_operation_failed)
+        self._start_task(task)
+
+    def save_template(self, name: str, values: dict) -> None:
+        task = _ServiceTask(lambda: self._templates.save(name, values))
+        task.signals.completed.connect(lambda _: self._on_template_saved(name))
+        task.signals.failed.connect(self.template_operation_failed)
+        self._start_task(task)
+
+    def apply_template(self, name: str, account: AssignedAccount) -> None:
+        task = _ServiceTask(
+            lambda: self._templates.apply(name, account.config_path.parent)
+        )
+        task.signals.completed.connect(lambda _: self._on_template_applied(account))
+        task.signals.failed.connect(self.template_operation_failed)
+        self._start_task(task)
+
+    def _on_template_applied(self, account: AssignedAccount) -> None:
+        self.template_applied.emit(account)
+        self.refresh()
+
+    def _run_template_change(self, operation: Callable[[], object]) -> None:
+        task = _ServiceTask(operation)
+        task.signals.completed.connect(lambda _: self.load_templates())
+        task.signals.failed.connect(self.template_operation_failed)
+        self._start_task(task)
+
+    def _on_template_created(self, template) -> None:
+        """Refresh the workspace and continue directly into template editing."""
+        self.load_templates()
+        self.load_template_configuration(template.name)
+
+    def _on_template_saved(self, name: str) -> None:
+        self.template_saved.emit(name)
+        self.load_templates()
 
     @Slot(object)
     def _on_account_created(self, account: AssignedAccount) -> None:

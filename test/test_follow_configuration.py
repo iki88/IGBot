@@ -41,7 +41,7 @@ def test_follow_configuration_loads_and_tracks_dirty_state(tmp_path):
 
     assert page.follow_page.limits.controls["minimum"].value() == 5
     assert not page.is_dirty
-    assert page.tabs.tabText(2) == "○ Follow"
+    assert page.tabs.tabText(2) == "● Follow"
 
     page.follow_page.limits.controls["maximum"].setValue(12)
     assert page.is_dirty
@@ -56,7 +56,8 @@ def test_follow_configuration_saves_without_changing_unrelated_yaml(tmp_path):
     page.limits.controls["minimum"].setValue(7)
     page.limits.controls["maximum"].setValue(15)
     page.enabled.setChecked(True)
-    page.methods.controls["method-followers"].setChecked(True)
+    page.sources.rows["blogger-followers"].set_entries(["source.account"])
+    page.sources.rows["blogger-followers"].enabled.setChecked(True)
 
     service.update_configuration(
         account, "account", "secret", "com.example.app", page.values()

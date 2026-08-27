@@ -175,7 +175,7 @@ def test_sidebar_contains_workspace_and_settings_navigation(application):
     assert [
         window.sidebar.navigation.item(index).text()
         for index in range(window.sidebar.navigation.count())
-    ] == ["Devices", "Accounts", "Archived", "Activity Log"]
+    ] == ["Devices", "Accounts", "Archived", "Activity Log", "Templates"]
     assert window.sidebar.settings_navigation.item(0).text() == "Global Settings"
     window.close()
 
@@ -233,9 +233,10 @@ def test_account_navigation_uses_context_specific_toolbar(application):
     assert not window.toolbar.start_action.isVisible()
     assert not window.toolbar.stop_action.isVisible()
     assert not window.toolbar.view_phone_action.isVisible()
-    assert [window.account_page.tabs.tabText(i) for i in range(11)] == list(
-        window.account_page.TABS
-    )
+    assert [
+        window.account_page.tabs.tabText(i)
+        for i in range(window.account_page.tabs.count())
+    ] == list(window.account_page.TABS)
     window.close()
 
 

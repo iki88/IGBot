@@ -16,12 +16,16 @@ from IGBot.ui.pages.activity_log_page import ActivityLogPage
 from IGBot.ui.pages.devices_page import DevicesPage
 from IGBot.ui.pages.global_settings_page import GlobalSettingsPage
 from IGBot.ui.pages.phone_accounts_page import PhoneAccountsPage
+from IGBot.ui.pages.templates_page import TemplatesPage
 from IGBot.ui.widgets.add_account_dialog import AddAccountDialog
 from IGBot.ui.widgets.confirmation_dialog import ConfirmationDialog
 from IGBot.ui.widgets.error_dialog import ErrorDialog
 from IGBot.ui.widgets.live_log_panel import LiveLogPanel
 from IGBot.ui.widgets.navigation_sidebar import NavigationSidebar
 from IGBot.ui.widgets.package_selection_dialog import PackageSelectionDialog
+from IGBot.ui.widgets.template_editor_dialog import TemplateEditorDialog
+from IGBot.ui.widgets.template_selection_dialog import TemplateSelectionDialog
+from IGBot.ui.widgets.text_input_dialog import TextInputDialog
 from IGBot.ui.widgets.top_toolbar import TopToolbar
 from IGBot.ui.widgets.transfer_account_dialog import TransferAccountDialog
 
@@ -41,6 +45,7 @@ class MainWindow(QMainWindow):
         self._managed_phone_serial: str | None = None
         self._workspace_context = "devices"
         self._account_return_context = "devices"
+        self._templates = ()
 
         service = device_service or DeviceInventoryService.for_workspace(Path.cwd())
         self.device_controller = DeviceController(service, self)
@@ -56,11 +61,13 @@ class MainWindow(QMainWindow):
         self.account_page = AccountPage(self)
         self.activity_log_page = ActivityLogPage(self.live_log, self)
         self.global_settings_page = GlobalSettingsPage(Path.cwd(), self)
+        self.templates_page = TemplatesPage(self)
         self.devices_page.add_device_button.hide()
 
         self._build_shell()
         self._connect_signals()
         self.device_controller.refresh()
+        self.device_controller.load_templates()
 
     def _build_shell(self) -> None:
         self.addToolBar(Qt.TopToolBarArea, self.toolbar)
@@ -70,6 +77,7 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.account_page)
         self.pages.addWidget(self.activity_log_page)
         self.pages.addWidget(self.global_settings_page)
+        self.pages.addWidget(self.templates_page)
 
         content_splitter = QSplitter(Qt.Vertical, self)
         content_splitter.setObjectName("contentSplitter")
@@ -158,6 +166,9 @@ class MainWindow(QMainWindow):
         self.phone_accounts_page.account_folder_requested.connect(
             lambda directory: QDesktopServices.openUrl(QUrl.fromLocalFile(directory))
         )
+        self.phone_accounts_page.apply_template_requested.connect(
+            self._show_apply_template_dialog
+        )
         self.device_controller.device_folder_ready.connect(
             lambda directory: QDesktopServices.openUrl(QUrl.fromLocalFile(directory))
         )
@@ -209,6 +220,20 @@ class MainWindow(QMainWindow):
             )
         )
         self.devices_page.notification_requested.connect(self.statusBar().showMessage)
+        self.device_controller.templates_changed.connect(self._templates_changed)
+        self.device_controller.template_configuration_ready.connect(
+            self._edit_template_configuration
+        )
+        self.device_controller.template_operation_failed.connect(
+            self._show_template_error
+        )
+        self.device_controller.template_applied.connect(self._on_template_applied)
+        self.templates_page.create_requested.connect(self._create_template)
+        self.templates_page.edit_requested.connect(
+            self.device_controller.load_template_configuration
+        )
+        self.templates_page.rename_requested.connect(self._rename_template)
+        self.templates_page.delete_requested.connect(self._delete_template)
 
     def _show_device_count(self, devices: list[DeviceRecord]) -> None:
         total = len(devices)
@@ -334,6 +359,8 @@ class MainWindow(QMainWindow):
         elif page_index == 3:
             self._open_activity_log()
         elif page_index == 4:
+            self._open_templates()
+        elif page_index == 5:
             self._open_global_settings()
 
     def _open_accounts(self) -> None:
@@ -467,6 +494,77 @@ class MainWindow(QMainWindow):
         self.toolbar.set_context("settings")
         self.live_log.show()
 
+    def _open_templates(self) -> None:
+        self._managed_phone_serial = None
+        self._workspace_context = "templates"
+        self.pages.setCurrentWidget(self.templates_page)
+        self.toolbar.set_context_title("Account templates")
+        self.toolbar.set_context("templates")
+        self.live_log.show()
+        self.device_controller.load_templates()
+
+    def _templates_changed(self, templates) -> None:
+        self._templates = tuple(templates)
+        self.templates_page.set_templates(self._templates)
+
+    def _create_template(self) -> None:
+        name, accepted = TextInputDialog.get_text(
+            "Create Template", "Template name", "", self
+        )
+        if accepted:
+            self.device_controller.create_template(name)
+
+    def _rename_template(self, name: str) -> None:
+        new_name, accepted = TextInputDialog.get_text(
+            "Rename Template", "Template name", name, self
+        )
+        if accepted:
+            self.device_controller.rename_template(name, new_name)
+
+    def _delete_template(self, name: str) -> None:
+        if ConfirmationDialog.confirm(
+            "Delete Template",
+            name,
+            "This deletes only the template. Existing accounts are not changed.",
+            self,
+        ):
+            self.device_controller.delete_template(name)
+
+    def _edit_template_configuration(self, name: str, values: dict) -> None:
+        dialog = TemplateEditorDialog(name, values, self)
+        dialog.save_requested.connect(
+            lambda configuration: self.device_controller.save_template(
+                name, configuration
+            )
+        )
+
+        def saved(saved_name: str) -> None:
+            if saved_name == name:
+                dialog.save_succeeded()
+
+        dialog_error = lambda message: dialog.save_failed(message)
+        self.device_controller.template_saved.connect(saved)
+        self.device_controller.template_operation_failed.connect(dialog_error)
+        try:
+            dialog.exec()
+        finally:
+            self.device_controller.template_saved.disconnect(saved)
+            self.device_controller.template_operation_failed.disconnect(dialog_error)
+
+    def _show_template_error(self, message: str) -> None:
+        ErrorDialog("Account Template", message, self).exec()
+
+    def _show_apply_template_dialog(self, account: AssignedAccount) -> None:
+        dialog = TemplateSelectionDialog(
+            tuple(template.name for template in self._templates), self
+        )
+        if dialog.exec() == QDialog.Accepted:
+            self.device_controller.apply_template(dialog.selected_template(), account)
+
+    def _on_template_applied(self, account: AssignedAccount) -> None:
+        if self.account_page.account == account:
+            self.device_controller.load_account_configuration(account)
+
     def _delete_managed_device(self, serial: str) -> None:
         if self.devices_page._confirm_delete(serial):
             self.device_controller.delete_device(serial)
@@ -486,10 +584,15 @@ class MainWindow(QMainWindow):
             )
             return
 
-        dialog = AddAccountDialog(device, self)
+        dialog = AddAccountDialog(
+            device, tuple(template.name for template in self._templates), self
+        )
         if dialog.exec():
             self.device_controller.add_account(
-                dialog.username.text().strip(), dialog.password.text(), device.serial
+                dialog.username.text().strip(),
+                dialog.password.text(),
+                device.serial,
+                dialog.selected_template(),
             )
 
     def _show_add_account_error(self, message: str) -> None:

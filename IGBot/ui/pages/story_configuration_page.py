@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
 from IGBot.ui.widgets.configuration_widgets import (
     CheckboxGroup,
     CollapsibleSection,
@@ -32,7 +33,7 @@ class StoryConfigurationPage(QScrollArea):
         "end-if-watches-limit-reached": "End Session when Watch Limit is Reached",
     }
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, include_sources: bool = True) -> None:
         super().__init__(parent)
         self._present_keys: set[str] = set()
         self._syncing_enabled = False
@@ -63,6 +64,9 @@ class StoryConfigurationPage(QScrollArea):
         limits.body_layout.addWidget(self.limits)
         limits.body_layout.addWidget(self.limit_behaviour)
         layout.addWidget(limits)
+        self.sources = AudienceSourcesPage(container)
+        self.sources.setVisible(include_sources)
+        layout.addWidget(self.sources)
         layout.addStretch()
         self.setWidget(container)
 
@@ -70,6 +74,7 @@ class StoryConfigurationPage(QScrollArea):
         self.session.changed.connect(self._session_changed)
         self.limits.changed.connect(self._changed)
         self.limit_behaviour.changed.connect(self._changed)
+        self.sources.changed.connect(self._changed)
 
     @staticmethod
     def _add_section(layout, title, widget, parent) -> None:
@@ -88,6 +93,7 @@ class StoryConfigurationPage(QScrollArea):
             self.session.set_values(configuration)
             self.limits.set_values(configuration)
             self.limit_behaviour.set_values(configuration)
+            self.sources.set_configuration(configuration)
             count = self.session.controls["stories-count"].text().strip()
             if count not in {"", "0"}:
                 self._enabled_count = count
@@ -103,7 +109,7 @@ class StoryConfigurationPage(QScrollArea):
         percentage = str(values.get("stories-percentage") or "")
         if percentage and max(int(part) for part in percentage.split("-")) > 100:
             control = self.session.controls["stories-percentage"]
-            control.setStyleSheet("border: 1px solid #D9534F;")
+            control.setStyleSheet("border: 1px solid #EF4444;")
             control.setFocus()
             raise ValueError("Story Percentage cannot exceed 100.")
         result = {}
@@ -150,4 +156,4 @@ class StoryConfigurationPage(QScrollArea):
     def _update_status(self) -> None:
         enabled = self.enabled.isChecked()
         self.status.setText("● Enabled" if enabled else "● Disabled")
-        self.status.setStyleSheet(f"color: {'#43c86b' if enabled else '#788697'}")
+        self.status.setStyleSheet(f"color: {'#22C55E' if enabled else '#A1A1AA'}")

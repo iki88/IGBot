@@ -97,6 +97,7 @@ def test_active_account_options_include_transfer_archive_and_open_folder():
     assert [action.text() for action in menu.actions()] == [
         "Transfer Account",
         "Archive Account",
+        "Apply Template...",
         "Open Account Folder",
     ]
     assert all(action.isEnabled() for action in menu.actions())

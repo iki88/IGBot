@@ -36,6 +36,7 @@ class PhoneAccountsPage(QWidget):
     restore_requested = Signal(str)
     account_delete_requested = Signal(str)
     account_folder_requested = Signal(str)
+    apply_template_requested = Signal(object)
     account_open_requested = Signal(object)
     active_account_changed = Signal(object)
 
@@ -302,6 +303,10 @@ class PhoneAccountsPage(QWidget):
             menu.addAction(
                 "Archive Account",
                 lambda: self.archive_requested.emit(username, account.device_id),
+            )
+            menu.addAction(
+                "Apply Template...",
+                lambda: self.apply_template_requested.emit(account),
             )
         else:
             menu.addAction(

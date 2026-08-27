@@ -111,6 +111,36 @@ This roadmap is the single source of truth for IGBot project progress. Preserve 
 - DM limits, recipient filtering, message-bank editing, validation, and status indicator.
 - Transparent atomic persistence across config.yml, filters.yml, and pm_list.txt.
 
+### Sprint 5.12
+
+- Engine-compatible Comment configuration interface.
+- Integrated comment editor with plain text, spintax, emoji, and multi-line support.
+- Atomic persistence across config.yml, filters.yml, and comments_list.txt.
+
+### Sprint 5.13
+
+- Central engine-compatible Audience Sources configuration page.
+- Reusable themed target editor for priority, hashtag, place, and blogger sources.
+- Transparent list persistence with clean source enable/disable handling.
+
+### Sprint 5.14
+
+- Independent reusable Account Templates workspace and management workflow.
+- One-time template application during account creation.
+- Account-specific identity, schedules, targets, and message resources excluded.
+
+### Sprint 5.14.3
+
+- Persistent template module enable states and one-time template application to existing accounts.
+- Module-integrated audience source editors backed by the existing engine source configuration.
+- Standalone Audience Sources tab removed while preserving shared target editing and persistence.
+
+### Sprint 5.15
+
+- Unified modern dark palette, typography, control hierarchy, and semantic status colors.
+- Improved tabs, inputs, switches, tables, dialogs, cards, and editor readability.
+- Shared visual identity applied across every existing workspace and module page.
+
 ## Missing Features From Old Bot
 
 ### UI
@@ -139,7 +169,7 @@ This roadmap is the single source of truth for IGBot project progress. Preserve 
 - [x] Follow configuration interface (execution not implemented).
 - [x] Unfollow configuration interface (execution not implemented).
 - [x] Like configuration interface (execution not implemented).
-- [ ] Comment.
+- [x] Comment configuration interface (execution not implemented).
 - [x] Story configuration interface (execution not implemented).
 - [x] DM configuration interface (execution not implemented).
 - [ ] Post.

@@ -3,6 +3,7 @@ from typing import ClassVar
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
+from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
 from IGBot.ui.widgets.configuration_widgets import (
     CheckboxGroup,
     CollapsibleSection,
@@ -35,8 +36,14 @@ class LikeConfigurationPage(QScrollArea):
         "posts-from-file": "Post URL Files",
     }
 
-    def __init__(self, parent=None) -> None:
+    def __init__(
+        self,
+        parent=None,
+        include_file_targets: bool = True,
+        include_sources: bool = True,
+    ) -> None:
         super().__init__(parent)
+        self.include_file_targets = include_file_targets
         self._present_keys: set[str] = set()
         self.setWidgetResizable(True)
         container = QWidget(self)
@@ -67,7 +74,13 @@ class LikeConfigurationPage(QScrollArea):
         self._add_section(layout, "Media Behaviour", self.media, container)
 
         self.files = TextListSettings(self.LIST_KEYS, container)
-        self._add_section(layout, "Post URL Files", self.files, container)
+        self.files_section = self._add_section(
+            layout, "Post URL Files", self.files, container
+        )
+        self.files_section.setVisible(include_file_targets)
+        self.sources = AudienceSourcesPage(container)
+        self.sources.setVisible(include_sources)
+        layout.addWidget(self.sources)
         layout.addStretch()
         self.setWidget(container)
 
@@ -79,12 +92,14 @@ class LikeConfigurationPage(QScrollArea):
             self.files,
         ):
             widget.changed.connect(self._changed)
+        self.sources.changed.connect(self._changed)
 
     @staticmethod
     def _add_section(layout, title, widget, parent) -> None:
         section = CollapsibleSection(title, parent)
         section.body_layout.addWidget(widget)
         layout.addWidget(section)
+        return section
 
     @classmethod
     def supported_keys(cls) -> set[str]:
@@ -103,6 +118,7 @@ class LikeConfigurationPage(QScrollArea):
         self.limit_behaviour.set_values(configuration)
         self.media.set_values(configuration)
         self.files.set_values(configuration)
+        self.sources.set_configuration(configuration)
         self._update_status()
 
     def values(self) -> dict:
@@ -110,7 +126,8 @@ class LikeConfigurationPage(QScrollArea):
         values.update(self.limits.values())
         values.update(self.limit_behaviour.values())
         values.update(self.media.values())
-        values.update(self.files.values())
+        if self.include_file_targets:
+            values.update(self.files.values())
         for key, label in (
             ("likes-percentage", "Like Percentage"),
             ("carousel-percentage", "Carousel Percentage"),
@@ -122,7 +139,7 @@ class LikeConfigurationPage(QScrollArea):
                     if key in self.interaction.controls
                     else self.media.controls[key]
                 )
-                control.setStyleSheet("border: 1px solid #D9534F;")
+                control.setStyleSheet("border: 1px solid #EF4444;")
                 control.setFocus()
                 raise ValueError(f"{label} cannot exceed 100.")
         result = {}
@@ -148,4 +165,4 @@ class LikeConfigurationPage(QScrollArea):
             control.toPlainText().strip() for control in self.files.controls.values()
         )
         self.status.setText("● Enabled" if enabled else "● Disabled")
-        self.status.setStyleSheet(f"color: {'#43c86b' if enabled else '#788697'}")
+        self.status.setStyleSheet(f"color: {'#22C55E' if enabled else '#A1A1AA'}")

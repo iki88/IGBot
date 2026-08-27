@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
 from IGBot.ui.widgets.configuration_widgets import (
     CheckboxGroup,
     CollapsibleSection,
@@ -34,8 +35,11 @@ class DMConfigurationPage(QScrollArea):
     }
     MESSAGE_RESOURCE = "pm_list.txt"
 
-    def __init__(self, parent=None) -> None:
+    def __init__(
+        self, parent=None, include_messages: bool = True, include_sources: bool = True
+    ) -> None:
         super().__init__(parent)
+        self.include_messages = include_messages
         self._present_keys: set[str] = set()
         self._message_file_present = False
         self._syncing_enabled = False
@@ -71,7 +75,13 @@ class DMConfigurationPage(QScrollArea):
             "Enter one message per line. Engine spintax and emoji are supported.",
             container,
         )
-        self._add_section(layout, "Messages", self.messages, container)
+        self.messages_section = self._add_section(
+            layout, "Messages", self.messages, container
+        )
+        self.messages_section.setVisible(include_messages)
+        self.sources = AudienceSourcesPage(container)
+        self.sources.setVisible(include_sources)
+        layout.addWidget(self.sources)
         layout.addStretch()
         self.setWidget(container)
 
@@ -80,12 +90,14 @@ class DMConfigurationPage(QScrollArea):
         self.limit_behaviour.changed.connect(self._changed)
         self.recipients.changed.connect(self._changed)
         self.messages.changed.connect(self._changed)
+        self.sources.changed.connect(self._changed)
 
     @staticmethod
     def _add_section(layout, title, widget, parent) -> None:
         section = CollapsibleSection(title, parent)
         section.body_layout.addWidget(widget)
         layout.addWidget(section)
+        return section
 
     @classmethod
     def supported_keys(cls) -> set[str]:
@@ -105,6 +117,7 @@ class DMConfigurationPage(QScrollArea):
             self.limit_behaviour.set_values(configuration)
             self.recipients.set_values(configuration)
             self.messages.set_text(str(configuration.get(self.MESSAGE_RESOURCE) or ""))
+            self.sources.set_configuration(configuration)
             percentage = self.delivery.controls["pm-percentage"].text().strip()
             if percentage not in {"", "0"}:
                 self._enabled_percentage = percentage
@@ -120,12 +133,12 @@ class DMConfigurationPage(QScrollArea):
         percentage = str(values.get("pm-percentage") or "")
         if percentage and max(int(part) for part in percentage.split("-")) > 100:
             control = self.delivery.controls["pm-percentage"]
-            control.setStyleSheet("border: 1px solid #D9534F;")
+            control.setStyleSheet("border: 1px solid #EF4444;")
             control.setFocus()
             raise ValueError("Direct Message Percentage cannot exceed 100.")
         messages = self.messages.text()
-        if self.enabled.isChecked() and not messages.strip():
-            self.messages.editor.setStyleSheet("border: 1px solid #D9534F;")
+        if self.include_messages and self.enabled.isChecked() and not messages.strip():
+            self.messages.editor.setStyleSheet("border: 1px solid #EF4444;")
             self.messages.editor.setFocus()
             raise ValueError("Add at least one direct message before enabling DM.")
         self.messages.editor.setStyleSheet("")
@@ -135,7 +148,7 @@ class DMConfigurationPage(QScrollArea):
             populated = value not in {"", "0", 0}
             if key in self._present_keys or populated:
                 result[key] = value
-        if self._message_file_present or messages:
+        if self.include_messages and (self._message_file_present or messages):
             result[self.MESSAGE_RESOURCE] = messages
         return result
 
@@ -176,4 +189,4 @@ class DMConfigurationPage(QScrollArea):
     def _update_status(self) -> None:
         enabled = self.enabled.isChecked()
         self.status.setText("● Enabled" if enabled else "● Disabled")
-        self.status.setStyleSheet(f"color: {'#43c86b' if enabled else '#788697'}")
+        self.status.setStyleSheet(f"color: {'#22C55E' if enabled else '#A1A1AA'}")

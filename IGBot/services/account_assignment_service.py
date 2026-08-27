@@ -17,6 +17,47 @@ logger = logging.getLogger(__name__)
 class AccountAssignmentService:
     """Manages phone assignments in InstaAddict account configurations."""
 
+    FILTER_SETTING_KEYS = frozenset(
+        {
+            "pm_to_private_or_empty",
+            "comment_photos",
+            "comment_videos",
+            "comment_carousels",
+            "comment_hashtag_likers_top",
+            "comment_hashtag_likers_recent",
+            "comment_hashtag_posts_top",
+            "comment_hashtag_posts_recent",
+            "comment_place_likers_top",
+            "comment_place_likers_recent",
+            "comment_place_posts_top",
+            "comment_place_posts_recent",
+            "comment_blogger_followers",
+            "comment_blogger_following",
+            "comment_blogger_post_likers",
+            "comment_blogger",
+            "comment_interact_usernames",
+            "comment_interact_from_file",
+            "comment_feed",
+        }
+    )
+    TEXT_RESOURCE_NAMES = frozenset({"pm_list.txt", "comments_list.txt"})
+    AUDIENCE_SOURCE_KEYS = frozenset(
+        {
+            "blogger",
+            "blogger-followers",
+            "blogger-following",
+            "blogger-post-likers",
+            "hashtag-likers-top",
+            "hashtag-likers-recent",
+            "hashtag-posts-top",
+            "hashtag-posts-recent",
+            "place-likers-top",
+            "place-likers-recent",
+            "place-posts-top",
+            "place-posts-recent",
+        }
+    )
+
     def __init__(self, accounts_directory: Path) -> None:
         self._accounts_directory = accounts_directory
         self.metadata = AccountMetadataService()
@@ -56,13 +97,18 @@ class AccountAssignmentService:
         filters_path = config_path.parent / "filters.yml"
         if filters_path.is_file():
             filters = yaml.safe_load(filters_path.read_bytes())
-            if isinstance(filters, dict) and "pm_to_private_or_empty" in filters:
-                configuration["pm_to_private_or_empty"] = filters[
-                    "pm_to_private_or_empty"
-                ]
-        messages_path = config_path.parent / "pm_list.txt"
-        if messages_path.is_file():
-            configuration["pm_list.txt"] = messages_path.read_text(encoding="utf-8")
+            if isinstance(filters, dict):
+                configuration.update(
+                    {
+                        key: filters[key]
+                        for key in self.FILTER_SETTING_KEYS
+                        if key in filters
+                    }
+                )
+        for resource_name in self.TEXT_RESOURCE_NAMES:
+            resource_path = config_path.parent / resource_name
+            if resource_path.is_file():
+                configuration[resource_name] = resource_path.read_text(encoding="utf-8")
         return configuration
 
     def update_configuration(
@@ -114,14 +160,14 @@ class AccountAssignmentService:
         if not isinstance(document, MappingNode):
             raise TypeError("The account configuration must contain a YAML mapping.")
         settings = dict(settings or {})
-        filter_settings = {}
-        if "pm_to_private_or_empty" in settings:
-            filter_settings["pm_to_private_or_empty"] = settings.pop(
-                "pm_to_private_or_empty"
-            )
-        messages_marker = object()
-        messages = settings.pop("pm_list.txt", messages_marker)
+        filter_settings = {
+            key: settings.pop(key) for key in self.FILTER_SETTING_KEYS & settings.keys()
+        }
+        text_resources = {
+            key: settings.pop(key) for key in self.TEXT_RESOURCE_NAMES & settings.keys()
+        }
         allowed_settings = {
+            "follow-percentage",
             "total-follows-limit",
             "working-hours",
             "shuffle-jobs",
@@ -153,14 +199,33 @@ class AccountAssignmentService:
             "pm-percentage",
             "total-pm-limit",
             "end-if-pm-limit-reached",
+            "comment-percentage",
+            "total-comments-limit",
+            "max-comments-pro-user",
+            "end-if-comments-limit-reached",
+            *self.AUDIENCE_SOURCE_KEYS,
         }
         if set(settings) - allowed_settings:
             raise ValueError("The account configuration contains unsupported settings.")
         for key, value in settings.items():
-            if key == "total-follows-limit" and not re.fullmatch(
+            if key in self.AUDIENCE_SOURCE_KEYS:
+                if value is not None and (
+                    not isinstance(value, list)
+                    or any(
+                        not isinstance(item, str) or not item.strip() for item in value
+                    )
+                ):
+                    raise ValueError(f"{key} must be a list of audience targets.")
+                continue
+            if key in {"follow-percentage", "total-follows-limit"} and not re.fullmatch(
                 r"\d+(?:-\d+)?", str(value)
             ):
-                raise ValueError("Total follows limit must be a number or range.")
+                raise ValueError(f"{key} must be a number or range.")
+            if (
+                key == "follow-percentage"
+                and max(int(part) for part in str(value).split("-")) > 100
+            ):
+                raise ValueError("Follow percentage cannot exceed 100.")
             if key == "total-follows-limit":
                 parts = [int(part) for part in str(value).split("-")]
                 if len(parts) == 2 and parts[0] > parts[1]:
@@ -228,6 +293,9 @@ class AccountAssignmentService:
                 "total-watches-limit",
                 "pm-percentage",
                 "total-pm-limit",
+                "comment-percentage",
+                "total-comments-limit",
+                "max-comments-pro-user",
             }
             if key in interaction_ranges and not re.fullmatch(
                 r"\d+(?:-\d+)?", str(value)
@@ -244,6 +312,7 @@ class AccountAssignmentService:
                     "carousel-percentage",
                     "stories-percentage",
                     "pm-percentage",
+                    "comment-percentage",
                 }
                 and max(int(part) for part in str(value).split("-")) > 100
             ):
@@ -254,6 +323,7 @@ class AccountAssignmentService:
                     "end-if-likes-limit-reached",
                     "end-if-watches-limit-reached",
                     "end-if-pm-limit-reached",
+                    "end-if-comments-limit-reached",
                 }
                 and type(value) is not bool
             ):
@@ -264,9 +334,9 @@ class AccountAssignmentService:
             ):
                 raise ValueError("posts-from-file must be a list of file entries.")
         if any(type(value) is not bool for value in filter_settings.values()):
-            raise ValueError("DM filter settings must be switch values.")
-        if messages is not messages_marker and not isinstance(messages, str):
-            raise ValueError("The direct message list must be text.")
+            raise ValueError("Account filter settings must be switch values.")
+        if any(not isinstance(value, str) for value in text_resources.values()):
+            raise ValueError("Account text resources must contain text.")
 
         fields = {}
         obsolete_fields = []
@@ -307,7 +377,13 @@ class AccountAssignmentService:
         missing_settings = []
         for key, value in settings.items():
             node = fields.get(key)
-            if node is None:
+            if value is None:
+                if node is not None:
+                    line_start = content.rfind("\n", 0, node.start_mark.index) + 1
+                    line_end = content.find("\n", node.end_mark.index)
+                    line_end = len(content) if line_end == -1 else line_end + 1
+                    replacements.append((line_start, line_end, ""))
+            elif node is None:
                 missing_settings.append((key, value))
             elif configuration.get(key) != value:
                 replacements.append(
@@ -344,7 +420,10 @@ class AccountAssignmentService:
                 )
             ):
                 raise RuntimeError("The saved account values could not be verified.")
-            if any(parsed.get(key) != value for key, value in settings.items()):
+            if any(
+                (key in parsed if value is None else parsed.get(key) != value)
+                for key, value in settings.items()
+            ):
                 raise RuntimeError("The saved account settings could not be verified.")
         except (OSError, RuntimeError, yaml.YAMLError) as error:
             self._write_configuration(config_path, content)
@@ -356,29 +435,35 @@ class AccountAssignmentService:
                 "Account configuration verification failed; the original was restored."
             ) from error
         filters_path = config_path.parent / "filters.yml"
-        messages_path = config_path.parent / "pm_list.txt"
-        original_filters = filters_path.read_bytes() if filters_path.is_file() else None
-        original_messages = (
-            messages_path.read_bytes() if messages_path.is_file() else None
-        )
+        resource_paths = {
+            name: config_path.parent / name for name in self.TEXT_RESOURCE_NAMES
+        }
+        original_resources = {
+            filters_path: filters_path.read_bytes() if filters_path.is_file() else None,
+            **{
+                path: path.read_bytes() if path.is_file() else None
+                for path in resource_paths.values()
+            },
+        }
         try:
             if filter_settings:
                 self._update_yaml_fields(filters_path, filter_settings)
-            if messages is not messages_marker:
-                if messages:
-                    self._write_configuration(messages_path, messages)
-                    if messages_path.read_text(encoding="utf-8") != messages:
+            for name, resource_content in text_resources.items():
+                resource_path = resource_paths[name]
+                if resource_content:
+                    self._write_configuration(resource_path, resource_content)
+                    if resource_path.read_text(encoding="utf-8") != resource_content:
                         raise RuntimeError(
-                            "The direct message list could not be verified."
+                            f"The {name} resource could not be verified."
                         )
-                elif messages_path.exists():
-                    messages_path.unlink()
+                elif resource_path.exists():
+                    resource_path.unlink()
         except (OSError, RuntimeError, TypeError, ValueError, yaml.YAMLError) as error:
             self._write_configuration(config_path, content)
-            self._restore_file(filters_path, original_filters)
-            self._restore_file(messages_path, original_messages)
+            for path, original_resource in original_resources.items():
+                self._restore_file(path, original_resource)
             raise RuntimeError(
-                "DM configuration update failed; the original files were restored."
+                "Account resource update failed; the original files were restored."
             ) from error
 
         updated_account = self._load_account(config_path)
@@ -408,8 +493,8 @@ class AccountAssignmentService:
                 new_directory.rename(old_directory)
             self._write_configuration(config_path, content)
             self.metadata.restore(metadata_path, original_metadata)
-            self._restore_file(filters_path, original_filters)
-            self._restore_file(messages_path, original_messages)
+            for path, original_resource in original_resources.items():
+                self._restore_file(path, original_resource)
             raise RuntimeError(
                 "Account metadata update failed; the original account was restored."
             ) from error
