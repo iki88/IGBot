@@ -219,15 +219,13 @@ def test_edit_save_and_reopen_template_configuration(tmp_path):
     service = AccountTemplateService(tmp_path / "templates")
     service.create("Persistent")
     editor = TemplateEditorDialog("Persistent", service.load("Persistent"))
-    editor.follow.limits.controls["minimum"].setValue(25)
-    editor.follow.limits.controls["maximum"].setValue(40)
+    editor.follow.settings.controls["total-follows-limit"].setText("25-40")
     editor.like.interaction.controls["likes-percentage"].setText("65")
 
     service.save("Persistent", editor.values())
 
     reopened = TemplateEditorDialog("Persistent", service.load("Persistent"))
-    assert reopened.follow.limits.controls["minimum"].text() == "25"
-    assert reopened.follow.limits.controls["maximum"].text() == "40"
+    assert reopened.follow.settings.controls["total-follows-limit"].text() == "25-40"
     assert reopened.like.interaction.controls["likes-percentage"].text() == "65"
 
 

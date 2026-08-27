@@ -4,7 +4,7 @@ from typing import ClassVar
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from IGBot.ui.widgets.configuration_widgets import CollapsibleSection
+from IGBot.ui.widgets.configuration_widgets import ConfigurationSection
 from IGBot.ui.widgets.target_editor_dialog import TargetEditorDialog
 from IGBot.ui.widgets.target_source_row import TargetSourceRow
 
@@ -33,24 +33,23 @@ class AudienceSourcesPage(QWidget):
         {"blogger-followers", "blogger-following", "blogger", "blogger-post-likers"}
     )
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, include_advanced: bool = True) -> None:
         super().__init__(parent)
         self._loading = False
         self._present_keys: set[str] = set()
+        self._hidden_values: dict[str, list[str] | None] = {}
         self.rows: dict[str, TargetSourceRow] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        priority = CollapsibleSection("Method", self)
-        for key, label in self.PRIORITY_SOURCES.items():
-            priority.body_layout.addWidget(self._create_row(key, label, priority))
-        layout.addWidget(priority)
-
-        advanced = CollapsibleSection("Advanced Sources", self)
-        for key, label in self.ADVANCED_SOURCES.items():
-            advanced.body_layout.addWidget(self._create_row(key, label, advanced))
-        layout.addWidget(advanced)
+        method = ConfigurationSection("Method", self)
+        sources = dict(self.PRIORITY_SOURCES)
+        if include_advanced:
+            sources.update(self.ADVANCED_SOURCES)
+        for key, label in sources.items():
+            method.body_layout.addWidget(self._create_row(key, label, method))
+        layout.addWidget(method)
 
     @classmethod
     def supported_keys(cls) -> set[str]:
@@ -67,6 +66,11 @@ class AudienceSourcesPage(QWidget):
         self._loading = True
         try:
             self._present_keys = self.supported_keys() & set(configuration)
+            self._hidden_values = {
+                key: configuration.get(key)
+                for key in self.supported_keys() - set(self.rows)
+                if key in configuration
+            }
             for key, row in self.rows.items():
                 value = configuration.get(key)
                 entries = value if isinstance(value, list) else []
@@ -92,11 +96,15 @@ class AudienceSourcesPage(QWidget):
 
     def state_values(self) -> dict:
         """Return editor state without validation for synchronizing module views."""
-        return {
-            key: row.entries() if row.enabled.isChecked() else None
-            for key, row in self.rows.items()
-            if row.enabled.isChecked() or key in self._present_keys
-        }
+        values = dict(self._hidden_values)
+        values.update(
+            {
+                key: row.entries() if row.enabled.isChecked() else None
+                for key, row in self.rows.items()
+                if row.enabled.isChecked() or key in self._present_keys
+            }
+        )
+        return values
 
     def _edit_source(self, key: str) -> None:
         row = self.rows[key]

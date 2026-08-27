@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWi
 
 from IGBot.ui.widgets.configuration_widgets import (
     CheckboxGroup,
-    CollapsibleSection,
+    ConfigurationSection,
     NumericSettings,
     RangeSettings,
     TextListSettings,
@@ -34,7 +34,7 @@ class UnfollowConfigurationPage(QScrollArea):
         layout.setContentsMargins(12, 14, 12, 14)
         layout.setSpacing(12)
 
-        overview = CollapsibleSection("Unfollow", container)
+        overview = ConfigurationSection("Enable / Disable", container)
         row = QHBoxLayout()
         heading = QLabel("Engine configuration status", overview)
         self.status = QLabel("● Disabled", overview)
@@ -45,7 +45,19 @@ class UnfollowConfigurationPage(QScrollArea):
         layout.addWidget(overview)
 
         self.modes = RangeSettings(self.RANGE_KEYS, container)
-        self._add_section(layout, "Unfollow Modes", self.modes, container)
+        self.files = TextListSettings(
+            {
+                "unfollow-from-file": "Unfollow from Files",
+                "remove-followers-from-file": "Remove Followers from Files",
+            },
+            container,
+        )
+        method = ConfigurationSection("Method", container)
+        method.body_layout.addWidget(self.modes)
+        method.body_layout.addWidget(self.files)
+        self.files_section = self.files
+        self.files.setVisible(include_file_targets)
+        layout.addWidget(method)
 
         self.limits = RangeSettings(
             {"total-unfollows-limit": "Total Unfollows Limit"}, container
@@ -57,7 +69,7 @@ class UnfollowConfigurationPage(QScrollArea):
             },
             container,
         )
-        limits = CollapsibleSection("Limits", container)
+        limits = ConfigurationSection("Settings", container)
         limits.body_layout.addWidget(self.limits)
         limits.body_layout.addWidget(self.numeric)
         layout.addWidget(limits)
@@ -69,19 +81,7 @@ class UnfollowConfigurationPage(QScrollArea):
             },
             container,
         )
-        self._add_section(layout, "Behaviour", self.behaviour, container)
-
-        self.files = TextListSettings(
-            {
-                "unfollow-from-file": "Unfollow from Files",
-                "remove-followers-from-file": "Remove Followers from Files",
-            },
-            container,
-        )
-        self.files_section = self._add_section(
-            layout, "File Targets", self.files, container
-        )
-        self.files_section.setVisible(include_file_targets)
+        self._add_section(layout, "Additional Settings", self.behaviour, container)
         layout.addStretch()
         self.setWidget(container)
 
@@ -96,7 +96,7 @@ class UnfollowConfigurationPage(QScrollArea):
 
     @staticmethod
     def _add_section(layout, title, widget, parent) -> None:
-        section = CollapsibleSection(title, parent)
+        section = ConfigurationSection(title, parent)
         section.body_layout.addWidget(widget)
         layout.addWidget(section)
         return section

@@ -4,6 +4,13 @@ This is a living project document for reviewed UI and workflow improvements that
 
 ## High Priority
 
+### Completed workflow refinements
+
+- Follow now presents the Version 1 production workflow in the order Enable, Method, Settings, Additional Settings, and Filters.
+- Follow methods are limited to Followers, Followings, and Specific Users while lower-priority engine sources remain compatible but hidden.
+- Required and blocked Follow words use the shared one-entry-per-line editor, and internal engine safeguards remain outside the normal operator controls.
+- Follow filters use operator-oriented labels, standard checkboxes for word-list activation, paired numeric ranges, and vertically arranged language fields.
+
 ### Navigation
 
 - Replace separate Start and Stop buttons with one dynamic button.
@@ -46,6 +53,7 @@ This is a living project document for reviewed UI and workflow improvements that
 - [x] Keep Account and Template editor tab presentation identical.
 - [x] Treat target sources as module methods without a duplicate Sources section.
 - [x] Keep configuration sections permanently visible in continuous scrolling pages.
+- [x] Standardize interaction modules as Enable, Method, Settings, supported Additional Settings, and supported Filters.
 
 #### DM
 

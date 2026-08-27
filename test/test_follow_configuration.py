@@ -10,6 +10,7 @@ from IGBot.services.account_assignment_service import AccountAssignmentService
 from IGBot.services.android_package_service import AndroidPackageService
 from IGBot.ui.pages.account_page import AccountPage
 from IGBot.ui.pages.follow_configuration_page import FollowConfigurationPage
+from IGBot.ui.widgets.target_editor_dialog import TargetEditorDialog
 from IGBot.ui.widgets.top_toolbar import TopToolbar
 
 
@@ -25,7 +26,9 @@ def _configuration(tmp_path):
         b"app-id: com.example.app\r\n"
         b"screen-sleep: true\r\n"
         b'follow-percentage: "30-40"\r\n'
+        b'follow-limit: "3-6"\r\n'
         b'total-follows-limit: "5-10" # retained inline\r\n'
+        b"end-if-follows-limit-reached: true\r\n"
         b"igbot-follow-enabled: true\r\n"
     )
     account = AssignedAccount("account", "phone-a", "com.example.app", path)
@@ -39,11 +42,14 @@ def test_follow_configuration_loads_and_tracks_dirty_state(tmp_path):
     page.set_account(account)
     page.set_configuration(service.load_configuration(account.config_path))
 
-    assert page.follow_page.limits.controls["minimum"].value() == 5
+    assert page.follow_page.settings.controls["follow-limit"].text() == "3-6"
+    assert page.follow_page.additional.controls[
+        "end-if-follows-limit-reached"
+    ].isChecked()
     assert not page.is_dirty
     assert page.tabs.tabText(2) == "● Follow"
 
-    page.follow_page.limits.controls["maximum"].setValue(12)
+    page.follow_page.settings.controls["follow-limit"].setText("4-8")
     assert page.is_dirty
     page.mark_clean()
     assert not page.is_dirty
@@ -53,8 +59,7 @@ def test_follow_configuration_saves_without_changing_unrelated_yaml(tmp_path):
     service, account = _configuration(tmp_path)
     page = FollowConfigurationPage()
     page.set_configuration(service.load_configuration(account.config_path))
-    page.limits.controls["minimum"].setValue(7)
-    page.limits.controls["maximum"].setValue(15)
+    page.settings.controls["total-follows-limit"].setText("7-15")
     page.enabled.setChecked(True)
     page.sources.rows["blogger-followers"].set_entries(["source.account"])
     page.sources.rows["blogger-followers"].enabled.setChecked(True)
@@ -70,6 +75,128 @@ def test_follow_configuration_saves_without_changing_unrelated_yaml(tmp_path):
     assert b"# retained comment\r\n" in content
     assert b"# retained inline\r\n" in content
     assert not any(str(key).startswith("igbot-") for key in parsed)
+
+
+def test_follow_exposes_only_production_methods_and_preserves_hidden_sources(tmp_path):
+    service, account = _configuration(tmp_path)
+    content = account.config_path.read_bytes() + b'hashtag-posts-top: ["cats"]\r\n'
+    account.config_path.write_bytes(content)
+    page = FollowConfigurationPage()
+    page.set_configuration(service.load_configuration(account.config_path))
+
+    assert list(page.sources.rows) == [
+        "blogger-followers",
+        "blogger-following",
+        "blogger",
+    ]
+
+    service.update_configuration(
+        account, "account", "secret", "com.example.app", page.values()
+    )
+    assert yaml.safe_load(account.config_path.read_bytes())["hashtag-posts-top"] == [
+        "cats"
+    ]
+
+
+def test_follow_filters_load_and_save_through_engine_filters_file(tmp_path):
+    service, account = _configuration(tmp_path)
+    filters_path = account.config_path.parent / "filters.yml"
+    filters_path.write_text(
+        "min_followers: 100\nmax_followers: 5000\nskip_if_private: true\n",
+        encoding="utf-8",
+    )
+    page = FollowConfigurationPage()
+    page.set_configuration(service.load_configuration(account.config_path))
+
+    assert page.filter_numbers.controls["min_followers"].value() == 100
+    assert page.filter_switches.controls["skip_if_private"].isChecked()
+    page.filter_numbers.controls["max_followers"].setValue(7500)
+    service.update_configuration(
+        account, "account", "secret", "com.example.app", page.values()
+    )
+
+    filters = yaml.safe_load(filters_path.read_text(encoding="utf-8"))
+    assert filters["min_followers"] == 100
+    assert filters["max_followers"] == 7500
+    assert filters["skip_if_private"] is True
+
+
+@pytest.mark.parametrize(
+    ("key", "entries"),
+    (
+        ("mandatory_words", ["cat lover", "animal rescue"]),
+        ("blacklist_words", ["giveaway", "follow me"]),
+    ),
+)
+def test_follow_word_filters_use_shared_popup_and_serialize_as_lists(
+    tmp_path, mocker, key, entries
+):
+    service, account = _configuration(tmp_path)
+    filters_path = account.config_path.parent / "filters.yml"
+    filters_path.write_text(f"{key}: [existing]\n", encoding="utf-8")
+    page = FollowConfigurationPage()
+    page.set_configuration(service.load_configuration(account.config_path))
+    mocker.patch.object(
+        TargetEditorDialog, "exec", return_value=TargetEditorDialog.Accepted
+    )
+    mocker.patch.object(TargetEditorDialog, "entries", return_value=entries)
+
+    page.filter_editors[key].name.click()
+    service.update_configuration(
+        account, "account", "secret", "com.example.app", page.values()
+    )
+
+    assert page.filter_editors[key].entries() == entries
+    assert yaml.safe_load(filters_path.read_text(encoding="utf-8"))[key] == entries
+
+
+def test_internal_skip_following_filter_is_hidden_and_preserved(tmp_path):
+    service, account = _configuration(tmp_path)
+    filters_path = account.config_path.parent / "filters.yml"
+    filters_path.write_text("skip_following: true\n", encoding="utf-8")
+    page = FollowConfigurationPage()
+    page.set_configuration(service.load_configuration(account.config_path))
+
+    assert "skip_following" not in page.filter_switches.controls
+    service.update_configuration(
+        account, "account", "secret", "com.example.app", page.values()
+    )
+    assert (
+        yaml.safe_load(filters_path.read_text(encoding="utf-8"))["skip_following"]
+        is True
+    )
+
+
+def test_follow_filter_labels_checkbox_style_and_operator_order():
+    page = FollowConfigurationPage()
+
+    required = page.filter_editors["mandatory_words"]
+    blocked = page.filter_editors["blacklist_words"]
+    assert required.name.text() == "Follow only if user contains these words"
+    assert blocked.name.text() == "Don't follow if user contains these words"
+    assert required.enabled.objectName() != "configurationSwitch"
+    assert blocked.enabled.objectName() != "configurationSwitch"
+
+    numeric_layout = page.filter_numbers.layout()
+    positions = {
+        key: numeric_layout.getItemPosition(numeric_layout.indexOf(control))[:2]
+        for key, control in page.filter_numbers.controls.items()
+    }
+    assert positions["min_followers"][0] == positions["max_followers"][0] == 0
+    assert positions["min_followings"][0] == positions["max_followings"][0] == 1
+    assert positions["min_posts"][0] == 2
+
+    list_layout = page.filter_lists.layout()
+    list_rows = [
+        list_layout.getItemPosition(list_layout.indexOf(control))[0]
+        for control in page.filter_lists.controls.values()
+    ]
+    assert list_rows == [0, 1, 2]
+    assert list(page.filter_lists.controls) == [
+        "specific_alphabet",
+        "biography_language",
+        "biography_banned_language",
+    ]
 
 
 def test_installed_packages_uses_read_only_adb_query(mocker):

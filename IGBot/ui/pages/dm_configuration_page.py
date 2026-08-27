@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
 from IGBot.ui.widgets.configuration_widgets import (
     CheckboxGroup,
-    CollapsibleSection,
+    ConfigurationSection,
     RangeSettings,
     TextResourceEditor,
 )
@@ -50,7 +50,7 @@ class DMConfigurationPage(QScrollArea):
         layout.setContentsMargins(12, 14, 12, 14)
         layout.setSpacing(12)
 
-        overview = CollapsibleSection("Direct Message", container)
+        overview = ConfigurationSection("Enable / Disable", container)
         row = QHBoxLayout()
         self.enabled = QCheckBox("Enable Direct Messages", overview)
         self.enabled.setObjectName("configurationSwitch")
@@ -61,27 +61,28 @@ class DMConfigurationPage(QScrollArea):
         overview.body_layout.addLayout(row)
         layout.addWidget(overview)
 
+        self.sources = AudienceSourcesPage(container)
+        self.sources.setVisible(include_sources)
+        layout.addWidget(self.sources)
+
         self.delivery = RangeSettings(self.CONFIG_RANGE_KEYS, container)
-        self._add_section(layout, "Delivery", self.delivery, container)
+        self._add_section(layout, "Settings", self.delivery, container)
 
         self.limit_behaviour = CheckboxGroup(self.CONFIG_BOOLEAN_KEYS, container)
-        self._add_section(layout, "Limits", self.limit_behaviour, container)
-
-        self.recipients = CheckboxGroup(self.FILTER_KEYS, container)
-        self._add_section(layout, "Recipients", self.recipients, container)
-
         self.messages = TextResourceEditor(
             "Message List",
             "Enter one message per line. Engine spintax and emoji are supported.",
             container,
         )
-        self.messages_section = self._add_section(
-            layout, "Messages", self.messages, container
-        )
-        self.messages_section.setVisible(include_messages)
-        self.sources = AudienceSourcesPage(container)
-        self.sources.setVisible(include_sources)
-        layout.addWidget(self.sources)
+        additional = ConfigurationSection("Additional Settings", container)
+        additional.body_layout.addWidget(self.limit_behaviour)
+        additional.body_layout.addWidget(self.messages)
+        self.messages_section = self.messages
+        self.messages.setVisible(include_messages)
+        layout.addWidget(additional)
+
+        self.recipients = CheckboxGroup(self.FILTER_KEYS, container)
+        self._add_section(layout, "Filters", self.recipients, container)
         layout.addStretch()
         self.setWidget(container)
 
@@ -94,7 +95,7 @@ class DMConfigurationPage(QScrollArea):
 
     @staticmethod
     def _add_section(layout, title, widget, parent) -> None:
-        section = CollapsibleSection(title, parent)
+        section = ConfigurationSection(title, parent)
         section.body_layout.addWidget(widget)
         layout.addWidget(section)
         return section

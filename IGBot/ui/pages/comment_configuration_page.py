@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
 from IGBot.ui.widgets.configuration_widgets import (
     CheckboxGroup,
-    CollapsibleSection,
+    ConfigurationSection,
     RangeSettings,
     TextResourceEditor,
 )
@@ -74,7 +74,7 @@ class CommentConfigurationPage(QScrollArea):
         layout.setContentsMargins(12, 14, 12, 14)
         layout.setSpacing(12)
 
-        method_section = CollapsibleSection("Comment Method", container)
+        method_section = ConfigurationSection("Enable / Disable", container)
         method_row = QHBoxLayout()
         self.method_group = QButtonGroup(self)
         self.ai_method = QRadioButton("AI Comments (Coming Soon)", method_section)
@@ -92,34 +92,36 @@ class CommentConfigurationPage(QScrollArea):
         method_section.body_layout.addLayout(method_row)
         layout.addWidget(method_section)
 
+        self.sources = AudienceSourcesPage(container)
+        self.sources.setVisible(include_sources)
+        layout.addWidget(self.sources)
+
         self.comments = TextResourceEditor(
             "Comment Editor",
             "Enter comments directly. Plain text, spintax, emoji, and multiple lines are supported.",
             container,
         )
-        self.comments_section = self._add_section(
-            layout, "Comments", self.comments, container
-        )
-        self.comments_section.setVisible(include_comments)
-
         self.delivery = RangeSettings(self.CONFIG_RANGE_KEYS, container)
-        self._add_section(layout, "Configuration", self.delivery, container)
-
         self.limits = RangeSettings(self.LIMIT_KEYS, container)
+        settings = ConfigurationSection("Settings", container)
+        settings.body_layout.addWidget(self.comments)
+        self.comments_section = self.comments
+        self.comments.setVisible(include_comments)
+        settings.body_layout.addWidget(self.delivery)
+        settings.body_layout.addWidget(self.limits)
+        layout.addWidget(settings)
+
         self.limit_behaviour = CheckboxGroup(self.CONFIG_BOOLEAN_KEYS, container)
-        limits = CollapsibleSection("Limits", container)
-        limits.body_layout.addWidget(self.limits)
-        limits.body_layout.addWidget(self.limit_behaviour)
-        layout.addWidget(limits)
+        self._add_section(
+            layout, "Additional Settings", self.limit_behaviour, container
+        )
 
         self.content_filters = CheckboxGroup(self.CONTENT_FILTER_KEYS, container)
-        self._add_section(layout, "Content Types", self.content_filters, container)
-
         self.source_filters = CheckboxGroup(self.SOURCE_FILTER_KEYS, container)
-        self._add_section(layout, "Source Filters", self.source_filters, container)
-        self.sources = AudienceSourcesPage(container)
-        self.sources.setVisible(include_sources)
-        layout.addWidget(self.sources)
+        filters = ConfigurationSection("Filters", container)
+        filters.body_layout.addWidget(self.content_filters)
+        filters.body_layout.addWidget(self.source_filters)
+        layout.addWidget(filters)
         layout.addStretch()
         self.setWidget(container)
 
@@ -134,7 +136,7 @@ class CommentConfigurationPage(QScrollArea):
 
     @staticmethod
     def _add_section(layout, title, widget, parent) -> None:
-        section = CollapsibleSection(title, parent)
+        section = ConfigurationSection(title, parent)
         section.body_layout.addWidget(widget)
         layout.addWidget(section)
         return section

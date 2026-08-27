@@ -3,6 +3,7 @@ import re
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDoubleSpinBox,
     QFrame,
     QGridLayout,
     QLabel,
@@ -36,10 +37,32 @@ class CollapsibleSection(QFrame):
         layout.addWidget(self.body)
 
 
+class ConfigurationSection(QFrame):
+    """Static section for continuously scrollable configuration pages."""
+
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("contentCard")
+        self.title = QLabel(title, self)
+        self.title.setObjectName("configurationSectionTitle")
+        self.body_layout = QVBoxLayout()
+        self.body_layout.setContentsMargins(10, 4, 10, 10)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+        layout.addWidget(self.title)
+        layout.addLayout(self.body_layout)
+
+
 class CheckboxGroup(QWidget):
     changed = Signal()
 
-    def __init__(self, options: dict[str, str], parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        options: dict[str, str],
+        parent: QWidget | None = None,
+        columns: int = 2,
+    ) -> None:
         super().__init__(parent)
         self.controls = {}
         layout = QGridLayout(self)
@@ -50,7 +73,7 @@ class CheckboxGroup(QWidget):
             control = QCheckBox(label, self)
             control.toggled.connect(self.changed)
             self.controls[key] = control
-            layout.addWidget(control, index // 2, index % 2)
+            layout.addWidget(control, index // columns, index % columns)
 
     def values(self) -> dict[str, bool]:
         return {key: control.isChecked() for key, control in self.controls.items()}
@@ -63,7 +86,12 @@ class CheckboxGroup(QWidget):
 class NumericSettings(QWidget):
     changed = Signal()
 
-    def __init__(self, options: dict[str, str], parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        options: dict[str, str],
+        parent: QWidget | None = None,
+        columns: int = 2,
+    ) -> None:
         super().__init__(parent)
         self.controls = {}
         layout = QGridLayout(self)
@@ -71,7 +99,7 @@ class NumericSettings(QWidget):
         layout.setHorizontalSpacing(12)
         layout.setVerticalSpacing(8)
         for index, (key, label) in enumerate(options.items()):
-            row, column = divmod(index, 2)
+            row, column = divmod(index, columns)
             heading = QLabel(label, self)
             control = QSpinBox(self)
             control.setRange(0, 100000)
@@ -86,6 +114,82 @@ class NumericSettings(QWidget):
     def set_values(self, values: dict) -> None:
         for key, control in self.controls.items():
             control.setValue(int(values.get(key, 0) or 0))
+
+
+class DecimalSettings(QWidget):
+    """Reusable decimal editors for engine filter thresholds."""
+
+    changed = Signal()
+
+    def __init__(
+        self,
+        options: dict[str, str],
+        parent: QWidget | None = None,
+        columns: int = 2,
+    ) -> None:
+        super().__init__(parent)
+        self.controls = {}
+        layout = QGridLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setHorizontalSpacing(12)
+        layout.setVerticalSpacing(8)
+        for index, (key, label) in enumerate(options.items()):
+            row, column = divmod(index, columns)
+            heading = QLabel(label, self)
+            control = QDoubleSpinBox(self)
+            control.setRange(0, 1000000)
+            control.setDecimals(2)
+            control.valueChanged.connect(self.changed)
+            self.controls[key] = control
+            layout.addWidget(heading, row, column * 2)
+            layout.addWidget(control, row, column * 2 + 1)
+
+    def values(self) -> dict[str, float]:
+        return {key: control.value() for key, control in self.controls.items()}
+
+    def set_values(self, values: dict) -> None:
+        for key, control in self.controls.items():
+            control.setValue(float(values.get(key, 0) or 0))
+
+
+class InlineListSettings(QWidget):
+    """Compact comma-separated editors for short engine string lists."""
+
+    changed = Signal()
+
+    def __init__(
+        self,
+        options: dict[str, str],
+        parent: QWidget | None = None,
+        columns: int = 2,
+    ) -> None:
+        super().__init__(parent)
+        self.controls = {}
+        layout = QGridLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setHorizontalSpacing(12)
+        layout.setVerticalSpacing(8)
+        for index, (key, label) in enumerate(options.items()):
+            row, column = divmod(index, columns)
+            heading = QLabel(label, self)
+            control = QLineEdit(self)
+            control.setObjectName("dialogInput")
+            control.setPlaceholderText("Comma-separated values")
+            control.textChanged.connect(self.changed)
+            self.controls[key] = control
+            layout.addWidget(heading, row, column * 2)
+            layout.addWidget(control, row, column * 2 + 1)
+
+    def values(self) -> dict[str, list[str]]:
+        return {
+            key: [item.strip() for item in control.text().split(",") if item.strip()]
+            for key, control in self.controls.items()
+        }
+
+    def set_values(self, values: dict) -> None:
+        for key, control in self.controls.items():
+            value = values.get(key)
+            control.setText(", ".join(str(item) for item in value or []))
 
 
 class RangeSettings(QWidget):

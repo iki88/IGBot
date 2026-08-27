@@ -38,6 +38,26 @@ class AccountAssignmentService:
             "comment_interact_usernames",
             "comment_interact_from_file",
             "comment_feed",
+            "skip_following",
+            "skip_follower",
+            "skip_if_private",
+            "skip_business",
+            "skip_non_business",
+            "skip_if_link_in_bio",
+            "follow_private_or_empty",
+            "min_followers",
+            "max_followers",
+            "min_followings",
+            "max_followings",
+            "min_posts",
+            "mutual_friends",
+            "min_potency_ratio",
+            "max_potency_ratio",
+            "blacklist_words",
+            "mandatory_words",
+            "specific_alphabet",
+            "biography_language",
+            "biography_banned_language",
         }
     )
     TEXT_RESOURCE_NAMES = frozenset({"pm_list.txt", "comments_list.txt"})
@@ -168,7 +188,9 @@ class AccountAssignmentService:
         }
         allowed_settings = {
             "follow-percentage",
+            "follow-limit",
             "total-follows-limit",
+            "end-if-follows-limit-reached",
             "working-hours",
             "shuffle-jobs",
             "unfollow",
@@ -217,8 +239,10 @@ class AccountAssignmentService:
                 ):
                     raise ValueError(f"{key} must be a list of audience targets.")
                 continue
-            if key in {"follow-percentage", "total-follows-limit"} and not re.fullmatch(
-                r"\d+(?:-\d+)?", str(value)
+            if (
+                key in {"follow-percentage", "follow-limit", "total-follows-limit"}
+                and value is not None
+                and not re.fullmatch(r"\d+(?:-\d+)?", str(value))
             ):
                 raise ValueError(f"{key} must be a number or range.")
             if (
@@ -226,12 +250,12 @@ class AccountAssignmentService:
                 and max(int(part) for part in str(value).split("-")) > 100
             ):
                 raise ValueError("Follow percentage cannot exceed 100.")
-            if key == "total-follows-limit":
+            if key in {"follow-limit", "total-follows-limit"} and value is not None:
                 parts = [int(part) for part in str(value).split("-")]
                 if len(parts) == 2 and parts[0] > parts[1]:
-                    raise ValueError(
-                        "Total follows limit minimum cannot exceed its maximum."
-                    )
+                    raise ValueError(f"{key} minimum cannot exceed its maximum.")
+            if key == "end-if-follows-limit-reached" and type(value) is not bool:
+                raise ValueError(f"{key} must be a switch value.")
             if key == "working-hours" and (
                 not isinstance(value, list)
                 or any(
@@ -333,8 +357,51 @@ class AccountAssignmentService:
                 or any(not isinstance(item, str) or not item.strip() for item in value)
             ):
                 raise ValueError("posts-from-file must be a list of file entries.")
-        if any(type(value) is not bool for value in filter_settings.values()):
-            raise ValueError("Account filter settings must be switch values.")
+        filter_switches = set(self.FILTER_SETTING_KEYS) - {
+            "min_followers",
+            "max_followers",
+            "min_followings",
+            "max_followings",
+            "min_posts",
+            "mutual_friends",
+            "min_potency_ratio",
+            "max_potency_ratio",
+            "blacklist_words",
+            "mandatory_words",
+            "specific_alphabet",
+            "biography_language",
+            "biography_banned_language",
+        }
+        for key, value in filter_settings.items():
+            if value is None:
+                continue
+            if key in filter_switches and type(value) is not bool:
+                raise ValueError(f"{key} must be a switch value.")
+            if key in {
+                "min_followers",
+                "max_followers",
+                "min_followings",
+                "max_followings",
+                "min_posts",
+            } and (type(value) is not int or value < 0):
+                raise ValueError(f"{key} must be a non-negative number.")
+            if key == "mutual_friends" and (type(value) is not int or value < -1):
+                raise ValueError("mutual_friends must be -1 or a non-negative number.")
+            if key in {"min_potency_ratio", "max_potency_ratio"} and (
+                type(value) not in {int, float} or value < 0
+            ):
+                raise ValueError(f"{key} must be a non-negative number.")
+            if key in {
+                "blacklist_words",
+                "mandatory_words",
+                "specific_alphabet",
+                "biography_language",
+                "biography_banned_language",
+            } and (
+                not isinstance(value, list)
+                or any(not isinstance(item, str) or not item.strip() for item in value)
+            ):
+                raise ValueError(f"{key} must be a list of non-empty values.")
         if any(not isinstance(value, str) for value in text_resources.values()):
             raise ValueError("Account text resources must contain text.")
 

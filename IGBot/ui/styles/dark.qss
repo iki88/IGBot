@@ -699,6 +699,12 @@ QHeaderView::section { background-color: #27272A; border-color: #3F3F46; color: 
 
 QToolButton#configurationSectionHeader { color: #F9FAFB; font-weight: 700; }
 QToolButton#configurationSectionHeader:hover { background: transparent; }
+QLabel#configurationSectionTitle {
+    color: #F9FAFB;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 4px 2px 6px 2px;
+}
 
 QPushButton#linkButton {
     background: transparent;

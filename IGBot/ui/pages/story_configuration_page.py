@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
 from IGBot.ui.widgets.configuration_widgets import (
     CheckboxGroup,
-    CollapsibleSection,
+    ConfigurationSection,
     RangeSettings,
 )
 
@@ -44,7 +44,7 @@ class StoryConfigurationPage(QScrollArea):
         layout.setContentsMargins(12, 14, 12, 14)
         layout.setSpacing(12)
 
-        overview = CollapsibleSection("Story", container)
+        overview = ConfigurationSection("Enable / Disable", container)
         row = QHBoxLayout()
         self.enabled = QCheckBox("Enable Story", overview)
         self.enabled.setObjectName("configurationSwitch")
@@ -55,18 +55,21 @@ class StoryConfigurationPage(QScrollArea):
         overview.body_layout.addLayout(row)
         layout.addWidget(overview)
 
-        self.session = RangeSettings(self.SESSION_KEYS, container)
-        self._add_section(layout, "Story Session", self.session, container)
-
-        self.limits = RangeSettings(self.LIMIT_KEYS, container)
-        self.limit_behaviour = CheckboxGroup(self.BEHAVIOUR_KEYS, container)
-        limits = CollapsibleSection("Limits", container)
-        limits.body_layout.addWidget(self.limits)
-        limits.body_layout.addWidget(self.limit_behaviour)
-        layout.addWidget(limits)
         self.sources = AudienceSourcesPage(container)
         self.sources.setVisible(include_sources)
         layout.addWidget(self.sources)
+
+        self.session = RangeSettings(self.SESSION_KEYS, container)
+        self.limits = RangeSettings(self.LIMIT_KEYS, container)
+        settings = ConfigurationSection("Settings", container)
+        settings.body_layout.addWidget(self.session)
+        settings.body_layout.addWidget(self.limits)
+        layout.addWidget(settings)
+
+        self.limit_behaviour = CheckboxGroup(self.BEHAVIOUR_KEYS, container)
+        self._add_section(
+            layout, "Additional Settings", self.limit_behaviour, container
+        )
         layout.addStretch()
         self.setWidget(container)
 
@@ -78,7 +81,7 @@ class StoryConfigurationPage(QScrollArea):
 
     @staticmethod
     def _add_section(layout, title, widget, parent) -> None:
-        section = CollapsibleSection(title, parent)
+        section = ConfigurationSection(title, parent)
         section.body_layout.addWidget(widget)
         layout.addWidget(section)
 

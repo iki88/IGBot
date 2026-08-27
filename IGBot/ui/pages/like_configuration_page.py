@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWi
 from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
 from IGBot.ui.widgets.configuration_widgets import (
     CheckboxGroup,
-    CollapsibleSection,
+    ConfigurationSection,
     RangeSettings,
     TextListSettings,
 )
@@ -51,7 +51,7 @@ class LikeConfigurationPage(QScrollArea):
         layout.setContentsMargins(12, 14, 12, 14)
         layout.setSpacing(12)
 
-        overview = CollapsibleSection("Like", container)
+        overview = ConfigurationSection("Enable / Disable", container)
         row = QHBoxLayout()
         row.addWidget(QLabel("Engine configuration status", overview))
         row.addStretch()
@@ -60,27 +60,27 @@ class LikeConfigurationPage(QScrollArea):
         overview.body_layout.addLayout(row)
         layout.addWidget(overview)
 
-        self.interaction = RangeSettings(self.INTERACTION_KEYS, container)
-        self._add_section(layout, "Interaction", self.interaction, container)
-
-        self.limits = RangeSettings(self.LIMIT_KEYS, container)
-        self.limit_behaviour = CheckboxGroup(self.BOOLEAN_KEYS, container)
-        limits = CollapsibleSection("Limits", container)
-        limits.body_layout.addWidget(self.limits)
-        limits.body_layout.addWidget(self.limit_behaviour)
-        layout.addWidget(limits)
-
-        self.media = RangeSettings(self.MEDIA_KEYS, container)
-        self._add_section(layout, "Media Behaviour", self.media, container)
-
-        self.files = TextListSettings(self.LIST_KEYS, container)
-        self.files_section = self._add_section(
-            layout, "Post URL Files", self.files, container
-        )
-        self.files_section.setVisible(include_file_targets)
         self.sources = AudienceSourcesPage(container)
         self.sources.setVisible(include_sources)
         layout.addWidget(self.sources)
+
+        self.interaction = RangeSettings(self.INTERACTION_KEYS, container)
+        self.limits = RangeSettings(self.LIMIT_KEYS, container)
+        settings = ConfigurationSection("Settings", container)
+        settings.body_layout.addWidget(self.interaction)
+        settings.body_layout.addWidget(self.limits)
+        layout.addWidget(settings)
+
+        self.limit_behaviour = CheckboxGroup(self.BOOLEAN_KEYS, container)
+        self.media = RangeSettings(self.MEDIA_KEYS, container)
+        self.files = TextListSettings(self.LIST_KEYS, container)
+        additional = ConfigurationSection("Additional Settings", container)
+        additional.body_layout.addWidget(self.limit_behaviour)
+        additional.body_layout.addWidget(self.media)
+        additional.body_layout.addWidget(self.files)
+        self.files_section = self.files
+        self.files.setVisible(include_file_targets)
+        layout.addWidget(additional)
         layout.addStretch()
         self.setWidget(container)
 
@@ -96,7 +96,7 @@ class LikeConfigurationPage(QScrollArea):
 
     @staticmethod
     def _add_section(layout, title, widget, parent) -> None:
-        section = CollapsibleSection(title, parent)
+        section = ConfigurationSection(title, parent)
         section.body_layout.addWidget(widget)
         layout.addWidget(section)
         return section

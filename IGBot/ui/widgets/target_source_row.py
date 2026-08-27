@@ -8,14 +8,22 @@ class TargetSourceRow(QWidget):
     changed = Signal()
     edit_requested = Signal()
 
-    def __init__(self, label: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        label: str,
+        parent: QWidget | None = None,
+        item_noun: str = "target",
+        switch_style: bool = True,
+    ) -> None:
         super().__init__(parent)
         self._entries: list[str] = []
+        self._item_noun = item_noun
         self.enabled = QCheckBox(self)
-        self.enabled.setObjectName("configurationSwitch")
+        if switch_style:
+            self.enabled.setObjectName("configurationSwitch")
         self.name = QPushButton(label, self)
         self.name.setObjectName("linkButton")
-        self.count = QLabel("0 targets", self)
+        self.count = QLabel(f"0 {item_noun}s", self)
         self.count.setObjectName("mutedLabel")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -30,7 +38,8 @@ class TargetSourceRow(QWidget):
     def set_entries(self, entries: list[str] | tuple[str, ...]) -> None:
         self._entries = list(entries)
         count = len(self._entries)
-        self.count.setText(f"{count} {'target' if count == 1 else 'targets'}")
+        noun = self._item_noun if count == 1 else f"{self._item_noun}s"
+        self.count.setText(f"{count} {noun}")
 
     def entries(self) -> list[str]:
         return list(self._entries)

@@ -7,7 +7,11 @@ from PySide6.QtWidgets import QApplication, QDialog
 from IGBot.core.device import AssignedAccount
 from IGBot.services.account_assignment_service import AccountAssignmentService
 from IGBot.ui.pages.account_page import AccountPage
-from IGBot.ui.widgets.configuration_widgets import CollapsibleSection
+from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
+from IGBot.ui.widgets.configuration_widgets import (
+    CollapsibleSection,
+    ConfigurationSection,
+)
 from IGBot.ui.widgets.target_editor_dialog import TargetEditorDialog
 from IGBot.ui.widgets.target_source_row import TargetSourceRow
 from IGBot.ui.widgets.top_toolbar import TopToolbar
@@ -45,7 +49,8 @@ def test_audience_sources_load_and_dirty_state(tmp_path):
         "source_two",
     ]
     assert sources.rows["blogger-followers"].enabled.isChecked()
-    assert sources.rows["hashtag-posts-recent"].entries() == ["cats", "dogs"]
+    assert "hashtag-posts-recent" not in sources.rows
+    assert sources.state_values()["hashtag-posts-recent"] == ["cats", "dogs"]
     assert "Audience Sources" not in [
         page.tabs.tabText(index) for index in range(page.tabs.count())
     ]
@@ -136,11 +141,71 @@ def test_module_source_label_launches_shared_target_editor_request():
 def test_module_sources_are_methods_without_duplicate_sources_heading():
     page = AccountPage()
     headings = [
-        section.toggle.text()
-        for section in page.follow_page.sources.findChildren(CollapsibleSection)
+        section.title.text()
+        for section in page.follow_page.sources.findChildren(ConfigurationSection)
     ]
-    assert headings == ["Method", "Advanced Sources"]
+    assert headings == ["Method"]
     assert "Sources" not in headings
+
+
+def test_interaction_modules_share_static_continuous_section_order():
+    page = AccountPage()
+    expected = {
+        page.follow_page: [
+            "Enable",
+            "Method",
+            "Settings",
+            "Additional Settings",
+            "Filters",
+        ],
+        page.unfollow_page: [
+            "Enable / Disable",
+            "Method",
+            "Settings",
+            "Additional Settings",
+        ],
+        page.like_page: [
+            "Enable / Disable",
+            "Method",
+            "Settings",
+            "Additional Settings",
+        ],
+        page.story_page: [
+            "Enable / Disable",
+            "Method",
+            "Settings",
+            "Additional Settings",
+        ],
+        page.dm_page: [
+            "Enable / Disable",
+            "Method",
+            "Settings",
+            "Additional Settings",
+            "Filters",
+        ],
+        page.comment_page: [
+            "Enable / Disable",
+            "Method",
+            "Settings",
+            "Additional Settings",
+            "Filters",
+        ],
+    }
+
+    for module, expected_headings in expected.items():
+        headings = []
+        layout = module.widget().layout()
+        for index in range(layout.count()):
+            widget = layout.itemAt(index).widget()
+            if isinstance(widget, ConfigurationSection):
+                headings.append(widget.title.text())
+            elif isinstance(widget, AudienceSourcesPage) and widget.isVisibleTo(
+                module.widget()
+            ):
+                method = widget.findChild(ConfigurationSection)
+                headings.append(method.title.text())
+        assert headings == expected_headings
+        assert not module.findChildren(CollapsibleSection)
 
 
 def test_configuration_sections_are_permanently_expanded():
