@@ -2,6 +2,7 @@ import re
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QCheckBox,
     QDoubleSpinBox,
     QFrame,
@@ -19,12 +20,20 @@ from PySide6.QtWidgets import (
 class WheelSafeSpinBox(QSpinBox):
     """Integer editor that ignores incidental mouse-wheel input."""
 
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setButtonSymbols(QAbstractSpinBox.NoButtons)
+
     def wheelEvent(self, event) -> None:
         event.ignore()
 
 
 class WheelSafeDoubleSpinBox(QDoubleSpinBox):
     """Decimal editor that ignores incidental mouse-wheel input."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setButtonSymbols(QAbstractSpinBox.NoButtons)
 
     def wheelEvent(self, event) -> None:
         event.ignore()

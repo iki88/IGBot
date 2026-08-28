@@ -205,7 +205,7 @@ def test_follow_product_layout_and_runtime_extensions_are_not_persisted():
     )[:2] == (1, 1)
     for row in page.list_filters.values():
         assert row.name.objectName() == "checkboxLinkButton"
-        assert row.layout().spacing() == 8
+        assert row.layout().spacing() == 0
 
 
 def test_all_module_tabs_use_consistent_filled_status_indicators():

@@ -18,6 +18,7 @@ This is a living project document for reviewed UI and workflow improvements that
 - Sidebar navigation now fits its normal contents without a redundant scrollbar and scrolls only when required.
 - Unfollow now mirrors Follow's operator-focused structure: source-only methods, shared Min/Max actions, behavioral modifiers, popup-managed usernames, no profile-filter section, and a collapsed weekday schedule.
 - Follow and Unfollow action fields now share consistent fixed widths and alignment; popup-backed labels remain blue and pointer-enabled without underline styling.
+- Shared checkbox rows now use consistent height and spacing, clickable labels share native checkbox text geometry, and numeric inputs are keyboard-only without wheel changes or spin buttons.
 
 ### Navigation
 

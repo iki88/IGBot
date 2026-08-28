@@ -28,7 +28,7 @@ class TargetSourceRow(QWidget):
         self.count.setObjectName("mutedLabel")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(0)
         layout.addWidget(self.enabled)
         layout.addWidget(self.name)
         layout.addStretch()

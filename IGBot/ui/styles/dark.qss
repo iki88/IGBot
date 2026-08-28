@@ -671,6 +671,7 @@ QComboBox QAbstractItemView { background-color: #27272A; border: 1px solid #3F3F
 
 QCheckBox,
 QRadioButton { color: #F9FAFB; spacing: 8px; }
+QCheckBox { min-height: 28px; }
 QCheckBox::indicator,
 QRadioButton::indicator { width: 17px; height: 17px; border: 1px solid #52525B; background-color: #27272A; }
 QCheckBox::indicator { border-radius: 4px; }
@@ -712,7 +713,7 @@ QPushButton#linkButton {
     color: #60A5FA;
     font-weight: 600;
     min-height: 28px;
-    padding: 0 4px;
+    padding: 0;
     text-align: left;
 }
 QPushButton#linkButton:hover { color: #93C5FD; }
