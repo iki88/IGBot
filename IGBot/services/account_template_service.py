@@ -77,6 +77,7 @@ class AccountTemplateService:
             "carousel-percentage",
             "watch-photo-time",
             "watch-video-time",
+            "delete-interacted-users",
             "stories-count",
             "stories-percentage",
             "total-watches-limit",

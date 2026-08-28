@@ -426,6 +426,7 @@ class MainWindow(QMainWindow):
                 self.account_page.password.text(),
                 self.account_page.application_id.text(),
                 settings,
+                self.account_page.tag.text(),
             )
 
     def _on_account_configuration_saved(self, account) -> None:

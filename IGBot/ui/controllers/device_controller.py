@@ -252,10 +252,11 @@ class DeviceController(QObject):
         password: str,
         app_id: str,
         settings: dict | None = None,
+        tag: str | None = None,
     ) -> None:
         task = _ServiceTask(
             lambda: self._service.update_account_configuration(
-                account, username, password, app_id, settings
+                account, username, password, app_id, settings, tag
             )
         )
         task.signals.completed.connect(self._on_account_configuration_saved)

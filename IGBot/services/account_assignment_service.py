@@ -50,6 +50,8 @@ class AccountAssignmentService:
             "min_followings",
             "max_followings",
             "min_posts",
+            "min_likers",
+            "max_likers",
             "mutual_friends",
             "min_potency_ratio",
             "max_potency_ratio",
@@ -121,6 +123,7 @@ class AccountAssignmentService:
                 metadata.get("username") or configuration.get("username") or ""
             )
             configuration["password"] = str(metadata.get("password") or "")
+            configuration["tag"] = str(metadata.get("tag") or "")
         filters_path = config_path.parent / "filters.yml"
         if filters_path.is_file():
             filters = yaml.safe_load(filters_path.read_bytes())
@@ -145,6 +148,7 @@ class AccountAssignmentService:
         password: str,
         app_id: str,
         settings: dict | None = None,
+        tag: str | None = None,
     ) -> AssignedAccount:
         """Atomically update account fields while preserving YAML layout and comments."""
         username = username.strip()
@@ -221,6 +225,7 @@ class AccountAssignmentService:
             "watch-photo-time",
             "watch-video-time",
             "posts-from-file",
+            "delete-interacted-users",
             "stories-count",
             "stories-percentage",
             "total-watches-limit",
@@ -355,6 +360,7 @@ class AccountAssignmentService:
                     "end-if-watches-limit-reached",
                     "end-if-pm-limit-reached",
                     "end-if-comments-limit-reached",
+                    "delete-interacted-users",
                 }
                 and type(value) is not bool
             ):
@@ -370,6 +376,8 @@ class AccountAssignmentService:
             "min_followings",
             "max_followings",
             "min_posts",
+            "min_likers",
+            "max_likers",
             "mutual_friends",
             "min_potency_ratio",
             "max_potency_ratio",
@@ -390,6 +398,8 @@ class AccountAssignmentService:
                 "min_followings",
                 "max_followings",
                 "min_posts",
+                "min_likers",
+                "max_likers",
             } and (type(value) is not int or value < 0):
                 raise ValueError(f"{key} must be a non-negative number.")
             if key == "mutual_friends" and (type(value) is not int or value < -1):
@@ -552,7 +562,9 @@ class AccountAssignmentService:
             raise ValueError("An account directory with this username already exists.")
         renamed = False
         try:
-            self.metadata.save(old_directory, username, password, account.device_id)
+            self.metadata.save(
+                old_directory, username, password, account.device_id, tag=tag
+            )
             if old_directory.resolve() != new_directory.resolve():
                 old_directory.rename(new_directory)
                 renamed = True
@@ -600,7 +612,13 @@ class AccountAssignmentService:
         missing = []
         for key, value in values.items():
             node = fields.get(key)
-            if node is None:
+            if value is None:
+                if node is not None:
+                    line_start = content.rfind("\n", 0, node.start_mark.index) + 1
+                    line_end = content.find("\n", node.end_mark.index)
+                    line_end = len(content) if line_end == -1 else line_end + 1
+                    replacements.append((line_start, line_end, ""))
+            elif node is None:
                 missing.append((key, value))
             elif parsed.get(key) != value:
                 replacements.append(
@@ -625,7 +643,8 @@ class AccountAssignmentService:
         cls._write_configuration(path, updated)
         verified = yaml.safe_load(path.read_bytes())
         if not isinstance(verified, dict) or any(
-            verified.get(key) != value for key, value in values.items()
+            (key in verified if value is None else verified.get(key) != value)
+            for key, value in values.items()
         ):
             cls._restore_file(path, original)
             raise RuntimeError(f"The saved {path.name} values could not be verified.")

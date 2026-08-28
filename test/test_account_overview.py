@@ -32,7 +32,7 @@ def _account(tmp_path, content=None):
     )
 
 
-def test_overview_masks_password_and_disables_future_operations(tmp_path):
+def test_overview_contains_only_unified_account_information(tmp_path):
     application = QApplication.instance() or QApplication([])
     service, account = _account(tmp_path)
     page = AccountPage()
@@ -43,19 +43,34 @@ def test_overview_masks_password_and_disables_future_operations(tmp_path):
     assert page.password.text() == "old#password"
     assert page.password.echoMode() == QLineEdit.Password
     assert page.application_id.text() == "com.instagram.android"
-    assert not any(
-        button.isEnabled()
-        for button in (
-            page.login_button,
-            page.logout_button,
-        )
-    )
     assert page.detect_app_id_button.isEnabled()
+    assert page.detect_app_id_button.text() == "Detect"
+    assert page.detect_app_id_button.toolTip() == "Detect App ID"
     assert not hasattr(page, "load_app_ids_button")
+    assert not hasattr(page, "login_button")
+    assert not hasattr(page, "logout_button")
+    assert page.tag.text() == ""
+    assert page.tag.placeholderText() == "Warmup, APK1, VIP, Client A, Germany"
+    overview_text = page.tabs.widget(0).widget().findChildren(QLineEdit)
+    assert set(overview_text) == {
+        page.username,
+        page.password,
+        page.application_id,
+        page.tag,
+    }
     page.password_toggle.setChecked(True)
     assert page.password.echoMode() == QLineEdit.Normal
     assert page.password_toggle.toolTip() == "Hide password"
     assert application is not None
+
+
+def test_detect_button_shares_the_application_field_row():
+    page = AccountPage()
+
+    assert page.application_layout.indexOf(page.application_id) == 0
+    assert page.application_layout.indexOf(page.detect_app_id_button) == 1
+    assert page.application_layout.contentsMargins().left() == 0
+    assert page.application_layout.spacing() == 8
 
 
 def test_detect_button_emits_detection_request_and_updates_field(tmp_path):
@@ -195,6 +210,38 @@ def test_metadata_updates_preserve_created_timestamp_and_extension_fields(tmp_pa
     assert saved["password"] == "second"
     assert saved["created_at"] == metadata["created_at"]
     assert saved["notes"] == "operator-owned metadata"
+
+
+def test_tag_persists_in_metadata_and_reloads(tmp_path):
+    service, account = _account(tmp_path)
+
+    updated = service.update_configuration(
+        account,
+        "original",
+        "secret",
+        account.app_id,
+        tag="priority-group",
+    )
+    metadata_path = updated.config_path.parent / "account.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    assert metadata["tag"] == "priority-group"
+    assert service.load_configuration(updated.config_path)["tag"] == "priority-group"
+    assert "tag" not in yaml.safe_load(updated.config_path.read_bytes())
+
+
+def test_saving_without_tag_preserves_existing_metadata_tag(tmp_path):
+    service, account = _account(tmp_path)
+    updated = service.update_configuration(
+        account, "original", "first", account.app_id, tag="account-only"
+    )
+
+    service.update_configuration(updated, "original", "second", account.app_id)
+
+    metadata = json.loads(
+        (updated.config_path.parent / "account.json").read_text(encoding="utf-8")
+    )
+    assert metadata["tag"] == "account-only"
 
 
 @pytest.mark.parametrize(

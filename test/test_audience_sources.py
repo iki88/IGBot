@@ -63,9 +63,8 @@ def test_audience_sources_load_and_dirty_state(tmp_path):
 
 def test_audience_sources_save_only_documented_engine_keys(tmp_path):
     service, account = configuration(tmp_path)
-    account_page = AccountPage()
-    account_page.set_configuration(service.load_configuration(account.config_path))
-    page = account_page.like_page.sources
+    page = AudienceSourcesPage()
+    page.set_configuration(service.load_configuration(account.config_path))
     page.rows["blogger-followers"].set_entries(["new.source", "another.source"])
     page.rows["blogger"].enabled.setChecked(False)
     page.rows["place-posts-top"].set_entries(["Sarajevo", "Mostar"])
@@ -167,10 +166,12 @@ def test_interaction_modules_share_static_continuous_section_order():
             "Schedule",
         ],
         page.like_page: [
-            "Enable / Disable",
-            "Method",
-            "Settings",
+            "Enable Like",
+            "Like Method",
+            "Like Actions",
             "Additional Settings",
+            "Filters",
+            "Schedule",
         ],
         page.story_page: [
             "Enable / Disable",
@@ -179,11 +180,12 @@ def test_interaction_modules_share_static_continuous_section_order():
             "Additional Settings",
         ],
         page.dm_page: [
-            "Enable / Disable",
-            "Method",
-            "Settings",
+            "Enable DM",
+            "DM Method",
+            "Messages",
+            "DM Actions",
             "Additional Settings",
-            "Filters",
+            "Schedule",
         ],
         page.comment_page: [
             "Enable / Disable",
@@ -213,6 +215,8 @@ def test_interaction_modules_share_static_continuous_section_order():
         expected_collapsible = {
             page.follow_page: [page.follow_page.schedule_section],
             page.unfollow_page: [page.unfollow_page.schedule_section],
+            page.like_page: [page.like_page.schedule_section],
+            page.dm_page: [page.dm_page.schedule_section],
         }.get(module, [])
         assert collapsible == expected_collapsible
 

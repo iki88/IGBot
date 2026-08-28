@@ -104,10 +104,10 @@ class DeviceInventoryService:
         return self._account_assignments.load_configuration(account.config_path)
 
     def update_account_configuration(
-        self, account, username, password, app_id, settings=None
+        self, account, username, password, app_id, settings=None, tag=None
     ):
         return self._account_assignments.update_configuration(
-            account, username, password, app_id, settings
+            account, username, password, app_id, settings, tag
         )
 
     def installed_packages(self, serial: str):

@@ -31,6 +31,7 @@ class AccountMetadataService:
         username: str,
         password: str,
         device_id: str,
+        tag: str | None = None,
     ) -> dict:
         existing = self.load(account_directory)
         metadata = dict(existing)
@@ -44,6 +45,8 @@ class AccountMetadataService:
                 or datetime.now(UTC).isoformat(),
             }
         )
+        if tag is not None:
+            metadata["tag"] = tag
         self._write(account_directory / self.FILE_NAME, metadata)
         if self.load(account_directory) != metadata:
             raise RuntimeError("The saved account metadata could not be verified.")

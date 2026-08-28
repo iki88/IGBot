@@ -7,6 +7,7 @@ from IGBot.core.device import AssignedAccount
 from IGBot.services.account_assignment_service import AccountAssignmentService
 from IGBot.ui.pages.account_page import AccountPage
 from IGBot.ui.pages.dm_configuration_page import DMConfigurationPage
+from IGBot.ui.widgets.target_editor_dialog import TargetEditorDialog
 from IGBot.ui.widgets.top_toolbar import TopToolbar
 
 
@@ -152,3 +153,65 @@ def test_dm_resource_failure_restores_every_file(tmp_path, monkeypatch):
         )
 
     assert all(path.read_bytes() == content for path, content in paths.items())
+
+
+def test_dm_product_layout_exposes_only_operator_methods_and_ai_placeholder():
+    page = DMConfigurationPage()
+
+    assert page.enabled.text() == "Enable DM"
+    assert page.new_followers.text() == "Send DMs to New Followers"
+    assert page.new_followers.isChecked()
+    assert page.specific_accounts.name.text() == "Send DMs to Specific Accounts"
+    assert page.sources.rows["blogger-followers"].isHidden()
+    assert page.sources.rows["blogger-following"].isHidden()
+    assert page.edit_messages_button.text() == "Edit DM Messages"
+    assert page.edit_ai_prompt_button.text() == "Edit AI Prompt"
+    assert not page.edit_ai_prompt_button.isEnabled()
+    assert page.delivery.controls["pm-percentage"].isHidden()
+    assert page.limit_behaviour.isHidden()
+    assert page.schedule_section.body.isHidden()
+
+
+def test_dm_message_button_uses_shared_popup_editor(mocker):
+    page = DMConfigurationPage()
+    page.set_configuration({"pm_list.txt": "Hello {friend|there}!\nWelcome 😊"})
+    mocker.patch.object(
+        TargetEditorDialog, "exec", return_value=TargetEditorDialog.Accepted
+    )
+    mocker.patch.object(
+        TargetEditorDialog,
+        "entries",
+        return_value=["Updated {friend|there}!", "Welcome 😊"],
+    )
+
+    page.edit_messages_button.click()
+
+    assert page.messages.text() == "Updated {friend|there}!\nWelcome 😊"
+
+
+def test_dm_runtime_extensions_do_not_write_engine_keys():
+    page = DMConfigurationPage()
+    page.set_configuration(
+        {
+            "pm-percentage": "1",
+            "pm_list.txt": "Hello",
+            "total-pm-limit": "10",
+        }
+    )
+    page.message_amount.minimum.setValue(2)
+    page.message_amount.maximum.setValue(5)
+    page.delay.minimum.setValue(10)
+    page.delay.maximum.setValue(20)
+    page.check_interval.controls["check-new-messages-every"].setValue(15)
+    page.reply_to_incoming.setChecked(True)
+    page.schedule_days.controls["monday"].setChecked(False)
+
+    values = page.values()
+
+    assert values["pm-percentage"] == "1"
+    assert values["total-pm-limit"] == "10"
+    assert not any(
+        fragment in key
+        for key in values
+        for fragment in ("users-to-message", "delay", "check-new", "reply", "schedule")
+    )

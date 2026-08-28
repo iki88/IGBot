@@ -319,6 +319,12 @@ QLabel#deviceContextTitle {
     font-weight: 600;
 }
 
+QLabel#accountInformationTitle {
+    color: #e9eef4;
+    font-size: 14px;
+    font-weight: 600;
+}
+
 QLabel#deviceContextSerial {
     color: #748294;
     font-family: "Cascadia Mono", "Consolas", monospace;

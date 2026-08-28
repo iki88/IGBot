@@ -2,7 +2,6 @@ from PySide6.QtCore import QSize, Signal
 from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -116,13 +115,15 @@ class AccountPage(QWidget):
         layout.setContentsMargins(12, 14, 12, 14)
         layout.setSpacing(14)
 
-        credentials, credential_layout = self._section("Login Credentials", overview)
+        information, information_layout = self._section("Account Information", overview)
+        information_layout.setContentsMargins(16, 12, 16, 12)
+        information_layout.setSpacing(8)
         credential_form = QFormLayout()
         credential_form.setHorizontalSpacing(18)
-        credential_form.setVerticalSpacing(10)
-        self.username = QLineEdit(credentials)
+        credential_form.setVerticalSpacing(8)
+        self.username = QLineEdit(information)
         self.username.setObjectName("dialogInput")
-        self.password = QLineEdit(credentials)
+        self.password = QLineEdit(information)
         self.password.setObjectName("dialogInput")
         self.password.setEchoMode(QLineEdit.Password)
         self.password_toggle = self.password.addAction(
@@ -133,46 +134,33 @@ class AccountPage(QWidget):
         self.password_toggle.toggled.connect(self._toggle_password_visibility)
         credential_form.addRow("Username", self.username)
         credential_form.addRow("Password", self.password)
-        credential_layout.addLayout(credential_form)
-        session_actions = QHBoxLayout()
-        self.login_button = QPushButton("Login", credentials)
-        self.logout_button = QPushButton("Logout", credentials)
-        for button in (self.login_button, self.logout_button):
-            button.setObjectName("secondaryButton")
-            button.setEnabled(False)
-            session_actions.addWidget(button)
-        session_actions.addStretch()
-        credential_layout.addLayout(session_actions)
-        layout.addWidget(credentials)
-
-        app_cloner, app_layout = self._section("App Cloner", overview)
-        app_form = QFormLayout()
-        app_form.setHorizontalSpacing(18)
-        self.application_id = QLineEdit(app_cloner)
+        self.application_id = QLineEdit(information)
         self.application_id.setObjectName("dialogInput")
-        app_form.addRow("Application ID", self.application_id)
-        app_layout.addLayout(app_form)
-        app_actions = QHBoxLayout()
-        self.detect_app_id_button = QPushButton("Detect App ID", app_cloner)
+        self.tag = QLineEdit(information)
+        self.tag.setObjectName("dialogInput")
+        self.tag.setPlaceholderText("Warmup, APK1, VIP, Client A, Germany")
+        for editor in (self.username, self.password, self.application_id, self.tag):
+            editor.setMaximumWidth(460)
+        self.application_row = QWidget(information)
+        self.application_layout = QHBoxLayout(self.application_row)
+        self.application_layout.setContentsMargins(0, 0, 0, 0)
+        self.application_layout.setSpacing(8)
+        self.application_layout.addWidget(self.application_id, 1)
+        self.detect_app_id_button = QPushButton("Detect", self.application_row)
         self.detect_app_id_button.setObjectName("secondaryButton")
+        self.detect_app_id_button.setToolTip("Detect App ID")
         self.detect_app_id_button.clicked.connect(self.package_detection_requested)
-        app_actions.addWidget(self.detect_app_id_button)
-        app_actions.addStretch()
-        app_layout.addLayout(app_actions)
-        layout.addWidget(app_cloner)
-
-        reserved = QGridLayout()
-        reserved.setHorizontalSpacing(12)
-        reserved.setVerticalSpacing(12)
-        for index, title in enumerate(("Participation", "Tags", "Limits", "Filters")):
-            section, _ = self._section(title, overview)
-            reserved.addWidget(section, index // 2, index % 2)
-        layout.addLayout(reserved)
+        self.application_layout.addWidget(self.detect_app_id_button)
+        self.application_row.setMaximumWidth(560)
+        credential_form.addRow("Instagram App", self.application_row)
+        credential_form.addRow("Tag", self.tag)
+        information_layout.addLayout(credential_form)
+        layout.addWidget(information)
         layout.addStretch()
 
         self.device = QLabel(overview)
         self.device.hide()
-        for editor in (self.username, self.password, self.application_id):
+        for editor in (self.username, self.password, self.application_id, self.tag):
             editor.textChanged.connect(self._mark_dirty)
         scroll.setWidget(overview)
         return scroll
@@ -185,7 +173,7 @@ class AccountPage(QWidget):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(12)
         heading = QLabel(title, section)
-        heading.setObjectName("deviceContextTitle")
+        heading.setObjectName("accountInformationTitle")
         layout.addWidget(heading)
         return section, layout
 
@@ -200,6 +188,7 @@ class AccountPage(QWidget):
         self.application_id.setText(
             str(configuration.get("app-id") or configuration.get("app_id") or "")
         )
+        self.tag.setText(str(configuration.get("tag") or ""))
         self.follow_page.set_configuration(configuration)
         self.timer_page.set_configuration(configuration)
         self.unfollow_page.set_configuration(configuration)

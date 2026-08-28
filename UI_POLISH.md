@@ -19,6 +19,12 @@ This is a living project document for reviewed UI and workflow improvements that
 - Unfollow now mirrors Follow's operator-focused structure: source-only methods, shared Min/Max actions, behavioral modifiers, popup-managed usernames, no profile-filter section, and a collapsed weekday schedule.
 - Follow and Unfollow action fields now share consistent fixed widths and alignment; popup-backed labels remain blue and pointer-enabled without underline styling.
 - Shared checkbox rows now use consistent height and spacing, clickable labels share native checkbox text geometry, and numeric inputs are keyboard-only without wheel changes or spin buttons.
+- Like now follows the finalized product module structure with production-focused methods, aligned actions, useful media settings, engine-backed filters, and a collapsed weekday schedule.
+- Like view-time controls now sit with Like Actions, and the single Minimum Posts filter no longer reserves paired-field space.
+- Timer now contains only operator-facing Start Time and End Time fields while transparently translating standard time notation to engine working hours.
+- Overview now presents one Account Information section for credentials, Instagram App, detection, and account-specific Tag metadata.
+- Overview keeps Detect inline with Instagram App, uses compact account-field spacing, and provides concise Tag examples.
+- DM now follows the operator workflow: two recipient methods, popup-managed messages, aligned actions, concise production settings, and a collapsed schedule.
 
 ### Navigation
 
@@ -63,12 +69,13 @@ This is a living project document for reviewed UI and workflow improvements that
 - [x] Treat target sources as module methods without a duplicate Sources section.
 - [x] Keep configuration sections permanently visible in continuous scrolling pages.
 - [x] Standardize interaction modules as Enable, Method, Settings, supported Additional Settings, and supported Filters.
+- [x] Refine Like around production methods, popup-backed word filters, and optional profile filters.
 
 #### DM
 
-- Move Compose Message editor to the top.
-- Reserve a second button beside it for future AI Prompt integration.
-- Place limits and advanced settings below the editor.
+- [x] Move the message editor directly below DM Method.
+- [x] Reserve a second button beside it for future AI Prompt integration.
+- [x] Place DM actions and additional settings below the editor.
 
 Future modules should follow a consistent layout:
 

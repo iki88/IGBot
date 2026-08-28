@@ -253,6 +253,13 @@ def test_template_enabled_state_persists_and_is_applied(tmp_path):
 def test_apply_template_to_existing_account_preserves_identity_and_targets(tmp_path):
     service = inventory_service(tmp_path)
     account = service.add_account("existing_account", "secret", "phone-a")
+    service._account_assignments.metadata.save(
+        account.config_path.parent,
+        account.username,
+        "secret",
+        account.device_id,
+        tag="account-specific",
+    )
     service._account_assignments._update_yaml_fields(
         account.config_path, {"blogger-followers": ["target.one"]}
     )
@@ -269,3 +276,7 @@ def test_apply_template_to_existing_account_preserves_identity_and_targets(tmp_p
     assert configuration["blogger-followers"] == ["target.one"]
     assert configuration["follow-percentage"] == "1"
     assert configuration["total-follows-limit"] == "20-30"
+    assert (
+        service._account_assignments.metadata.load(account.config_path.parent)["tag"]
+        == "account-specific"
+    )

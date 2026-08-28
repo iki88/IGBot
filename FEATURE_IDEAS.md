@@ -42,6 +42,7 @@ Future scheduler improvements will be collected here.
 - Optional Visit Target Profile behavior
 - Optional Scroll Profile behavior
 - Optional Like Random Posts behavior
+- Save Posts — Future IGBot Runtime Extension allowing operators to enable automatic saving of liked posts with a configurable chance, such as `Save Posts` and `Chance to Save Posts: 1%`.
 - Replace the free-text Allowed Alphabets editor with a checklist for Latin, Cyrillic, Arabic, Greek, Hebrew, and Chinese/Japanese/Korean.
 
 ## User Experience
