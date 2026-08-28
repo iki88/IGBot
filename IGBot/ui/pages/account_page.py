@@ -1,5 +1,4 @@
-from PySide6.QtCore import Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QSize, Signal
 from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
@@ -16,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from IGBot.core.device import AssignedAccount
 from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
-from IGBot.ui.icons import eye_icon
+from IGBot.ui.icons import eye_icon, status_dot_icon
 from IGBot.ui.pages.comment_configuration_page import CommentConfigurationPage
 from IGBot.ui.pages.dm_configuration_page import DMConfigurationPage
 from IGBot.ui.pages.follow_configuration_page import FollowConfigurationPage
@@ -66,6 +65,7 @@ class AccountPage(QWidget):
 
         self.tabs = QTabWidget(self)
         self.tabs.setObjectName("accountTabs")
+        self.tabs.setIconSize(QSize(12, 12))
         self.tabs.addTab(self._build_overview(), "Overview")
         self.timer_page = TimerConfigurationPage(self.tabs)
         self.timer_page.changed.connect(self._mark_dirty)
@@ -263,46 +263,34 @@ class AccountPage(QWidget):
             self.dirty_changed.emit(False)
 
     def update_follow_tab_indicator(self) -> None:
-        enabled = self.follow_page.enabled.isChecked()
-        self.tabs.setTabText(2, f"{'●' if enabled else '○'} Follow")
-        self.tabs.tabBar().setTabTextColor(
-            2, QColor("#22C55E" if enabled else "#A1A1AA")
+        self._set_module_tab_indicator(
+            2, "Follow", self.follow_page.enabled.isChecked()
         )
 
     def update_unfollow_tab_indicator(self) -> None:
         enabled = self.unfollow_page.status.text() == "● Enabled"
-        self.tabs.setTabText(3, f"{'●' if enabled else '○'} Unfollow")
-        self.tabs.tabBar().setTabTextColor(
-            3, QColor("#22C55E" if enabled else "#A1A1AA")
-        )
+        self._set_module_tab_indicator(3, "Unfollow", enabled)
 
     def update_like_tab_indicator(self) -> None:
         enabled = self.like_page.status.text() == "● Enabled"
-        self.tabs.setTabText(4, f"{'●' if enabled else '○'} Like")
-        self.tabs.tabBar().setTabTextColor(
-            4, QColor("#22C55E" if enabled else "#A1A1AA")
-        )
+        self._set_module_tab_indicator(4, "Like", enabled)
 
     def update_comment_tab_indicator(self) -> None:
         enabled = self.comment_page.spintax_method.isChecked()
-        self.tabs.setTabText(5, f"{'●' if enabled else '○'} Comment")
-        self.tabs.tabBar().setTabTextColor(
-            5, QColor("#22C55E" if enabled else "#A1A1AA")
-        )
+        self._set_module_tab_indicator(5, "Comment", enabled)
 
     def update_story_tab_indicator(self) -> None:
         enabled = self.story_page.enabled.isChecked()
-        self.tabs.setTabText(6, f"{'●' if enabled else '○'} Story")
-        self.tabs.tabBar().setTabTextColor(
-            6, QColor("#22C55E" if enabled else "#A1A1AA")
-        )
+        self._set_module_tab_indicator(6, "Story", enabled)
 
     def update_dm_tab_indicator(self) -> None:
         enabled = self.dm_page.enabled.isChecked()
-        self.tabs.setTabText(7, f"{'●' if enabled else '○'} DM")
-        self.tabs.tabBar().setTabTextColor(
-            7, QColor("#22C55E" if enabled else "#A1A1AA")
-        )
+        self._set_module_tab_indicator(7, "DM", enabled)
+
+    def _set_module_tab_indicator(self, index: int, name: str, enabled: bool) -> None:
+        """Apply one consistent module-state marker to every account tab."""
+        self.tabs.setTabText(index, name)
+        self.tabs.setTabIcon(index, status_dot_icon(enabled))
 
     def set_account(self, account: AssignedAccount, phone_name: str = "") -> None:
         self.account = account

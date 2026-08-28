@@ -144,7 +144,7 @@ def test_module_sources_are_methods_without_duplicate_sources_heading():
         section.title.text()
         for section in page.follow_page.sources.findChildren(ConfigurationSection)
     ]
-    assert headings == ["Method"]
+    assert headings == ["Follow Method"]
     assert "Sources" not in headings
 
 
@@ -152,17 +152,19 @@ def test_interaction_modules_share_static_continuous_section_order():
     page = AccountPage()
     expected = {
         page.follow_page: [
-            "Enable",
-            "Method",
-            "Settings",
-            "Additional Settings",
-            "Filters",
+            "Enable Follow",
+            "Follow Method",
+            "Follow Actions",
+            "Follow Settings",
+            "Additional Follow Settings",
+            "Schedule",
         ],
         page.unfollow_page: [
-            "Enable / Disable",
-            "Method",
-            "Settings",
+            "Enable Unfollow",
+            "Unfollow Method",
+            "Unfollow Actions",
             "Additional Settings",
+            "Schedule",
         ],
         page.like_page: [
             "Enable / Disable",
@@ -204,11 +206,32 @@ def test_interaction_modules_share_static_continuous_section_order():
             ):
                 method = widget.findChild(ConfigurationSection)
                 headings.append(method.title.text())
+            elif isinstance(widget, CollapsibleSection):
+                headings.append(widget.toggle.text())
         assert headings == expected_headings
-        assert not module.findChildren(CollapsibleSection)
+        collapsible = module.findChildren(CollapsibleSection)
+        expected_collapsible = {
+            page.follow_page: [page.follow_page.schedule_section],
+            page.unfollow_page: [page.unfollow_page.schedule_section],
+        }.get(module, [])
+        assert collapsible == expected_collapsible
 
 
 def test_configuration_sections_are_permanently_expanded():
     section = CollapsibleSection("Limits")
     assert not section.toggle.isCheckable()
     assert section.body.isVisibleTo(section)
+
+
+def test_follow_schedule_is_collapsed_and_weekdays_are_vertical():
+    page = AccountPage().follow_page
+
+    assert page.schedule_section.toggle.isCheckable()
+    assert not page.schedule_section.toggle.isChecked()
+    assert page.schedule_section.body.isHidden()
+    layout = page.schedule_days.layout()
+    positions = [
+        layout.getItemPosition(layout.indexOf(control))[:2]
+        for control in page.schedule_days.controls.values()
+    ]
+    assert positions == [(index, 0) for index in range(7)]

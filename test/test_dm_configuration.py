@@ -43,7 +43,7 @@ def test_dm_load_status_dirty_state_and_shared_shortcut(tmp_path):
     assert page.dm_page.delivery.controls["pm-percentage"].text() == "20-30"
     assert "Welcome 😊" in page.dm_page.messages.text()
     assert page.dm_page.recipients.controls["pm_to_private_or_empty"].isChecked()
-    assert page.tabs.tabText(7) == "● DM"
+    assert page.tabs.tabText(7) == "DM"
     assert not page.is_dirty
     assert TopToolbar().save_action.shortcut() == QKeySequence.Save
 

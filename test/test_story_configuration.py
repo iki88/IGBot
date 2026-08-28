@@ -38,7 +38,7 @@ def test_story_load_status_dirty_state_and_shared_shortcut(tmp_path):
 
     assert page.story_page.session.controls["stories-count"].text() == "2-3"
     assert page.story_page.enabled.isChecked()
-    assert page.tabs.tabText(6) == "● Story"
+    assert page.tabs.tabText(6) == "Story"
     assert not page.is_dirty
     assert TopToolbar().save_action.shortcut() == QKeySequence.Save
 

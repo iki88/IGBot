@@ -1,4 +1,4 @@
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QPushButton, QWidget
 
 
@@ -22,7 +22,8 @@ class TargetSourceRow(QWidget):
         if switch_style:
             self.enabled.setObjectName("configurationSwitch")
         self.name = QPushButton(label, self)
-        self.name.setObjectName("linkButton")
+        self.name.setObjectName("linkButton" if switch_style else "checkboxLinkButton")
+        self.name.setCursor(Qt.PointingHandCursor)
         self.count = QLabel(f"0 {item_noun}s", self)
         self.count.setObjectName("mutedLabel")
         layout = QHBoxLayout(self)

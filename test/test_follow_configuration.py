@@ -42,14 +42,12 @@ def test_follow_configuration_loads_and_tracks_dirty_state(tmp_path):
     page.set_account(account)
     page.set_configuration(service.load_configuration(account.config_path))
 
-    assert page.follow_page.settings.controls["follow-limit"].text() == "3-6"
-    assert page.follow_page.additional.controls[
-        "end-if-follows-limit-reached"
-    ].isChecked()
+    assert page.follow_page.follow_amount.minimum.value() == 3
+    assert page.follow_page.follow_amount.maximum.value() == 6
     assert not page.is_dirty
-    assert page.tabs.tabText(2) == "● Follow"
+    assert page.tabs.tabText(2) == "Follow"
 
-    page.follow_page.settings.controls["follow-limit"].setText("4-8")
+    page.follow_page.follow_amount.maximum.setValue(8)
     assert page.is_dirty
     page.mark_clean()
     assert not page.is_dirty
@@ -59,7 +57,7 @@ def test_follow_configuration_saves_without_changing_unrelated_yaml(tmp_path):
     service, account = _configuration(tmp_path)
     page = FollowConfigurationPage()
     page.set_configuration(service.load_configuration(account.config_path))
-    page.settings.controls["total-follows-limit"].setText("7-15")
+    page.follow_limit.controls["total-follows-limit"].setText("7-15")
     page.enabled.setChecked(True)
     page.sources.rows["blogger-followers"].set_entries(["source.account"])
     page.sources.rows["blogger-followers"].enabled.setChecked(True)
@@ -102,15 +100,15 @@ def test_follow_filters_load_and_save_through_engine_filters_file(tmp_path):
     service, account = _configuration(tmp_path)
     filters_path = account.config_path.parent / "filters.yml"
     filters_path.write_text(
-        "min_followers: 100\nmax_followers: 5000\nskip_if_private: true\n",
+        "min_followers: 100\nmax_followers: 5000\nskip_business: true\n",
         encoding="utf-8",
     )
     page = FollowConfigurationPage()
     page.set_configuration(service.load_configuration(account.config_path))
 
-    assert page.filter_numbers.controls["min_followers"].value() == 100
-    assert page.filter_switches.controls["skip_if_private"].isChecked()
-    page.filter_numbers.controls["max_followers"].setValue(7500)
+    assert page.profile_settings.controls["min_followers"].value() == 100
+    assert page.additional_settings.controls["skip_business"].isChecked()
+    page.profile_settings.controls["max_followers"].setValue(7500)
     service.update_configuration(
         account, "account", "secret", "com.example.app", page.values()
     )
@@ -118,7 +116,7 @@ def test_follow_filters_load_and_save_through_engine_filters_file(tmp_path):
     filters = yaml.safe_load(filters_path.read_text(encoding="utf-8"))
     assert filters["min_followers"] == 100
     assert filters["max_followers"] == 7500
-    assert filters["skip_if_private"] is True
+    assert filters["skip_business"] is True
 
 
 @pytest.mark.parametrize(
@@ -126,6 +124,9 @@ def test_follow_filters_load_and_save_through_engine_filters_file(tmp_path):
     (
         ("mandatory_words", ["cat lover", "animal rescue"]),
         ("blacklist_words", ["giveaway", "follow me"]),
+        ("specific_alphabet", ["LATIN", "CYRILLIC"]),
+        ("biography_language", ["en", "de"]),
+        ("biography_banned_language", ["it", "fr"]),
     ),
 )
 def test_follow_word_filters_use_shared_popup_and_serialize_as_lists(
@@ -141,12 +142,12 @@ def test_follow_word_filters_use_shared_popup_and_serialize_as_lists(
     )
     mocker.patch.object(TargetEditorDialog, "entries", return_value=entries)
 
-    page.filter_editors[key].name.click()
+    page.word_filters[key].name.click()
     service.update_configuration(
         account, "account", "secret", "com.example.app", page.values()
     )
 
-    assert page.filter_editors[key].entries() == entries
+    assert page.word_filters[key].entries() == entries
     assert yaml.safe_load(filters_path.read_text(encoding="utf-8"))[key] == entries
 
 
@@ -157,7 +158,7 @@ def test_internal_skip_following_filter_is_hidden_and_preserved(tmp_path):
     page = FollowConfigurationPage()
     page.set_configuration(service.load_configuration(account.config_path))
 
-    assert "skip_following" not in page.filter_switches.controls
+    assert "skip_following" not in page.additional_settings.controls
     service.update_configuration(
         account, "account", "secret", "com.example.app", page.values()
     )
@@ -167,36 +168,61 @@ def test_internal_skip_following_filter_is_hidden_and_preserved(tmp_path):
     )
 
 
-def test_follow_filter_labels_checkbox_style_and_operator_order():
+def test_follow_product_layout_and_runtime_extensions_are_not_persisted():
     page = FollowConfigurationPage()
 
-    required = page.filter_editors["mandatory_words"]
-    blocked = page.filter_editors["blacklist_words"]
-    assert required.name.text() == "Follow only if user contains these words"
-    assert blocked.name.text() == "Don't follow if user contains these words"
+    required = page.word_filters["mandatory_words"]
+    blocked = page.word_filters["blacklist_words"]
+    assert required.name.text() == "Follow only if profile contains these words"
+    assert blocked.name.text() == "Don't follow if profile contains these words"
     assert required.enabled.objectName() != "configurationSwitch"
     assert blocked.enabled.objectName() != "configurationSwitch"
+    assert all(control.isChecked() for control in page.schedule_days.controls.values())
 
-    numeric_layout = page.filter_numbers.layout()
-    positions = {
-        key: numeric_layout.getItemPosition(numeric_layout.indexOf(control))[:2]
-        for key, control in page.filter_numbers.controls.items()
-    }
-    assert positions["min_followers"][0] == positions["max_followers"][0] == 0
-    assert positions["min_followings"][0] == positions["max_followings"][0] == 1
-    assert positions["min_posts"][0] == 2
+    page.delay.minimum.setValue(4)
+    page.delay.maximum.setValue(9)
+    page.mute_after_follow.setChecked(True)
+    page.same_tagged_account.setChecked(True)
+    page.schedule_days.controls["monday"].setChecked(False)
 
-    list_layout = page.filter_lists.layout()
-    list_rows = [
-        list_layout.getItemPosition(list_layout.indexOf(control))[0]
-        for control in page.filter_lists.controls.values()
-    ]
-    assert list_rows == [0, 1, 2]
-    assert list(page.filter_lists.controls) == [
-        "specific_alphabet",
-        "biography_language",
-        "biography_banned_language",
-    ]
+    values = page.values()
+    assert not any(
+        "delay" in key or "mute" in key or "schedule" in key for key in values
+    )
+    assert not any(
+        "tagged" in key or key in page.schedule_days.controls for key in values
+    )
+    limit = page.follow_limit.controls["total-follows-limit"]
+    assert limit.minimumWidth() == limit.maximumWidth() == 180
+    assert page.follow_amount.minimum.width() == limit.width()
+    assert page.follow_amount.maximum.width() == limit.width()
+    assert page.action_grid.getItemPosition(page.action_grid.indexOf(limit))[:2] == (
+        2,
+        1,
+    )
+    assert page.action_grid.getItemPosition(
+        page.action_grid.indexOf(page.delay.minimum)
+    )[:2] == (1, 1)
+    for row in page.list_filters.values():
+        assert row.name.objectName() == "checkboxLinkButton"
+        assert row.layout().spacing() == 8
+
+
+def test_all_module_tabs_use_consistent_filled_status_indicators():
+    page = AccountPage()
+    page.set_configuration({})
+
+    for index, name in enumerate(
+        ("Follow", "Unfollow", "Like", "Comment", "Story", "DM"), start=2
+    ):
+        assert page.tabs.tabText(index) == name
+        marker = page.tabs.tabIcon(index).pixmap(12, 12).toImage().pixelColor(6, 6)
+        assert marker.name().upper() == "#A1A1AA"
+
+    page.follow_page.enabled.setChecked(True)
+    assert page.tabs.tabText(2) == "Follow"
+    marker = page.tabs.tabIcon(2).pixmap(12, 12).toImage().pixelColor(6, 6)
+    assert marker.name().upper() == "#22C55E"
 
 
 def test_installed_packages_uses_read_only_adb_query(mocker):

@@ -10,6 +10,14 @@ This is a living project document for reviewed UI and workflow improvements that
 - Follow methods are limited to Followers, Followings, and Specific Users while lower-priority engine sources remain compatible but hidden.
 - Required and blocked Follow words use the shared one-entry-per-line editor, and internal engine safeguards remain outside the normal operator controls.
 - Follow filters use operator-oriented labels, standard checkboxes for word-list activation, paired numeric ranges, and vertically arranged language fields.
+- Follow now uses the product workflow: Enable Follow, Follow Method, Follow Actions, Follow Settings, Additional Follow Settings, and Schedule. Unsupported delay, mute, tagged-account, and weekday controls remain UI-only runtime extensions.
+- Follow Schedule is collapsed by default with vertical weekdays, Follow action sizing is consistent, and every module tab uses the same filled green/grey state indicator.
+- Module state is rendered with fixed-size colored tab icons so selected-tab text styling cannot obscure enabled state. Follow language and alphabet filters use the shared one-entry-per-line popup editor.
+- Follow Actions now share one alignment grid, and popup-backed checkbox labels use a zero-padding link style aligned with ordinary checkbox text.
+- Numeric configuration controls ignore mouse-wheel input globally while retaining keyboard and spin-arrow editing.
+- Sidebar navigation now fits its normal contents without a redundant scrollbar and scrolls only when required.
+- Unfollow now mirrors Follow's operator-focused structure: source-only methods, shared Min/Max actions, behavioral modifiers, popup-managed usernames, no profile-filter section, and a collapsed weekday schedule.
+- Follow and Unfollow action fields now share consistent fixed widths and alignment; popup-backed labels remain blue and pointer-enabled without underline styling.
 
 ### Navigation
 

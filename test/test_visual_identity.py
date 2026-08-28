@@ -32,3 +32,11 @@ def test_visual_identity_covers_shared_interactive_controls():
         "QToolButton#configurationSectionHeader:hover",
     ):
         assert selector in stylesheet
+
+
+def test_popup_backed_labels_are_blue_without_underlines():
+    stylesheet = _load_stylesheet()
+
+    assert "QPushButton#linkButton:hover { color: #93C5FD; }" in stylesheet
+    assert "QPushButton#checkboxLinkButton:hover { color: #93C5FD; }" in stylesheet
+    assert "text-decoration: underline" not in stylesheet

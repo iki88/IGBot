@@ -16,17 +16,42 @@ from PySide6.QtWidgets import (
 )
 
 
+class WheelSafeSpinBox(QSpinBox):
+    """Integer editor that ignores incidental mouse-wheel input."""
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
+
+
+class WheelSafeDoubleSpinBox(QDoubleSpinBox):
+    """Decimal editor that ignores incidental mouse-wheel input."""
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
+
+
 class CollapsibleSection(QFrame):
     """Compact reusable section used by account configuration modules."""
 
-    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        parent: QWidget | None = None,
+        collapsible: bool = False,
+        collapsed: bool = False,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("contentCard")
         self.toggle = QToolButton(self)
         self.toggle.setObjectName("configurationSectionHeader")
         self.toggle.setText(title)
-        self.toggle.setCheckable(False)
-        self.toggle.setArrowType(Qt.NoArrow)
+        self.toggle.setCheckable(collapsible)
+        self.toggle.setChecked(collapsible and not collapsed)
+        self.toggle.setArrowType(
+            Qt.RightArrow
+            if collapsible and collapsed
+            else Qt.DownArrow if collapsible else Qt.NoArrow
+        )
         self.toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.body = QWidget(self)
         self.body_layout = QVBoxLayout(self.body)
@@ -35,6 +60,13 @@ class CollapsibleSection(QFrame):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.addWidget(self.toggle)
         layout.addWidget(self.body)
+        if collapsible:
+            self.body.setVisible(not collapsed)
+            self.toggle.toggled.connect(self._set_expanded)
+
+    def _set_expanded(self, expanded: bool) -> None:
+        self.body.setVisible(expanded)
+        self.toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
 
 
 class ConfigurationSection(QFrame):
@@ -94,6 +126,7 @@ class NumericSettings(QWidget):
     ) -> None:
         super().__init__(parent)
         self.controls = {}
+        self.labels = {}
         layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setHorizontalSpacing(12)
@@ -101,10 +134,11 @@ class NumericSettings(QWidget):
         for index, (key, label) in enumerate(options.items()):
             row, column = divmod(index, columns)
             heading = QLabel(label, self)
-            control = QSpinBox(self)
+            control = WheelSafeSpinBox(self)
             control.setRange(0, 100000)
             control.valueChanged.connect(self.changed)
             self.controls[key] = control
+            self.labels[key] = heading
             layout.addWidget(heading, row, column * 2)
             layout.addWidget(control, row, column * 2 + 1)
 
@@ -136,7 +170,7 @@ class DecimalSettings(QWidget):
         for index, (key, label) in enumerate(options.items()):
             row, column = divmod(index, columns)
             heading = QLabel(label, self)
-            control = QDoubleSpinBox(self)
+            control = WheelSafeDoubleSpinBox(self)
             control.setRange(0, 1000000)
             control.setDecimals(2)
             control.valueChanged.connect(self.changed)
@@ -200,6 +234,7 @@ class RangeSettings(QWidget):
     def __init__(self, options: dict[str, str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.controls = {}
+        self.labels = {}
         layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setHorizontalSpacing(12)
@@ -212,6 +247,7 @@ class RangeSettings(QWidget):
             control.setPlaceholderText("0 or 10-20")
             control.textChanged.connect(self.changed)
             self.controls[key] = control
+            self.labels[key] = heading
             layout.addWidget(heading, row, column * 2)
             layout.addWidget(control, row, column * 2 + 1)
 
@@ -235,6 +271,54 @@ class RangeSettings(QWidget):
                 raise ValueError(f"{key} must be a number or ascending range.")
             values[key] = value
         return values
+
+
+class RangePairSettings(QWidget):
+    """Two-field editor for one engine integer/range value."""
+
+    changed = Signal()
+
+    def __init__(
+        self,
+        minimum_label: str,
+        maximum_label: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        layout = QGridLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setHorizontalSpacing(12)
+        layout.setVerticalSpacing(8)
+        self.minimum_label = QLabel(minimum_label, self)
+        self.maximum_label = QLabel(maximum_label, self)
+        self.minimum = WheelSafeSpinBox(self)
+        self.maximum = WheelSafeSpinBox(self)
+        for control in (self.minimum, self.maximum):
+            control.setRange(0, 100000)
+            control.valueChanged.connect(self.changed)
+        layout.addWidget(self.minimum_label, 0, 0)
+        layout.addWidget(self.minimum, 0, 1)
+        layout.addWidget(self.maximum_label, 0, 2)
+        layout.addWidget(self.maximum, 0, 3)
+
+    def set_value(self, value: object) -> None:
+        text = str(value or "0")
+        parts = text.split("-", 1)
+        try:
+            minimum = int(parts[0])
+            maximum = int(parts[-1])
+        except ValueError:
+            minimum = maximum = 0
+        self.minimum.setValue(minimum)
+        self.maximum.setValue(maximum)
+
+    def value(self) -> str:
+        minimum = self.minimum.value()
+        maximum = self.maximum.value()
+        if minimum > maximum:
+            self.minimum.setFocus()
+            raise ValueError("Minimum users to follow cannot exceed maximum users.")
+        return str(minimum) if minimum == maximum else f"{minimum}-{maximum}"
 
 
 class TextListSettings(QWidget):

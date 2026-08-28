@@ -50,7 +50,7 @@ def test_comment_load_status_dirty_state_and_shared_shortcut(tmp_path):
     assert page.comment_page.content_filters.controls["comment_photos"].isChecked()
     assert page.comment_page.spintax_method.isChecked()
     assert not page.comment_page.ai_method.isEnabled()
-    assert page.tabs.tabText(5) == "● Comment"
+    assert page.tabs.tabText(5) == "Comment"
     assert not page.is_dirty
     assert TopToolbar().save_action.shortcut() == QKeySequence.Save
 

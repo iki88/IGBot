@@ -55,6 +55,19 @@ def eye_icon(color: str = "#A1A1AA") -> QIcon:
     return QIcon(pixmap)
 
 
+def status_dot_icon(enabled: bool) -> QIcon:
+    """Return the consistent module-state marker used by account tabs."""
+    pixmap = QPixmap(12, 12)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("#22C55E" if enabled else "#A1A1AA"))
+    painter.drawEllipse(QRectF(2, 2, 8, 8))
+    painter.end()
+    return QIcon(pixmap)
+
+
 def _phone_pixmap(color: str) -> QPixmap:
     pixmap = _canvas()
     painter = QPainter(pixmap)

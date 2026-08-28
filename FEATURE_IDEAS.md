@@ -38,7 +38,11 @@ Future scheduler improvements will be collected here.
 
 ## Automation
 
-Future automation improvements will be collected here.
+- Automatic Follow Increase
+- Optional Visit Target Profile behavior
+- Optional Scroll Profile behavior
+- Optional Like Random Posts behavior
+- Replace the free-text Allowed Alphabets editor with a checklist for Latin, Cyrillic, Arabic, Greek, Hebrew, and Chinese/Japanese/Korean.
 
 ## User Experience
 

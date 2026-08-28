@@ -60,7 +60,14 @@ class AccountAssignmentService:
             "biography_banned_language",
         }
     )
-    TEXT_RESOURCE_NAMES = frozenset({"pm_list.txt", "comments_list.txt"})
+    TEXT_RESOURCE_NAMES = frozenset(
+        {
+            "pm_list.txt",
+            "comments_list.txt",
+            "unfollow_users.txt",
+            "remove_followers_users.txt",
+        }
+    )
     AUDIENCE_SOURCE_KEYS = frozenset(
         {
             "blogger",

@@ -33,7 +33,12 @@ class AudienceSourcesPage(QWidget):
         {"blogger-followers", "blogger-following", "blogger", "blogger-post-likers"}
     )
 
-    def __init__(self, parent=None, include_advanced: bool = True) -> None:
+    def __init__(
+        self,
+        parent=None,
+        include_advanced: bool = True,
+        section_title: str = "Method",
+    ) -> None:
         super().__init__(parent)
         self._loading = False
         self._present_keys: set[str] = set()
@@ -43,7 +48,7 @@ class AudienceSourcesPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        method = ConfigurationSection("Method", self)
+        method = ConfigurationSection(section_title, self)
         sources = dict(self.PRIORITY_SOURCES)
         if include_advanced:
             sources.update(self.ADVANCED_SOURCES)

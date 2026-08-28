@@ -41,7 +41,7 @@ def test_like_load_status_and_dirty_state(tmp_path):
 
     assert page.like_page.interaction.controls["likes-count"].text() == "1-2"
     assert page.like_page.media.controls["watch-video-time"].text() == "15-30"
-    assert page.tabs.tabText(4) == "● Like"
+    assert page.tabs.tabText(4) == "Like"
     assert not page.is_dirty
 
     page.like_page.limits.controls["total-likes-limit"].setText("300")
