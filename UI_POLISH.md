@@ -25,6 +25,8 @@ This is a living project document for reviewed UI and workflow improvements that
 - Overview now presents one Account Information section for credentials, Instagram App, detection, and account-specific Tag metadata.
 - Overview keeps Detect inline with Instagram App, uses compact account-field spacing, and provides concise Tag examples.
 - DM now follows the operator workflow: two recipient methods, popup-managed messages, aligned actions, concise production settings, and a collapsed schedule.
+- DM now uses a dedicated single-message editor with multiline, spintax, and emoji support; unsupported delay and private/empty-profile controls are no longer exposed.
+- DM method controls now use consistent checkbox styling, with UI-only send-delay controls and a new-follower check interval that is enabled only for the New Followers method.
 
 ### Navigation
 

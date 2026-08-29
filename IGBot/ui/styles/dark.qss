@@ -404,6 +404,21 @@ QToolButton#configurationSectionHeader {
     text-align: left;
 }
 
+QToolButton#settingInfoButton {
+    background: transparent;
+    border: 0;
+    color: #A1A1AA;
+    min-width: 18px;
+    max-width: 18px;
+    min-height: 18px;
+    max-height: 18px;
+    padding: 0;
+}
+
+QToolButton#settingInfoButton:hover {
+    color: #60A5FA;
+}
+
 QCheckBox#configurationSwitch::indicator {
     width: 34px;
     height: 18px;

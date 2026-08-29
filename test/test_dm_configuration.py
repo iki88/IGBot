@@ -1,13 +1,13 @@
 import pytest
 import yaml
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from IGBot.core.device import AssignedAccount
 from IGBot.services.account_assignment_service import AccountAssignmentService
 from IGBot.ui.pages.account_page import AccountPage
 from IGBot.ui.pages.dm_configuration_page import DMConfigurationPage
-from IGBot.ui.widgets.target_editor_dialog import TargetEditorDialog
+from IGBot.ui.widgets.dm_message_editor_dialog import DMMessageEditorDialog
 from IGBot.ui.widgets.top_toolbar import TopToolbar
 
 
@@ -44,6 +44,7 @@ def test_dm_load_status_dirty_state_and_shared_shortcut(tmp_path):
     assert page.dm_page.delivery.controls["pm-percentage"].text() == "20-30"
     assert "Welcome 😊" in page.dm_page.messages.text()
     assert page.dm_page.recipients.controls["pm_to_private_or_empty"].isChecked()
+    assert page.dm_page.recipients.isHidden()
     assert page.tabs.tabText(7) == "DM"
     assert not page.is_dirty
     assert TopToolbar().save_action.shortcut() == QKeySequence.Save
@@ -162,31 +163,73 @@ def test_dm_product_layout_exposes_only_operator_methods_and_ai_placeholder():
     assert page.new_followers.text() == "Send DMs to New Followers"
     assert page.new_followers.isChecked()
     assert page.specific_accounts.name.text() == "Send DMs to Specific Accounts"
+    assert page.new_followers.objectName() != "configurationSwitch"
+    assert page.specific_accounts.enabled.objectName() != "configurationSwitch"
+    assert page.specific_accounts.name.objectName() == "checkboxLinkButton"
     assert page.sources.rows["blogger-followers"].isHidden()
     assert page.sources.rows["blogger-following"].isHidden()
-    assert page.edit_messages_button.text() == "Edit DM Messages"
+    assert page.messages_section.title.text() == "Message"
+    assert page.edit_messages_button.text() == "Edit DM Message"
     assert page.edit_ai_prompt_button.text() == "Edit AI Prompt"
     assert not page.edit_ai_prompt_button.isEnabled()
     assert page.delivery.controls["pm-percentage"].isHidden()
     assert page.limit_behaviour.isHidden()
+    assert page.recipients.isHidden()
+    assert page.dm_all_new_followers.text() == "DM All New Followers"
+    assert "outside IGBot" in page.dm_all_new_followers.toolTip()
+    assert "outside IGBot" in page.dm_all_new_followers_description.text()
+    assert page.reply_to_incoming.text() == "Reply to Incoming DM Messages"
     assert page.schedule_section.body.isHidden()
+    assert page.delay.minimum_label.text() == "Minimum delay after sending DM"
+    assert page.delay.maximum_label.text() == "Maximum delay after sending DM"
+    assert (
+        page.check_interval.labels["check-new-followers-every"].text()
+        == "Check for New Followers Every (minutes)"
+    )
+    assert page.check_interval.isEnabled()
 
 
-def test_dm_message_button_uses_shared_popup_editor(mocker):
+def test_new_follower_interval_follows_method_state_and_marks_dirty():
     page = DMConfigurationPage()
-    page.set_configuration({"pm_list.txt": "Hello {friend|there}!\nWelcome 😊"})
+    changes = []
+    page.changed.connect(lambda: changes.append(True))
+
+    page.new_followers.setChecked(False)
+
+    assert not page.check_interval.isEnabled()
+    assert changes
+
+    page.new_followers.setChecked(True)
+    assert page.check_interval.isEnabled()
+
+
+def test_dm_message_button_uses_dedicated_single_message_editor(mocker):
+    page = DMConfigurationPage()
+    page.set_configuration({"pm_list.txt": "Hello {friend|there}!\\nWelcome 😊"})
     mocker.patch.object(
-        TargetEditorDialog, "exec", return_value=TargetEditorDialog.Accepted
+        DMMessageEditorDialog,
+        "exec",
+        return_value=DMMessageEditorDialog.Accepted,
     )
     mocker.patch.object(
-        TargetEditorDialog,
-        "entries",
-        return_value=["Updated {friend|there}!", "Welcome 😊"],
+        DMMessageEditorDialog,
+        "message",
+        return_value="Updated {friend|there}!\nWelcome 😊",
     )
 
     page.edit_messages_button.click()
 
-    assert page.messages.text() == "Updated {friend|there}!\nWelcome 😊"
+    assert page.messages.text() == "Updated {friend|there}!\\nWelcome 😊"
+
+
+def test_dm_message_editor_has_no_target_list_actions():
+    dialog = DMMessageEditorDialog("Hello {friend|there}!\nWelcome 😊")
+
+    assert dialog.message() == "Hello {friend|there}!\nWelcome 😊"
+    assert not any(
+        button.text() == "Remove Duplicates"
+        for button in dialog.findChildren(QPushButton)
+    )
 
 
 def test_dm_runtime_extensions_do_not_write_engine_keys():
@@ -202,7 +245,8 @@ def test_dm_runtime_extensions_do_not_write_engine_keys():
     page.message_amount.maximum.setValue(5)
     page.delay.minimum.setValue(10)
     page.delay.maximum.setValue(20)
-    page.check_interval.controls["check-new-messages-every"].setValue(15)
+    page.check_interval.controls["check-new-followers-every"].setValue(60)
+    page.dm_all_new_followers.setChecked(True)
     page.reply_to_incoming.setChecked(True)
     page.schedule_days.controls["monday"].setChecked(False)
 
@@ -215,3 +259,13 @@ def test_dm_runtime_extensions_do_not_write_engine_keys():
         for key in values
         for fragment in ("users-to-message", "delay", "check-new", "reply", "schedule")
     )
+
+
+def test_dm_runtime_range_validation():
+    page = DMConfigurationPage()
+    page.set_configuration({})
+    page.message_amount.minimum.setValue(5)
+    page.message_amount.maximum.setValue(2)
+
+    with pytest.raises(ValueError, match="Minimum users to message"):
+        page.values()

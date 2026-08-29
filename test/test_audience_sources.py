@@ -182,7 +182,7 @@ def test_interaction_modules_share_static_continuous_section_order():
         page.dm_page: [
             "Enable DM",
             "DM Method",
-            "Messages",
+            "Message",
             "DM Actions",
             "Additional Settings",
             "Schedule",

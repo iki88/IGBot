@@ -22,7 +22,7 @@ from IGBot.ui.widgets.configuration_widgets import (
     RangeSettings,
     TextResourceEditor,
 )
-from IGBot.ui.widgets.target_editor_dialog import TargetEditorDialog
+from IGBot.ui.widgets.dm_message_editor_dialog import DMMessageEditorDialog
 
 
 class DMConfigurationPage(QScrollArea):
@@ -84,16 +84,18 @@ class DMConfigurationPage(QScrollArea):
         self.sources.rows["blogger-following"].hide()
         self.specific_accounts = self.sources.rows["blogger"]
         self.specific_accounts.name.setText("Send DMs to Specific Accounts")
+        self.specific_accounts.enabled.setObjectName("")
+        self.specific_accounts.name.setObjectName("checkboxLinkButton")
         method = self.sources.findChild(ConfigurationSection)
         self.new_followers = QCheckBox("Send DMs to New Followers", method)
         self.new_followers.setChecked(True)
         method.body_layout.insertWidget(0, self.new_followers)
         layout.addWidget(self.sources)
 
-        self.messages_section = ConfigurationSection("Messages", container)
+        self.messages_section = ConfigurationSection("Message", container)
         message_actions = QHBoxLayout()
         self.edit_messages_button = QPushButton(
-            "Edit DM Messages", self.messages_section
+            "Edit DM Message", self.messages_section
         )
         self.edit_messages_button.setObjectName("secondaryButton")
         self.edit_ai_prompt_button = QPushButton(
@@ -109,8 +111,8 @@ class DMConfigurationPage(QScrollArea):
         self.messages_section.setVisible(include_messages)
         layout.addWidget(self.messages_section)
         self.messages = TextResourceEditor(
-            "DM Messages",
-            "Enter one message per line. Engine spintax and emoji are supported.",
+            "DM Message",
+            "Write one message. Engine spintax, emoji, and multiline text are supported.",
             container,
         )
         self.messages.hide()
@@ -125,12 +127,12 @@ class DMConfigurationPage(QScrollArea):
             "Minimum users to message", "Maximum users to message", action_fields
         )
         self.delay = RangePairSettings(
-            "Minimum delay after sending message",
-            "Maximum delay after sending message",
+            "Minimum delay after sending DM",
+            "Maximum delay after sending DM",
             action_fields,
         )
         self.check_interval = NumericSettings(
-            {"check-new-messages-every": "Check new messages every"},
+            {"check-new-followers-every": "Check for New Followers Every (minutes)"},
             action_fields,
             columns=1,
         )
@@ -141,19 +143,19 @@ class DMConfigurationPage(QScrollArea):
             self.message_amount.maximum,
             self.delay.minimum,
             self.delay.maximum,
-            self.check_interval.controls["check-new-messages-every"],
+            self.check_interval.controls["check-new-followers-every"],
             self.delivery.controls["total-pm-limit"],
         ):
             control.setFixedWidth(width)
         self._place_pair(self.action_grid, 0, self.message_amount)
         self._place_pair(self.action_grid, 1, self.delay)
+        self._place_field(self.action_grid, 2, self.delivery, "total-pm-limit")
         self._place_field(
             self.action_grid,
-            2,
+            3,
             self.check_interval,
-            "check-new-messages-every",
+            "check-new-followers-every",
         )
-        self._place_field(self.action_grid, 3, self.delivery, "total-pm-limit")
         self.delivery.labels["pm-percentage"].hide()
         self.delivery.controls["pm-percentage"].hide()
         self.action_grid.setColumnStretch(4, 1)
@@ -161,11 +163,24 @@ class DMConfigurationPage(QScrollArea):
         layout.addWidget(actions)
 
         additional = ConfigurationSection("Additional Settings", container)
+        self.dm_all_new_followers = QCheckBox("DM All New Followers", additional)
+        self.dm_all_new_followers.setToolTip(
+            "Includes followers gained outside IGBot interactions"
+        )
+        self.dm_all_new_followers_description = QLabel(
+            "Includes followers gained outside IGBot interactions.", additional
+        )
+        self.dm_all_new_followers_description.setObjectName("mutedLabel")
         self.reply_to_incoming = QCheckBox("Reply to Incoming DM Messages", additional)
-        self.recipients = CheckboxGroup(self.FILTER_KEYS, additional, columns=1)
+        additional.body_layout.addWidget(self.dm_all_new_followers)
+        additional.body_layout.addWidget(self.dm_all_new_followers_description)
         additional.body_layout.addWidget(self.reply_to_incoming)
-        additional.body_layout.addWidget(self.recipients)
         layout.addWidget(additional)
+
+        # Preserve existing engine values without exposing behavior that does not
+        # match the product workflow. These controls are compatibility-only.
+        self.recipients = CheckboxGroup(self.FILTER_KEYS, additional, columns=1)
+        self.recipients.hide()
         self.limit_behaviour = CheckboxGroup(
             self.CONFIG_BOOLEAN_KEYS, container, columns=1
         )
@@ -191,13 +206,15 @@ class DMConfigurationPage(QScrollArea):
         self.recipients.changed.connect(self._changed)
         self.messages.changed.connect(self._changed)
         self.sources.changed.connect(self._changed)
-        self.new_followers.toggled.connect(self._runtime_extension_changed)
+        self.new_followers.toggled.connect(self._new_followers_changed)
         self.message_amount.changed.connect(self._runtime_extension_changed)
         self.delay.changed.connect(self._runtime_extension_changed)
         self.check_interval.changed.connect(self._runtime_extension_changed)
+        self.dm_all_new_followers.toggled.connect(self._runtime_extension_changed)
         self.reply_to_incoming.toggled.connect(self._runtime_extension_changed)
         self.schedule_days.changed.connect(self._runtime_extension_changed)
         self.edit_messages_button.clicked.connect(self._edit_messages)
+        self._update_new_follower_interval()
 
     @staticmethod
     def _place_pair(layout: QGridLayout, row: int, pair: RangePairSettings) -> None:
@@ -245,7 +262,8 @@ class DMConfigurationPage(QScrollArea):
             self.new_followers.setChecked(True)
             self.message_amount.set_value(None)
             self.delay.set_value(None)
-            self.check_interval.set_values({})
+            self.check_interval.set_values({"check-new-followers-every": 60})
+            self.dm_all_new_followers.setChecked(False)
             self.reply_to_incoming.setChecked(False)
             self.schedule_days.set_values(
                 {day.casefold(): True for day in self.WEEKDAYS}
@@ -256,10 +274,13 @@ class DMConfigurationPage(QScrollArea):
             self.enabled.setChecked(percentage not in {"", "0"})
             self._update_status()
             self._update_message_button()
+            self._update_new_follower_interval()
         finally:
             self._syncing_enabled = False
 
     def values(self) -> dict:
+        self._validate_runtime_pair(self.message_amount, "users to message")
+        self._validate_runtime_pair(self.delay, "delay after sending DM")
         values = self.delivery.values()
         values.update(self.limit_behaviour.values())
         values.update(self.recipients.values())
@@ -283,15 +304,18 @@ class DMConfigurationPage(QScrollArea):
         return result
 
     def _edit_messages(self) -> None:
-        dialog = TargetEditorDialog(
-            "DM Messages",
-            self.messages.text().splitlines(),
-            lambda message: bool(message.strip()),
-            self,
-        )
-        if dialog.exec() == TargetEditorDialog.Accepted:
-            self.messages.set_text("\n".join(dialog.entries()))
+        dialog = DMMessageEditorDialog(self._message_for_editor(), self)
+        if dialog.exec() == DMMessageEditorDialog.Accepted:
+            self.messages.set_text(self._message_for_engine(dialog.message()))
             self._update_message_button()
+
+    def _message_for_editor(self) -> str:
+        return self.messages.text().replace("\\n", "\n")
+
+    @staticmethod
+    def _message_for_engine(message: str) -> str:
+        normalized = message.replace("\r\n", "\n").replace("\r", "\n")
+        return normalized.replace("\n", "\\n")
 
     def _enabled_changed(self, enabled: bool) -> None:
         if self._syncing_enabled:
@@ -327,6 +351,19 @@ class DMConfigurationPage(QScrollArea):
         if not self._syncing_enabled:
             self.changed.emit()
 
+    def _new_followers_changed(self, _enabled: bool) -> None:
+        self._update_new_follower_interval()
+        self._runtime_extension_changed()
+
+    def _update_new_follower_interval(self) -> None:
+        self.check_interval.setEnabled(self.new_followers.isChecked())
+
+    @staticmethod
+    def _validate_runtime_pair(pair: RangePairSettings, label: str) -> None:
+        if pair.minimum.value() > pair.maximum.value():
+            pair.minimum.setFocus()
+            raise ValueError(f"Minimum {label} cannot exceed maximum {label}.")
+
     def _changed(self) -> None:
         if self._syncing_enabled:
             return
@@ -335,11 +372,9 @@ class DMConfigurationPage(QScrollArea):
         self.changed.emit()
 
     def _update_message_button(self) -> None:
-        count = len(
-            [line for line in self.messages.text().splitlines() if line.strip()]
-        )
+        configured = bool(self.messages.text().strip())
         self.edit_messages_button.setToolTip(
-            f"{count} configured message{'s' if count != 1 else ''}"
+            "DM message configured" if configured else "No DM message configured"
         )
 
     def _update_status(self) -> None:
