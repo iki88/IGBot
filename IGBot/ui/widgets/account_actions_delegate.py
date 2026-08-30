@@ -4,7 +4,6 @@ from PySide6.QtCore import QEvent, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QHelpEvent, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QStyledItemDelegate, QToolTip
 
-from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
 from IGBot.ui.icons import workspace_action_icon
 from IGBot.ui.models.phone_accounts_model import PhoneAccountsModel
 
@@ -20,14 +19,21 @@ class AccountActionsDelegate(QStyledItemDelegate):
 
     action_requested = Signal(str, object)
     ACTIONS = (
-        _AccountAction("view", "View Account"),
         _AccountAction("analytics", "Analytics"),
-        _AccountAction("phone", "View Phone"),
-        _AccountAction("folder", "Open Account Folder"),
-        _AccountAction("edit", "Settings"),
+        _AccountAction("edit", "Edit Account"),
     )
+    ARCHIVE_ACTION = _AccountAction("archive", "Archive Account")
     BUTTON_SIZE = 28
     GAP = 5
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._archive_visible = False
+
+    def set_archive_visible(self, visible: bool) -> None:
+        self._archive_visible = visible
+        if self.parent() is not None:
+            self.parent().viewport().update()
 
     def paint(self, painter: QPainter, option, index) -> None:
         account = index.data(PhoneAccountsModel.AccountRole)
@@ -35,7 +41,7 @@ class AccountActionsDelegate(QStyledItemDelegate):
             return
         for action, rect in self._action_rects(option.rect):
             enabled = self._is_enabled(action.name, account)
-            foreground = "#A1A1AA" if enabled else "#52525B"
+            foreground = self._foreground(action.name, enabled)
             painter.save()
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setBrush(QColor("#27272A" if enabled else "#202023"))
@@ -72,19 +78,29 @@ class AccountActionsDelegate(QStyledItemDelegate):
 
     @staticmethod
     def _is_enabled(action: str, account) -> bool:
-        if action == "analytics":
-            return False
-        if action == "phone":
-            return account.device_id != ARCHIVED_ACCOUNTS
-        return True
+        return action != "analytics"
+
+    @staticmethod
+    def _foreground(action: str, enabled: bool) -> str:
+        if not enabled:
+            return "#52525B"
+        if action == "edit":
+            return "#F59E0B"
+        if action == "archive":
+            return "#EF4444"
+        return "#3B82F6"
+
+    def visible_actions(self) -> tuple[_AccountAction, ...]:
+        if self._archive_visible:
+            return (*self.ACTIONS, self.ARCHIVE_ACTION)
+        return self.ACTIONS
 
     def _action_rects(self, cell_rect: QRect):
-        total = (
-            len(self.ACTIONS) * self.BUTTON_SIZE + (len(self.ACTIONS) - 1) * self.GAP
-        )
+        actions = self.visible_actions()
+        total = len(actions) * self.BUTTON_SIZE + (len(actions) - 1) * self.GAP
         left = cell_rect.left() + max(4, (cell_rect.width() - total) // 2)
         top = cell_rect.top() + (cell_rect.height() - self.BUTTON_SIZE) // 2
-        for action in self.ACTIONS:
+        for action in actions:
             rect = QRect(left, top, self.BUTTON_SIZE, self.BUTTON_SIZE)
             yield action, rect
             left = rect.right() + self.GAP + 1

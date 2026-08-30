@@ -30,7 +30,7 @@ This is a living project document for reviewed UI and workflow improvements that
 
 ### Navigation
 
-- Replace separate Start and Stop buttons with one dynamic button.
+- [x] Replace separate Start and Stop buttons with one dynamic button.
 - Remove double-click-to-open from the Devices page.
 - Open phones only through the Manage action.
 - Improve running/stopped status presentation.
@@ -41,6 +41,9 @@ This is a living project document for reviewed UI and workflow improvements that
 - [x] Add analytics action button to the Global Accounts page.
 - [x] Restore compact action icons similar to the previous production software.
 - [x] Improve account action column layout.
+- [x] Keep row actions focused on Analytics and Edit while workspace actions remain in the toolbar.
+- [x] Standardize compact device runtime, settings, and delete actions.
+- [x] Use a clear gear for Device Settings and keep Phone Account rows limited to Analytics, Edit, and Archive.
 
 ### Typography
 

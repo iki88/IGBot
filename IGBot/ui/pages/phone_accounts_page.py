@@ -40,7 +40,6 @@ class PhoneAccountsPage(QWidget):
     apply_template_requested = Signal(object)
     account_open_requested = Signal(object)
     active_account_changed = Signal(object)
-    phone_view_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -143,7 +142,7 @@ class PhoneAccountsPage(QWidget):
             "DM": 58,
             "Posted": 72,
             "Status": 96,
-            "Actions": 170,
+            "Actions": 78,
         }
         for column, title in enumerate(PhoneAccountsModel.HEADERS):
             if column != PhoneAccountsModel.USERNAME:
@@ -194,6 +193,8 @@ class PhoneAccountsPage(QWidget):
             else None
         )
         self._serial = device.serial
+        self.actions_delegate.set_archive_visible(True)
+        self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 112)
         self.device_context.show()
         self.search.clear()
         self.search.hide()
@@ -230,6 +231,8 @@ class PhoneAccountsPage(QWidget):
 
     def set_archived(self, accounts: list[AssignedAccount]) -> None:
         self._serial = ""
+        self.actions_delegate.set_archive_visible(False)
+        self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 78)
         self.device_context.show()
         self.search.clear()
         self.search.show()
@@ -251,6 +254,8 @@ class PhoneAccountsPage(QWidget):
 
     def set_all_accounts(self, accounts: list[AssignedAccount]) -> None:
         self._serial = ""
+        self.actions_delegate.set_archive_visible(False)
+        self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 78)
         self.search.clear()
         self.search.show()
         self.options_button.hide()
@@ -287,12 +292,10 @@ class PhoneAccountsPage(QWidget):
             self.account_open_requested.emit(account)
 
     def _handle_account_action(self, action: str, account: AssignedAccount) -> None:
-        if action in {"view", "edit"}:
+        if action == "edit":
             self.account_open_requested.emit(account)
-        elif action == "phone":
-            self.phone_view_requested.emit(account.device_id)
-        elif action == "folder":
-            self.account_folder_requested.emit(str(Path(account.config_path).parent))
+        elif action == "archive":
+            self.archive_requested.emit(account.username, account.device_id)
 
     def selected_account(self) -> AssignedAccount | None:
         rows = self.table.selectionModel().selectedRows()

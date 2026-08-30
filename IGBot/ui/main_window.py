@@ -110,7 +110,10 @@ class MainWindow(QMainWindow):
         self.toolbar.view_phone_requested.connect(self._view_phone)
         self.toolbar.start_requested.connect(self._start_phone_scheduler)
         self.toolbar.stop_requested.connect(self._stop_phone_scheduler)
+        self.toolbar.start_all_requested.connect(self._start_all_phone_schedulers)
+        self.toolbar.stop_all_requested.connect(self._stop_all_phone_schedulers)
         self.devices_page.runtime_start_requested.connect(self._start_device_accounts)
+        self.devices_page.runtime_stop_requested.connect(self.session_controller.stop)
         self.phone_accounts_page.active_account_changed.connect(
             self._update_runtime_toolbar
         )
@@ -165,9 +168,6 @@ class MainWindow(QMainWindow):
         )
         self.phone_accounts_page.account_folder_requested.connect(
             lambda directory: QDesktopServices.openUrl(QUrl.fromLocalFile(directory))
-        )
-        self.phone_accounts_page.phone_view_requested.connect(
-            self.device_controller.view_phone
         )
         self.phone_accounts_page.apply_template_requested.connect(
             self._show_apply_template_dialog
@@ -304,6 +304,15 @@ class MainWindow(QMainWindow):
             return
         self.session_controller.stop(self._managed_phone_serial)
 
+    def _start_all_phone_schedulers(self) -> None:
+        logger.info("Start All clicked in Devices workspace")
+        for device in self.device_controller.managed_devices:
+            self.session_controller.start(device)
+
+    def _stop_all_phone_schedulers(self) -> None:
+        logger.info("Stop All clicked in Devices workspace")
+        self.session_controller.stop_all()
+
     def _update_runtime_toolbar(self, account) -> None:
         if self._workspace_context != "phone" or not self._managed_phone_serial:
             self.toolbar.set_runtime_controls(False, False)
@@ -316,6 +325,7 @@ class MainWindow(QMainWindow):
         )
 
     def _runtime_state_changed(self, serial: str, status: str) -> None:
+        self.devices_page.set_runtime_status(serial, status)
         self._update_runtime_toolbar(None)
         self.statusBar().showMessage(f"{serial}: {status}", 3000)
 

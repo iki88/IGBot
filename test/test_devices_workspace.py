@@ -130,16 +130,18 @@ def test_delete_requires_both_confirmations(devices_page, mocker):
 
 
 def test_start_action_is_present_and_enabled():
-    start = next(
-        button for button in DeviceActionsDelegate._BUTTONS if button.action == "start"
+    runtime = next(
+        button
+        for button in DeviceActionsDelegate._BUTTONS
+        if button.action == "runtime"
     )
 
-    assert start.enabled is True
+    assert runtime.enabled is True
 
 
-def test_action_order_is_start_manage_delete():
+def test_action_order_is_runtime_settings_delete():
     assert [button.action for button in DeviceActionsDelegate._BUTTONS] == [
-        "start",
+        "runtime",
         "manage",
         "delete",
     ]
@@ -153,6 +155,20 @@ def test_device_start_action_routes_to_runtime_signal(devices_page):
     page._handle_row_action("start", "serial-alpha")
 
     assert requested == ["serial-alpha"]
+
+
+def test_device_runtime_action_changes_to_stop_for_running_phone(devices_page):
+    page, _ = devices_page
+    stopped = []
+    page.runtime_stop_requested.connect(stopped.append)
+
+    page.set_runtime_status("serial-alpha", "Running")
+    index = page.proxy_model.index(0, DeviceTableModel.ACTIONS)
+
+    assert page.actions_delegate._resolved_action("runtime", index) == "stop"
+    assert page.model.index(0, DeviceTableModel.STATUS).data() == "Running"
+    page._handle_row_action("stop", "serial-alpha")
+    assert stopped == ["serial-alpha"]
 
 
 def test_sidebar_devices_item_returns_from_phone_accounts(application):
@@ -215,8 +231,7 @@ def test_account_navigation_uses_context_specific_toolbar(application):
     window._open_phone_accounts(device, [account])
 
     assert window.toolbar.add_account_action.isVisible()
-    assert window.toolbar.start_action.isVisible()
-    assert window.toolbar.stop_action.isVisible()
+    assert window.toolbar.runtime_action.isVisible()
     assert window.toolbar.view_phone_action.isVisible()
     assert window.toolbar.view_phone_action.isEnabled()
     assert not window.toolbar.save_action.isVisible()
@@ -229,8 +244,7 @@ def test_account_navigation_uses_context_specific_toolbar(application):
     assert window.toolbar.save_action.isEnabled()
     assert window.toolbar.options_button.text() == "Account Options"
     assert not window.toolbar.add_account_action.isVisible()
-    assert not window.toolbar.start_action.isVisible()
-    assert not window.toolbar.stop_action.isVisible()
+    assert not window.toolbar.runtime_action.isVisible()
     assert not window.toolbar.view_phone_action.isVisible()
     assert [
         window.account_page.tabs.tabText(i)
@@ -246,8 +260,7 @@ def test_phone_toolbar_actions_use_compact_icons(application):
     actions = (
         window.toolbar.add_account_action,
         window.toolbar.today_action,
-        window.toolbar.start_action,
-        window.toolbar.stop_action,
+        window.toolbar.runtime_action,
         window.toolbar.view_phone_action,
     )
 
@@ -255,17 +268,38 @@ def test_phone_toolbar_actions_use_compact_icons(application):
         "Add Account",
         "Today",
         "Start",
-        "Stop",
         "View Phone",
     ]
     assert all(action.isVisible() and not action.icon().isNull() for action in actions)
     assert window.toolbar.add_account_action.isEnabled()
     assert not window.toolbar.today_action.isEnabled()
-    assert window.toolbar.start_action.isEnabled()
-    assert not window.toolbar.stop_action.isEnabled()
+    assert window.toolbar.runtime_action.isEnabled()
     assert window.toolbar.view_phone_action.isEnabled()
     assert window.toolbar.iconSize().width() == 16
     assert not window.toolbar.options_button.icon().isNull()
+    window.close()
+
+
+def test_devices_toolbar_exposes_fleet_runtime_actions(application, mocker):
+    device = DeviceRecord("phone-a", "Rack One", True)
+    service = _DeviceService()
+    mocker.patch.object(service, "refresh", return_value=DeviceFleetSnapshot((device,)))
+    window = MainWindow(service)
+    application.processEvents()
+    window.device_controller._records = {device.serial: device}
+    start = mocker.patch.object(window.session_controller, "start")
+    stop_all = mocker.patch.object(window.session_controller, "stop_all")
+
+    assert window.toolbar.start_all_action.isVisible()
+    assert window.toolbar.stop_all_action.isVisible()
+    assert window.toolbar.start_all_action.text() == "Start All"
+    assert window.toolbar.stop_all_action.text() == "Stop All"
+
+    window.toolbar.start_all_action.trigger()
+    window.toolbar.stop_all_action.trigger()
+
+    start.assert_called_once_with(device)
+    stop_all.assert_called_once_with()
     window.close()
 
 
@@ -288,9 +322,9 @@ def test_phone_start_action_starts_phone_scheduler_without_account_selection(
     start = mocker.patch.object(window.session_controller, "start")
     error = mocker.patch.object(window, "_show_runtime_error")
 
-    assert window.toolbar.start_action.isEnabled()
+    assert window.toolbar.runtime_action.isEnabled()
 
-    window.toolbar.start_action.trigger()
+    window.toolbar.runtime_action.trigger()
     application.processEvents()
 
     start.assert_called_once_with(device)
@@ -321,7 +355,7 @@ def test_device_row_start_calls_session_controller_for_real_accounts(
 
     start.assert_called_once_with(device)
     assert "Start clicked for phone phone-a" in window.live_log.output.toPlainText()
-    assert window.toolbar.start_action.toolTip() == "Start this phone's scheduler"
+    assert window.toolbar.runtime_action.toolTip() == "Start this phone's scheduler"
     window.close()
 
 
@@ -344,8 +378,9 @@ def test_phone_stop_action_calls_session_controller_and_logs(application, mocker
     stop = mocker.patch.object(window.session_controller, "stop")
     window._update_runtime_toolbar(None)
 
-    assert window.toolbar.stop_action.isEnabled()
-    window.toolbar.stop_action.trigger()
+    assert window.toolbar.runtime_action.isEnabled()
+    assert window.toolbar.runtime_action.text() == "Stop"
+    window.toolbar.runtime_action.trigger()
     application.processEvents()
 
     stop.assert_called_once_with("phone-a")

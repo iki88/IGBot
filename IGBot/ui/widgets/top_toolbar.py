@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from IGBot.ui.icons import eye_icon
+from IGBot.ui.icons import eye_icon, workspace_action_icon
 
 
 class TopToolbar(QToolBar):
@@ -23,6 +23,8 @@ class TopToolbar(QToolBar):
     view_phone_requested = Signal()
     start_requested = Signal()
     stop_requested = Signal()
+    start_all_requested = Signal()
+    stop_all_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Application", parent)
@@ -54,6 +56,18 @@ class TopToolbar(QToolBar):
         self.add_device_action.triggered.connect(self.add_device_requested)
         self.addAction(self.add_device_action)
 
+        self.start_all_action = QAction("Start All", self)
+        self.start_all_action.setIcon(workspace_action_icon("start", "#22C55E"))
+        self.start_all_action.setToolTip("Start all phone schedulers")
+        self.start_all_action.triggered.connect(self.start_all_requested)
+        self.addAction(self.start_all_action)
+        self.stop_all_action = QAction("Stop All", self)
+        self.stop_all_action.setIcon(workspace_action_icon("stop", "#EF4444"))
+        self.stop_all_action.setToolTip("Stop all phone schedulers")
+        self.stop_all_action.triggered.connect(self.stop_all_requested)
+        self.addAction(self.stop_all_action)
+        self.fleet_separator = self.addSeparator()
+
         self.add_account_action = QAction("Add Account", self)
         self.add_account_action.setIcon(
             self.style().standardIcon(QStyle.SP_FileDialogNewFolder)
@@ -63,16 +77,14 @@ class TopToolbar(QToolBar):
         self.today_action.setIcon(
             self.style().standardIcon(QStyle.SP_FileDialogDetailedView)
         )
-        self.start_action = QAction("Start", self)
-        self.start_action.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        self.start_action.setToolTip("Start this phone's scheduler")
-        self.start_action.setStatusTip("Start the persistent scheduler for this phone")
-        self.start_action.triggered.connect(self.start_requested)
-        self.stop_action = QAction("Stop", self)
-        self.stop_action.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
-        self.stop_action.setToolTip("Stop this phone's scheduler")
-        self.stop_action.setStatusTip("Stop the phone scheduler and active session")
-        self.stop_action.triggered.connect(self.stop_requested)
+        self.runtime_action = QAction("Start", self)
+        self.runtime_action.setIcon(workspace_action_icon("start", "#22C55E"))
+        self.runtime_action.setToolTip("Start this phone's scheduler")
+        self.runtime_action.setStatusTip(
+            "Start the persistent scheduler for this phone"
+        )
+        self.runtime_action.triggered.connect(self._request_runtime_action)
+        self._runtime_running = False
         self.view_phone_action = QAction("View Phone", self)
         self.view_phone_action.setIcon(eye_icon())
         self.view_phone_action.setToolTip("Open the selected Android phone with scrcpy")
@@ -85,14 +97,19 @@ class TopToolbar(QToolBar):
         self._future_actions = (
             self.add_account_action,
             self.today_action,
-            self.start_action,
-            self.stop_action,
+            self.runtime_action,
             self.view_phone_action,
             self.save_action,
         )
         for action in self._future_actions:
             action.setEnabled(False)
             self.addAction(action)
+
+        self.widgetForAction(self.start_all_action).setObjectName("fleetStartButton")
+        self.widgetForAction(self.stop_all_action).setObjectName("fleetStopButton")
+        runtime_button = self.widgetForAction(self.runtime_action)
+        runtime_button.setObjectName("runtimeButton")
+        runtime_button.setProperty("runtimeState", "start")
 
         self.options_button = QToolButton(self)
         self.options_button.setIcon(
@@ -113,6 +130,9 @@ class TopToolbar(QToolBar):
     def set_context(self, context: str, options_menu: QMenu | None = None) -> None:
         self.refresh_action.setVisible(context == "devices")
         self.add_device_action.setVisible(context == "devices")
+        self.start_all_action.setVisible(context == "devices")
+        self.stop_all_action.setVisible(context == "devices")
+        self.fleet_separator.setVisible(context == "devices")
         self.view_phone_action.setEnabled(context in {"devices", "phone"})
         self.add_account_action.setEnabled(context == "phone")
         self.save_action.setEnabled(context == "account")
@@ -123,8 +143,7 @@ class TopToolbar(QToolBar):
             for action in (
                 self.add_account_action,
                 self.today_action,
-                self.start_action,
-                self.stop_action,
+                self.runtime_action,
                 self.view_phone_action,
             ):
                 action.setVisible(True)
@@ -141,5 +160,26 @@ class TopToolbar(QToolBar):
         )
 
     def set_runtime_controls(self, can_start: bool, can_stop: bool) -> None:
-        self.start_action.setEnabled(can_start)
-        self.stop_action.setEnabled(can_stop)
+        self._runtime_running = can_stop
+        self.runtime_action.setText("Stop" if can_stop else "Start")
+        self.runtime_action.setIcon(
+            workspace_action_icon(
+                "stop" if can_stop else "start", "#EF4444" if can_stop else "#22C55E"
+            )
+        )
+        self.runtime_action.setToolTip(
+            "Stop this phone's scheduler"
+            if can_stop
+            else "Start this phone's scheduler"
+        )
+        self.runtime_action.setEnabled(can_start or can_stop)
+        runtime_button = self.widgetForAction(self.runtime_action)
+        runtime_button.setProperty("runtimeState", "stop" if can_stop else "start")
+        runtime_button.style().unpolish(runtime_button)
+        runtime_button.style().polish(runtime_button)
+
+    def _request_runtime_action(self) -> None:
+        if self._runtime_running:
+            self.stop_requested.emit()
+        else:
+            self.start_requested.emit()

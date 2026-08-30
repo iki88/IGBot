@@ -79,7 +79,7 @@ def workspace_action_icon(action: str, color: str = "#A1A1AA") -> QIcon:
         painter.drawRoundedRect(QRectF(5, 2, 10, 16), 2, 2)
         painter.drawLine(8, 5, 12, 5)
         painter.drawLine(9, 15, 11, 15)
-    elif action in {"folder", "manage"}:
+    elif action == "folder":
         path = QPainterPath()
         path.moveTo(2.5, 6)
         path.lineTo(7.5, 6)
@@ -89,10 +89,14 @@ def workspace_action_icon(action: str, color: str = "#A1A1AA") -> QIcon:
         path.lineTo(3.5, 16)
         path.closeSubpath()
         painter.drawPath(path)
-    elif action == "edit":
-        painter.drawLine(5, 15, 15, 5)
-        painter.drawLine(13, 4, 16, 7)
-        painter.drawLine(4, 16, 7.5, 15.2)
+    elif action in {"edit", "manage"}:
+        painter.drawEllipse(QRectF(7, 7, 6, 6))
+        for angle in range(0, 360, 45):
+            painter.save()
+            painter.translate(10, 10)
+            painter.rotate(angle)
+            painter.drawLine(0, -7, 0, -5)
+            painter.restore()
     elif action == "start":
         path = QPainterPath()
         path.moveTo(7, 4)
@@ -100,7 +104,10 @@ def workspace_action_icon(action: str, color: str = "#A1A1AA") -> QIcon:
         path.lineTo(7, 16)
         path.closeSubpath()
         painter.drawPath(path)
-    elif action == "delete":
+    elif action == "stop":
+        painter.setBrush(QColor(color))
+        painter.drawRoundedRect(QRectF(5, 5, 10, 10), 1.5, 1.5)
+    elif action in {"archive", "delete"}:
         painter.drawRoundedRect(QRectF(5, 6, 10, 11), 1, 1)
         painter.drawLine(4, 5, 16, 5)
         painter.drawLine(8, 3, 12, 3)

@@ -174,35 +174,31 @@ def test_account_actions_are_shared_and_route_existing_workflows():
     )
     page.set_phone(DeviceRecord("phone-a", "Rack One", True), [account])
     opened = []
-    phones = []
-    folders = []
+    archived = []
     page.account_open_requested.connect(opened.append)
-    page.phone_view_requested.connect(phones.append)
-    page.account_folder_requested.connect(folders.append)
+    page.archive_requested.connect(
+        lambda username, device: archived.append((username, device))
+    )
 
     assert [action.name for action in page.actions_delegate.ACTIONS] == [
-        "view",
         "analytics",
-        "phone",
-        "folder",
         "edit",
     ]
     assert [action.tooltip for action in page.actions_delegate.ACTIONS] == [
-        "View Account",
         "Analytics",
-        "View Phone",
-        "Open Account Folder",
-        "Settings",
+        "Edit Account",
+    ]
+    assert [action.name for action in page.actions_delegate.visible_actions()] == [
+        "analytics",
+        "edit",
+        "archive",
     ]
 
-    page._handle_account_action("view", account)
-    page._handle_account_action("phone", account)
-    page._handle_account_action("folder", account)
     page._handle_account_action("edit", account)
+    page._handle_account_action("archive", account)
 
-    assert opened == [account, account]
-    assert phones == ["phone-a"]
-    assert folders == [str(Path("accounts/real_account"))]
+    assert opened == [account]
+    assert archived == [("real_account", "phone-a")]
     assert application is not None
 
 
@@ -226,6 +222,11 @@ def test_global_accounts_workspace_supports_username_search():
     assert page.proxy_model.rowCount() == 1
     assert page.proxy_model.index(0, page.model.USERNAME).data() == "first_account"
     assert not page.device_context.isVisibleTo(page)
+    assert [action.name for action in page.actions_delegate.visible_actions()] == [
+        "analytics",
+        "edit",
+    ]
+    assert page.table.columnWidth(page.model.ACTIONS) == 78
     assert application is not None
 
 
@@ -258,7 +259,7 @@ def test_phone_account_table_uses_final_dense_operator_columns():
     )
     assert page.table.verticalHeader().defaultSectionSize() == 34
     assert page.table.columnWidth(page.model.STATUS) == 96
-    assert page.table.columnWidth(page.model.ACTIONS) == 170
+    assert page.table.columnWidth(page.model.ACTIONS) == 112
     assert page.model.index(0, page.model.STATUS).data() == "Idle"
     assert (
         page.model.index(0, page.model.STATUS).data(Qt.TextAlignmentRole)

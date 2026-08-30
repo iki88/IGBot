@@ -22,7 +22,7 @@ class DeviceActionsDelegate(QStyledItemDelegate):
 
     action_requested = Signal(str, str)
     _BUTTONS = (
-        _ActionButton("start", 34),
+        _ActionButton("runtime", 70),
         _ActionButton("manage", 34),
         _ActionButton("delete", 34),
     )
@@ -38,8 +38,9 @@ class DeviceActionsDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option, index) -> None:
         serial = index.data(Qt.UserRole)
         for button, rect in self._button_rects(option.rect):
-            pressed = self._pressed_action == (serial, button.action)
-            background, border, foreground = self._colors(button, pressed)
+            action = self._resolved_action(button.action, index)
+            pressed = self._pressed_action == (serial, action)
+            background, border, foreground = self._colors(action, pressed)
 
             painter.save()
             painter.setRenderHint(QPainter.Antialiasing)
@@ -47,9 +48,17 @@ class DeviceActionsDelegate(QStyledItemDelegate):
             painter.setPen(QPen(border, 1))
             painter.drawRoundedRect(rect.adjusted(0, 0, -1, -1), 5, 5)
 
-            workspace_action_icon(button.action, foreground.name()).paint(
-                painter, rect.adjusted(7, 7, -7, -7), Qt.AlignCenter
+            icon_rect = QRect(rect.left() + 8, rect.top() + 6, 16, 16)
+            workspace_action_icon(action, foreground.name()).paint(
+                painter, icon_rect, Qt.AlignCenter
             )
+            if button.action == "runtime":
+                painter.setPen(foreground)
+                painter.drawText(
+                    rect.adjusted(28, 0, -5, 0),
+                    Qt.AlignVCenter | Qt.AlignLeft,
+                    "Stop" if action == "stop" else "Start",
+                )
             painter.restore()
 
     def editorEvent(self, event, model, option, index) -> bool:
@@ -66,7 +75,7 @@ class DeviceActionsDelegate(QStyledItemDelegate):
         requested_action = None
         for button, rect in self._button_rects(option.rect):
             if button.enabled and rect.contains(mouse_event.position().toPoint()):
-                requested_action = button.action
+                requested_action = self._resolved_action(button.action, index)
                 break
 
         if event.type() == QEvent.MouseButtonPress:
@@ -99,8 +108,8 @@ class DeviceActionsDelegate(QStyledItemDelegate):
         for button, rect in self._button_rects(option.rect):
             if rect.contains(event.pos()):
                 tooltip = {
-                    "manage": "Open phone accounts",
-                    "start": "Start the persistent scheduler for this phone",
+                    "manage": "Device Settings",
+                    "runtime": "Start or stop this phone's scheduler",
                     "delete": "Remove phone from IGBot",
                 }[button.action]
                 QToolTip.showText(event.globalPos(), tooltip, view)
@@ -108,19 +117,36 @@ class DeviceActionsDelegate(QStyledItemDelegate):
         return False
 
     @staticmethod
-    def _colors(button: _ActionButton, pressed: bool):
-        if not button.enabled:
-            return QColor("#202832"), QColor("#455261"), QColor("#9aa8b7")
-        if button.action == "delete":
+    def _colors(action: str, pressed: bool):
+        if action in {"stop", "delete"}:
             return (
                 QColor("#4a1f24" if pressed else "#21161a"),
                 QColor("#f85149" if pressed else "#6e3035"),
                 QColor("#ffb3ad"),
             )
+        if action == "start":
+            return (
+                QColor("#16412b" if pressed else "#17261d"),
+                QColor("#22C55E" if pressed else "#28633c"),
+                QColor("#86efac"),
+            )
+        if action == "manage":
+            return QColor("#30281a"), QColor("#72551d"), QColor("#fbbf24")
         return (
             QColor("#173b66" if pressed else "#212d3b"),
             QColor("#388bfd" if pressed else "#3c526b"),
             QColor("#f0f6fc"),
+        )
+
+    @staticmethod
+    def _resolved_action(action: str, index) -> str:
+        if action != "runtime":
+            return action
+        status = str(index.siblingAtColumn(4).data() or "").casefold()
+        return (
+            "stop"
+            if status in {"starting", "running", "waiting", "stopping"}
+            else "start"
         )
 
     def _clear_pressed(self, action_key: tuple[str, str]) -> None:

@@ -39,6 +39,7 @@ class DevicesPage(QWidget):
 
     notification_requested = Signal(str, int)
     runtime_start_requested = Signal(str)
+    runtime_stop_requested = Signal(str)
 
     def __init__(
         self, controller: DeviceController, parent: QWidget | None = None
@@ -130,7 +131,7 @@ class DevicesPage(QWidget):
         self.table.setColumnWidth(DeviceTableModel.PHONE, 175)
         self.table.setColumnWidth(DeviceTableModel.ACCOUNTS, 82)
         self.table.setColumnWidth(DeviceTableModel.STATUS, 86)
-        self.table.setColumnWidth(DeviceTableModel.ACTIONS, 132)
+        self.table.setColumnWidth(DeviceTableModel.ACTIONS, 170)
 
     def _build_layout(self) -> None:
         controls = QHBoxLayout()
@@ -235,10 +236,15 @@ class DevicesPage(QWidget):
     def _handle_row_action(self, action: str, serial: str) -> None:
         if action == "start":
             self.runtime_start_requested.emit(serial)
+        elif action == "stop":
+            self.runtime_stop_requested.emit(serial)
         elif action == "manage":
             self._controller.open_phone_accounts(serial)
         elif action == "delete" and self._confirm_delete(serial):
             self._controller.delete_device(serial)
+
+    def set_runtime_status(self, serial: str, status: str) -> None:
+        self.model.set_runtime_status(serial, status)
 
     def _show_context_menu(self, position: QPoint) -> None:
         index = self.table.indexAt(position)

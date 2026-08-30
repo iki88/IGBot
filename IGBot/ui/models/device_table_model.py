@@ -16,6 +16,7 @@ class DeviceTableModel(QAbstractTableModel):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._devices: list[DeviceRecord] = []
+        self._runtime_statuses: dict[str, str] = {}
 
     def rowCount(self, parent=_ROOT_INDEX) -> int:
         return 0 if parent.isValid() else len(self._devices)
@@ -52,7 +53,7 @@ class DeviceTableModel(QAbstractTableModel):
             device.serial,
             device.phone_name or "—",
             len(device.accounts),
-            device.status or "—",
+            self._runtime_statuses.get(device.serial, device.status or "Idle"),
             "",
         )
         return values[index.column()]
@@ -78,6 +79,15 @@ class DeviceTableModel(QAbstractTableModel):
         if 0 <= row < len(self._devices):
             return self._devices[row]
         return None
+
+    def set_runtime_status(self, serial: str, status: str) -> None:
+        self._runtime_statuses[serial] = status
+        for row, device in enumerate(self._devices):
+            if device.serial == serial:
+                first = self.index(row, self.STATUS)
+                last = self.index(row, self.ACTIONS)
+                self.dataChanged.emit(first, last, [Qt.DisplayRole])
+                break
 
 
 class DeviceFilterProxyModel(QSortFilterProxyModel):

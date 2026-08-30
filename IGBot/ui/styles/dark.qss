@@ -717,6 +717,23 @@ QTableView#deviceTable::item:selected,
 QTableView#accountsTable::item:selected { background-color: #1D4ED8; color: #F9FAFB; }
 QHeaderView::section { background-color: #27272A; border-color: #3F3F46; color: #A1A1AA; }
 
+QToolButton#fleetStartButton,
+QToolButton#runtimeButton[runtimeState="start"] {
+    background-color: #17261D;
+    border: 1px solid #28633C;
+    color: #86EFAC;
+}
+QToolButton#fleetStopButton,
+QToolButton#runtimeButton[runtimeState="stop"] {
+    background-color: #21161A;
+    border: 1px solid #6E3035;
+    color: #FFB3AD;
+}
+QToolButton#fleetStartButton:hover,
+QToolButton#runtimeButton[runtimeState="start"]:hover { background-color: #16412B; }
+QToolButton#fleetStopButton:hover,
+QToolButton#runtimeButton[runtimeState="stop"]:hover { background-color: #4A1F24; }
+
 QToolButton#configurationSectionHeader { color: #F9FAFB; font-weight: 700; }
 QToolButton#configurationSectionHeader:hover { background: transparent; }
 QLabel#configurationSectionTitle {
