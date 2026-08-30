@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import ClassVar
 
+from PySide6.QtCore import QRegularExpression
+from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -74,19 +76,12 @@ class GlobalSettingsPage(QScrollArea):
             section, maximum=3600, suffix=" sec"
         )
         self.start_all_phones_delay.setProperty("runtimeExtension", True)
-        self.wait_after_instagram_launch = self._numeric_control(
-            section, maximum=3600, suffix=" sec"
+        self.wait_after_instagram_launch = self._range_control(
+            section, placeholder="10 or 8-12"
         )
         self.wait_after_instagram_launch.setProperty("runtimeExtension", True)
         self.login_retry_limit = self._numeric_control(section, maximum=100)
         self.login_retry_limit.setProperty("runtimeExtension", True)
-        self.airplane_mode_reset = self._switch(
-            "Enable Airplane Mode Reset", section, runtime_extension=True
-        )
-        self.random_search_letters = self._switch(
-            "Enable Random Search Letters", section, runtime_extension=True
-        )
-
         self._add_field(
             grid,
             0,
@@ -108,7 +103,6 @@ class GlobalSettingsPage(QScrollArea):
             self.login_retry_limit,
             info="Maximum automatic attempts before operator intervention.",
         )
-        grid.addWidget(self.airplane_mode_reset, 3, 0, 1, 3)
         return section
 
     def _build_runtime_safety(self, parent: QWidget) -> ConfigurationSection:
@@ -129,6 +123,25 @@ class GlobalSettingsPage(QScrollArea):
         self.maximum_crash_retries.setProperty(
             "engineKey", self.ENGINE_BINDINGS["maximum_crash_retries"]
         )
+        self.airplane_mode_reset = self._switch(
+            "Toggle Airplane Mode Between Sessions",
+            section,
+            runtime_extension=True,
+        )
+        self.random_search_letters = self._switch(
+            "Use Random Search Letters", section, runtime_extension=True
+        )
+        self.first_character_pool = self._text_control(
+            section, placeholder="abcdefghijklmnopqrstuvwxyz"
+        )
+        self.first_character_pool.setText("abcdefghijklmnopqrstuvwxyz")
+        self.second_character_pool = self._text_control(section, placeholder="aeiou")
+        self.second_character_pool.setText("aeiou")
+        self.follow_back_ratio_check = self._switch(
+            "Enable Follow Back Ratio Check", section, runtime_extension=True
+        )
+        self.follow_back_ratio_check.setChecked(True)
+
         grid.addWidget(self.enable_block_detection, 0, 0, 1, 3)
         self._add_field(
             grid,
@@ -144,16 +157,60 @@ class GlobalSettingsPage(QScrollArea):
             self.maximum_crash_retries,
             info="Maximum recoverable crashes before the session stops.",
         )
-        grid.addWidget(self.random_search_letters, 3, 0, 1, 3)
+        grid.addWidget(
+            self._switch_row(
+                self.airplane_mode_reset,
+                (
+                    "Before each new session, IGBot toggles Airplane Mode in order "
+                    "to obtain a new mobile IP address when using SIM cards."
+                ),
+            ),
+            3,
+            0,
+            1,
+            3,
+        )
+        grid.addWidget(
+            self._switch_row(
+                self.random_search_letters,
+                (
+                    "When scrolling large follower lists, IGBot may use Instagram's "
+                    "search instead of continuous scrolling. Random prefixes are "
+                    "generated from the configured character pools."
+                ),
+            ),
+            4,
+            0,
+            1,
+            3,
+        )
+        self._add_field(grid, 5, "First Character Pool", self.first_character_pool)
+        self._add_field(grid, 6, "Second Character Pool", self.second_character_pool)
         self._add_field(
             grid,
-            4,
-            "Maximum Scrolling Time",
+            7,
+            "Maximum Source Scrolling Time",
             self.maximum_scrolling_time,
             info=(
                 "Stops an endless user search after this time so another "
                 "discovery strategy can be used."
             ),
+        )
+        grid.addWidget(
+            self._switch_row(
+                self.follow_back_ratio_check,
+                (
+                    "At the beginning of each session IGBot checks the account's "
+                    "followers to calculate Follow Back Ratio (FBR) and update "
+                    "source performance statistics. Disable this when using only "
+                    "Specific User source lists because no follower-based source "
+                    "statistics can be collected."
+                ),
+            ),
+            8,
+            0,
+            1,
+            3,
         )
         return section
 
@@ -165,9 +222,9 @@ class GlobalSettingsPage(QScrollArea):
             ("follows", "Maximum Follows Per Hour"),
             ("unfollows", "Maximum Unfollows Per Hour"),
             ("likes", "Maximum Likes Per Hour"),
+            ("comments", "Maximum Comments Per Hour"),
             ("dms", "Maximum DMs Per Hour"),
             ("story_views", "Maximum Story Views Per Hour"),
-            ("comments", "Maximum Comments Per Hour"),
         )
         for row, (name, label) in enumerate(labels):
             control = self._numeric_control(section, maximum=100000)
@@ -196,7 +253,7 @@ class GlobalSettingsPage(QScrollArea):
         section = ConfigurationSection("AI", parent)
         grid = self._settings_grid(section)
         self.ai_provider = QComboBox(section)
-        self.ai_provider.addItem("Not configured", None)
+        self.ai_provider.addItem("OpenAI", "openai")
         self.ai_model = QLineEdit(section)
         self.ai_model.setPlaceholderText("Model name")
         self.openai_api_key = QLineEdit(section)
@@ -215,24 +272,17 @@ class GlobalSettingsPage(QScrollArea):
             control.setFixedWidth(260)
             control.setProperty("runtimeExtension", True)
 
-        self._add_field(grid, 0, "AI Provider", self.ai_provider)
-        self._add_field(grid, 1, "AI Model", self.ai_model)
-        self._add_field(grid, 2, "OpenAI API Key", self.openai_api_key)
+        self._add_field(grid, 0, "Provider", self.ai_provider)
+        self._add_field(grid, 1, "Model", self.ai_model)
+        self._add_field(grid, 2, "API Key", self.openai_api_key)
         self._add_field(grid, 3, "Temperature", self.temperature)
         return section
 
     def _build_integrations(self, parent: QWidget) -> ConfigurationSection:
         section = ConfigurationSection("Integrations", parent)
-        self.mongodb_integration = self._switch(
-            "MongoDB", section, runtime_extension=True
-        )
         self.backend_api_integration = self._switch(
             "Backend API", section, runtime_extension=True
         )
-        self.telegram_integration = self._switch(
-            "Telegram (optional)", section, runtime_extension=True
-        )
-        section.body_layout.addWidget(self.mongodb_integration)
         section.body_layout.addWidget(
             self._switch_row(
                 self.backend_api_integration,
@@ -242,7 +292,6 @@ class GlobalSettingsPage(QScrollArea):
                 ),
             )
         )
-        section.body_layout.addWidget(self.telegram_integration)
         return section
 
     @staticmethod
@@ -263,6 +312,27 @@ class GlobalSettingsPage(QScrollArea):
         control.setRange(0, maximum)
         control.setSuffix(suffix)
         control.setFixedWidth(180)
+        return control
+
+    @staticmethod
+    def _range_control(parent: QWidget, *, placeholder: str) -> QLineEdit:
+        control = QLineEdit(parent)
+        control.setPlaceholderText(placeholder)
+        control.setFixedWidth(180)
+        control.setMaxLength(9)
+        control.setValidator(
+            QRegularExpressionValidator(
+                QRegularExpression(r"(?:\d+|\d+-\d+)?"), control
+            )
+        )
+        return control
+
+    @staticmethod
+    def _text_control(parent: QWidget, *, placeholder: str) -> QLineEdit:
+        control = QLineEdit(parent)
+        control.setPlaceholderText(placeholder)
+        control.setFixedWidth(260)
+        control.setProperty("runtimeExtension", True)
         return control
 
     @staticmethod

@@ -33,15 +33,24 @@ def test_global_settings_exposes_requested_operator_controls(tmp_path):
     QApplication.instance() or QApplication([])
     page = GlobalSettingsPage(tmp_path)
 
-    assert page.airplane_mode_reset.text() == "Enable Airplane Mode Reset"
-    assert page.random_search_letters.text() == "Enable Random Search Letters"
+    assert page.airplane_mode_reset.text() == "Toggle Airplane Mode Between Sessions"
+    assert page.random_search_letters.text() == "Use Random Search Letters"
     assert page.enable_block_detection.text() == "Enable Block Detection"
-    assert page.random_search_letters.parentWidget().title.text() == "Runtime Safety"
-    assert page.airplane_mode_reset.parentWidget().title.text() == "Session Startup"
+    runtime_safety = next(
+        section
+        for section in page.findChildren(ConfigurationSection)
+        if section.title.text() == "Runtime Safety"
+    )
+    assert runtime_safety.isAncestorOf(page.random_search_letters)
+    assert runtime_safety.isAncestorOf(page.airplane_mode_reset)
+    assert page.first_character_pool.text() == "abcdefghijklmnopqrstuvwxyz"
+    assert page.second_character_pool.text() == "aeiou"
+    assert page.follow_back_ratio_check.text() == "Enable Follow Back Ratio Check"
+    assert page.follow_back_ratio_check.isChecked()
     assert page.contact_details_scraping.text() == ("Enable Contact Details Scraping")
-    assert page.mongodb_integration.text() == "MongoDB"
     assert page.backend_api_integration.text() == "Backend API"
-    assert page.telegram_integration.text() == "Telegram (optional)"
+    assert page.ai_provider.count() == 1
+    assert page.ai_provider.currentText() == "OpenAI"
     assert set(page.hourly_limits) == {
         "follows",
         "unfollows",
@@ -53,6 +62,9 @@ def test_global_settings_exposes_requested_operator_controls(tmp_path):
     assert not hasattr(page, "restart_instagram_automatically")
     assert not hasattr(page, "screen_recording")
     assert not hasattr(page, "website_api_integration")
+    assert not hasattr(page, "after_scrolling_timeout")
+    assert not hasattr(page, "mongodb_integration")
+    assert not hasattr(page, "telegram_integration")
 
 
 def test_only_documented_engine_controls_have_engine_bindings(tmp_path):
@@ -73,14 +85,15 @@ def test_only_documented_engine_controls_have_engine_bindings(tmp_path):
         page.random_search_letters,
         page.pause_after_action_block,
         page.maximum_scrolling_time,
+        page.first_character_pool,
+        page.second_character_pool,
+        page.follow_back_ratio_check,
         page.contact_details_scraping,
         page.ai_provider,
         page.ai_model,
         page.openai_api_key,
         page.temperature,
-        page.mongodb_integration,
         page.backend_api_integration,
-        page.telegram_integration,
         *page.hourly_limits.values(),
     )
     assert all(control.property("runtimeExtension") for control in runtime_extensions)
@@ -92,7 +105,6 @@ def test_global_numeric_controls_are_compact_and_wheel_safe(tmp_path):
     page = GlobalSettingsPage(tmp_path)
     controls = (
         page.start_all_phones_delay,
-        page.wait_after_instagram_launch,
         page.login_retry_limit,
         page.pause_after_action_block,
         page.maximum_crash_retries,
@@ -108,6 +120,34 @@ def test_global_numeric_controls_are_compact_and_wheel_safe(tmp_path):
         Qt.ScrollBarAsNeeded,
         Qt.ScrollBarAlwaysOff,
     )
+
+
+def test_launch_wait_accepts_fixed_or_range_values(tmp_path):
+    QApplication.instance() or QApplication([])
+    page = GlobalSettingsPage(tmp_path)
+    editor = page.wait_after_instagram_launch
+
+    editor.setText("10")
+    assert editor.hasAcceptableInput()
+    editor.setText("8-12")
+    assert editor.hasAcceptableInput()
+    editor.setText("8 to 12")
+    assert not editor.hasAcceptableInput()
+    assert editor.width() == 180
+
+
+def test_advanced_global_controls_have_help_tooltips(tmp_path):
+    QApplication.instance() or QApplication([])
+    page = GlobalSettingsPage(tmp_path)
+    tooltips = {
+        button.toolTip()
+        for button in page.findChildren(QToolButton, "settingInfoButton")
+    }
+
+    assert any("new mobile IP address" in tooltip for tooltip in tooltips)
+    assert any("Random prefixes" in tooltip for tooltip in tooltips)
+    assert any("endless user search" in tooltip for tooltip in tooltips)
+    assert any("Follow Back Ratio (FBR)" in tooltip for tooltip in tooltips)
 
 
 def test_global_settings_uses_compact_information_tooltips(tmp_path):
