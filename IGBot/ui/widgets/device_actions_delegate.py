@@ -1,21 +1,19 @@
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QHelpEvent, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
-    QApplication,
-    QStyle,
     QStyledItemDelegate,
     QToolTip,
 )
+
+from IGBot.ui.icons import workspace_action_icon
 
 
 @dataclass(frozen=True)
 class _ActionButton:
     action: str
-    text: str
     width: int
-    icon: QStyle.StandardPixmap
     enabled: bool = True
 
 
@@ -24,9 +22,9 @@ class DeviceActionsDelegate(QStyledItemDelegate):
 
     action_requested = Signal(str, str)
     _BUTTONS = (
-        _ActionButton("start", "Start", 70, QStyle.SP_MediaPlay),
-        _ActionButton("manage", "Manage", 82, QStyle.SP_DirOpenIcon),
-        _ActionButton("delete", "", 42, QStyle.SP_TrashIcon),
+        _ActionButton("start", 34),
+        _ActionButton("manage", 34),
+        _ActionButton("delete", 34),
     )
     _GAP = 6
 
@@ -49,28 +47,9 @@ class DeviceActionsDelegate(QStyledItemDelegate):
             painter.setPen(QPen(border, 1))
             painter.drawRoundedRect(rect.adjusted(0, 0, -1, -1), 5, 5)
 
-            icon = QApplication.style().standardIcon(button.icon)
-            icon_size = QSize(13, 13)
-            content_width = icon_size.width() + (5 if button.text else 0)
-            if button.text:
-                content_width += painter.fontMetrics().horizontalAdvance(button.text)
-            content_left = rect.left() + (rect.width() - content_width) // 2
-            icon_rect = QRect(
-                content_left,
-                rect.top() + (rect.height() - icon_size.height()) // 2,
-                icon_size.width(),
-                icon_size.height(),
+            workspace_action_icon(button.action, foreground.name()).paint(
+                painter, rect.adjusted(7, 7, -7, -7), Qt.AlignCenter
             )
-            icon.paint(painter, icon_rect, Qt.AlignCenter)
-            if button.text:
-                painter.setPen(foreground)
-                text_rect = QRect(
-                    icon_rect.right() + 5,
-                    rect.top(),
-                    rect.right() - icon_rect.right() - 5,
-                    rect.height(),
-                )
-                painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, button.text)
             painter.restore()
 
     def editorEvent(self, event, model, option, index) -> bool:

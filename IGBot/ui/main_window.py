@@ -166,6 +166,9 @@ class MainWindow(QMainWindow):
         self.phone_accounts_page.account_folder_requested.connect(
             lambda directory: QDesktopServices.openUrl(QUrl.fromLocalFile(directory))
         )
+        self.phone_accounts_page.phone_view_requested.connect(
+            self.device_controller.view_phone
+        )
         self.phone_accounts_page.apply_template_requested.connect(
             self._show_apply_template_dialog
         )

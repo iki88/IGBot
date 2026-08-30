@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
 from IGBot.ui.models.phone_accounts_model import PhoneAccountsModel
+from IGBot.ui.widgets.account_actions_delegate import AccountActionsDelegate
 from IGBot.ui.widgets.empty_state import EmptyState
 from IGBot.ui.widgets.page_header import PageHeader
 from IGBot.ui.widgets.text_input_dialog import TextInputDialog
@@ -39,6 +40,7 @@ class PhoneAccountsPage(QWidget):
     apply_template_requested = Signal(object)
     account_open_requested = Signal(object)
     active_account_changed = Signal(object)
+    phone_view_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -103,6 +105,11 @@ class PhoneAccountsPage(QWidget):
         self.table.verticalHeader().setDefaultSectionSize(34)
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.actions_delegate = AccountActionsDelegate(self.table)
+        self.table.setItemDelegateForColumn(
+            PhoneAccountsModel.ACTIONS, self.actions_delegate
+        )
+        self.actions_delegate.action_requested.connect(self._handle_account_action)
         self._configure_columns()
         self.table.doubleClicked.connect(self._open_account)
         self.table.selectionModel().selectionChanged.connect(self._selection_changed)
@@ -122,6 +129,7 @@ class PhoneAccountsPage(QWidget):
         header.setMinimumSectionSize(55)
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.setSectionResizeMode(PhoneAccountsModel.USERNAME, QHeaderView.Stretch)
+        header.setSectionResizeMode(PhoneAccountsModel.ACTIONS, QHeaderView.Fixed)
         widths = {
             "Start Hour": 84,
             "End Hour": 78,
@@ -135,6 +143,7 @@ class PhoneAccountsPage(QWidget):
             "DM": 58,
             "Posted": 72,
             "Status": 96,
+            "Actions": 170,
         }
         for column, title in enumerate(PhoneAccountsModel.HEADERS):
             if column != PhoneAccountsModel.USERNAME:
@@ -276,6 +285,14 @@ class PhoneAccountsPage(QWidget):
         account = self.model.account_at(source_index.row())
         if account is not None:
             self.account_open_requested.emit(account)
+
+    def _handle_account_action(self, action: str, account: AssignedAccount) -> None:
+        if action in {"view", "edit"}:
+            self.account_open_requested.emit(account)
+        elif action == "phone":
+            self.phone_view_requested.emit(account.device_id)
+        elif action == "folder":
+            self.account_folder_requested.emit(str(Path(account.config_path).parent))
 
     def selected_account(self) -> AssignedAccount | None:
         rows = self.table.selectionModel().selectedRows()

@@ -23,9 +23,12 @@ class PhoneAccountsModel(QAbstractTableModel):
         "DM",
         "Posted",
         "Status",
+        "Actions",
     )
     USERNAME = HEADERS.index("Username")
     STATUS = HEADERS.index("Status")
+    ACTIONS = HEADERS.index("Actions")
+    AccountRole = Qt.UserRole + 2
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -44,7 +47,7 @@ class PhoneAccountsModel(QAbstractTableModel):
         account = self._accounts[index.row()]
         if role == Qt.ToolTipRole and index.column() == self.USERNAME:
             return str(account.config_path)
-        if role == Qt.FontRole and index.column() != self.USERNAME:
+        if role == Qt.FontRole and index.column() not in (self.USERNAME, self.ACTIONS):
             return QFont("Cascadia Mono", 9)
         if role == Qt.TextAlignmentRole:
             return (
@@ -58,12 +61,16 @@ class PhoneAccountsModel(QAbstractTableModel):
             return account.username
         if role == Qt.UserRole + 1:
             return account.device_id
+        if role == self.AccountRole:
+            return account
         if role != Qt.DisplayRole:
             return None
         if index.column() == self.USERNAME:
             return account.username
         if index.column() == self.STATUS:
             return self._statuses.get(str(account.config_path.resolve()), "Idle")
+        if index.column() == self.ACTIONS:
+            return ""
         return "—"
 
     def headerData(

@@ -159,7 +159,50 @@ def test_phone_account_double_click_opens_selected_account():
     page.table.doubleClicked.emit(page.proxy_model.index(0, page.model.USERNAME))
 
     assert opened == [account]
-    assert "Actions" not in page.model.HEADERS
+    assert page.model.HEADERS[-1] == "Actions"
+    assert application is not None
+
+
+def test_account_actions_are_shared_and_route_existing_workflows():
+    application = QApplication.instance() or QApplication([])
+    page = PhoneAccountsPage()
+    account = AssignedAccount(
+        username="real_account",
+        device_id="phone-a",
+        app_id="com.instagram.android",
+        config_path=Path("accounts/real_account/config.yml"),
+    )
+    page.set_phone(DeviceRecord("phone-a", "Rack One", True), [account])
+    opened = []
+    phones = []
+    folders = []
+    page.account_open_requested.connect(opened.append)
+    page.phone_view_requested.connect(phones.append)
+    page.account_folder_requested.connect(folders.append)
+
+    assert [action.name for action in page.actions_delegate.ACTIONS] == [
+        "view",
+        "analytics",
+        "phone",
+        "folder",
+        "edit",
+    ]
+    assert [action.tooltip for action in page.actions_delegate.ACTIONS] == [
+        "View Account",
+        "Analytics",
+        "View Phone",
+        "Open Account Folder",
+        "Settings",
+    ]
+
+    page._handle_account_action("view", account)
+    page._handle_account_action("phone", account)
+    page._handle_account_action("folder", account)
+    page._handle_account_action("edit", account)
+
+    assert opened == [account, account]
+    assert phones == ["phone-a"]
+    assert folders == [str(Path("accounts/real_account"))]
     assert application is not None
 
 
@@ -211,9 +254,11 @@ def test_phone_account_table_uses_final_dense_operator_columns():
         "DM",
         "Posted",
         "Status",
+        "Actions",
     )
     assert page.table.verticalHeader().defaultSectionSize() == 34
     assert page.table.columnWidth(page.model.STATUS) == 96
+    assert page.table.columnWidth(page.model.ACTIONS) == 170
     assert page.model.index(0, page.model.STATUS).data() == "Idle"
     assert (
         page.model.index(0, page.model.STATUS).data(Qt.TextAlignmentRole)

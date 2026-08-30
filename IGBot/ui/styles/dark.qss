@@ -713,8 +713,6 @@ QTabWidget#accountTabs QTabBar::tab:selected { background-color: #27272A; border
 
 QTableView#deviceTable,
 QTableView#accountsTable { background-color: #18181B; alternate-background-color: #202023; border-color: #3F3F46; color: #F9FAFB; gridline-color: #27272A; selection-background-color: #1D4ED8; }
-QTableView#deviceTable::item:hover,
-QTableView#accountsTable::item:hover { background-color: #27272A; }
 QTableView#deviceTable::item:selected,
 QTableView#accountsTable::item:selected { background-color: #1D4ED8; color: #F9FAFB; }
 QHeaderView::section { background-color: #27272A; border-color: #3F3F46; color: #A1A1AA; }

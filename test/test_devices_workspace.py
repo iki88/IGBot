@@ -134,7 +134,6 @@ def test_start_action_is_present_and_enabled():
         button for button in DeviceActionsDelegate._BUTTONS if button.action == "start"
     )
 
-    assert start.text == "Start"
     assert start.enabled is True
 
 

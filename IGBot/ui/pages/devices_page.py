@@ -90,7 +90,7 @@ class DevicesPage(QWidget):
         self.table.setShowGrid(False)
         self.table.setWordWrap(False)
         self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(40)
+        self.table.verticalHeader().setDefaultSectionSize(36)
         self.table.horizontalHeader().setSectionsClickable(False)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
 
@@ -130,7 +130,7 @@ class DevicesPage(QWidget):
         self.table.setColumnWidth(DeviceTableModel.PHONE, 175)
         self.table.setColumnWidth(DeviceTableModel.ACCOUNTS, 82)
         self.table.setColumnWidth(DeviceTableModel.STATUS, 86)
-        self.table.setColumnWidth(DeviceTableModel.ACTIONS, 244)
+        self.table.setColumnWidth(DeviceTableModel.ACTIONS, 132)
 
     def _build_layout(self) -> None:
         controls = QHBoxLayout()

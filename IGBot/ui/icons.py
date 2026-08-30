@@ -55,6 +55,61 @@ def eye_icon(color: str = "#A1A1AA") -> QIcon:
     return QIcon(pixmap)
 
 
+def workspace_action_icon(action: str, color: str = "#A1A1AA") -> QIcon:
+    """Return a consistent line icon for compact workspace table actions."""
+    pixmap = _canvas()
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setBrush(Qt.NoBrush)
+    painter.setPen(QPen(QColor(color), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+
+    if action == "view":
+        outline = QPainterPath()
+        outline.moveTo(2.5, 10)
+        outline.cubicTo(6, 4, 14, 4, 17.5, 10)
+        outline.cubicTo(14, 16, 6, 16, 2.5, 10)
+        painter.drawPath(outline)
+        painter.drawEllipse(QRectF(7.25, 7.25, 5.5, 5.5))
+    elif action == "analytics":
+        painter.drawLine(4, 16, 4, 11)
+        painter.drawLine(9, 16, 9, 7)
+        painter.drawLine(14, 16, 14, 3)
+        painter.drawLine(2.5, 16.5, 17, 16.5)
+    elif action == "phone":
+        painter.drawRoundedRect(QRectF(5, 2, 10, 16), 2, 2)
+        painter.drawLine(8, 5, 12, 5)
+        painter.drawLine(9, 15, 11, 15)
+    elif action in {"folder", "manage"}:
+        path = QPainterPath()
+        path.moveTo(2.5, 6)
+        path.lineTo(7.5, 6)
+        path.lineTo(9, 8)
+        path.lineTo(17.5, 8)
+        path.lineTo(16, 16)
+        path.lineTo(3.5, 16)
+        path.closeSubpath()
+        painter.drawPath(path)
+    elif action == "edit":
+        painter.drawLine(5, 15, 15, 5)
+        painter.drawLine(13, 4, 16, 7)
+        painter.drawLine(4, 16, 7.5, 15.2)
+    elif action == "start":
+        path = QPainterPath()
+        path.moveTo(7, 4)
+        path.lineTo(16, 10)
+        path.lineTo(7, 16)
+        path.closeSubpath()
+        painter.drawPath(path)
+    elif action == "delete":
+        painter.drawRoundedRect(QRectF(5, 6, 10, 11), 1, 1)
+        painter.drawLine(4, 5, 16, 5)
+        painter.drawLine(8, 3, 12, 3)
+        painter.drawLine(8, 9, 8, 14)
+        painter.drawLine(12, 9, 12, 14)
+    painter.end()
+    return QIcon(pixmap)
+
+
 def status_dot_icon(enabled: bool) -> QIcon:
     """Return the consistent module-state marker used by account tabs."""
     pixmap = QPixmap(12, 12)

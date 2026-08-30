@@ -37,10 +37,10 @@ This is a living project document for reviewed UI and workflow improvements that
 
 ### Device Workspace
 
-- Add analytics action button to every phone account row.
-- Add analytics action button to the Global Accounts page.
-- Restore compact action icons similar to the previous production software.
-- Improve account action column layout.
+- [x] Add analytics action button to every phone account row.
+- [x] Add analytics action button to the Global Accounts page.
+- [x] Restore compact action icons similar to the previous production software.
+- [x] Improve account action column layout.
 
 ### Typography
 
