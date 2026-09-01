@@ -7,7 +7,7 @@ the intended operator-facing behavior independently of InstaAddict's current
 execution model. It is an architecture specification, not an implementation plan
 or a description of completed runtime functionality.
 
-The IGBot runtime owns scheduling, limits, recovery, background work, state,
+The IGBot runtime owns scheduling, limits, recovery, runtime hooks, state,
 statistics, and module coordination. InstaAddict remains a temporary execution
 provider behind a compatibility boundary while IGBot replaces legacy behavior in
 controlled stages.
@@ -21,12 +21,11 @@ Fleet Runtime
   -> one Phone Scheduler per started phone
        -> one active Account Session at a time
             -> Session Startup
-            -> Startup Background Tasks
             -> Smart Interaction Scheduler
                  -> interaction modules
-                 -> periodic background tasks
-            -> Session Finalization
-            -> statistics and synchronization
+                 -> inline Runtime Hooks
+                 -> Runtime Recovery when a failure occurs
+            -> Session Shutdown
        -> wait for the next eligible account session
 ```
 
@@ -48,13 +47,11 @@ Operator starts phone
   -> select next eligible account
   -> create Account Session
   -> run Session Startup
-  -> run startup background tasks
-  -> build module budgets and event queues
   -> run Smart Interaction Scheduler
-  -> interleave modules and due background tasks
+  -> execute Runtime Hooks inline when module events trigger them
+  -> invoke Runtime Recovery only when a failure occurs
   -> stop at schedule end, operator request, safety stop, or completed session
-  -> finalize state and statistics
-  -> enqueue backend synchronization
+  -> run Session Shutdown
   -> return control to Phone Scheduler
   -> select another eligible account or wait
 ```
@@ -69,7 +66,7 @@ buttons.
   `Stopping`, `Completed`, `Failed`, `Cancelled`.
 - Module: `Disabled`, `Ready`, `Running`, `CoolingDown`, `LimitReached`, `Blocked`,
   `Failed`.
-- Background task: `Pending`, `Running`, `Deferred`, `Completed`, `Failed`.
+- Runtime Hook invocation: `Triggered`, `Running`, `Completed`, `Failed`.
 
 State changes are published as events to the UI, audit log, statistics store, and
 future synchronization layer. The UI displays runtime state but does not calculate
@@ -79,7 +76,7 @@ or own it.
 
 Stop is cooperative and phone-scoped:
 
-1. Reject new module and background-task work.
+1. Reject new module work and new Runtime Hook invocations.
 2. Cancel the current action at the nearest safe boundary.
 3. Ask the execution provider to stop gracefully.
 4. Restore temporary device state owned by the session.
@@ -119,76 +116,93 @@ mandatory gates succeed or an explicit policy permits a degraded session.
     blocks, incompatible application state, and repeated startup crashes.
 11. **Create the session snapshot.** Record start time, configuration revision,
     phone, account, enabled modules, schedules, and limit balances.
-12. **Run startup background tasks.** Execute the required tasks below before
-    interaction rotation begins.
-13. **Build scheduler inputs.** Create module budgets, cooldown state, event queues,
+12. **Run Follow Back Ratio.** When enabled and meaningful for the configured
+    sources, compare prior source interactions with the current follower state and
+    update source performance facts.
+13. **Run the initial new-follower scan.** Compare the current follower snapshot
+    with the previous durable snapshot and prepare any eligible new-follower DM
+    work for the DM module.
+14. **Initialize runtime state.** Record the initial analytics snapshot and prepare
+    the session's interaction history, health state, and scheduler inputs.
+15. **Build scheduler inputs.** Create module budgets, cooldown state, target queues,
     and the first scheduling decision.
 
-### Startup background-task order
-
-1. Follow Back Ratio check, when enabled and meaningful for the configured sources.
-2. New-follower scan and comparison with the interaction database.
-3. DM queue creation for eligible newly gained followers.
-4. Inbox scan when reply processing is enabled in a future runtime.
-5. Contact and profile-data refresh required by session policy.
-6. Initial analytics snapshot.
-7. Backend inbound synchronization and account-state reconciliation.
+Every item in Session Startup executes exactly once for that Account Session. FBR,
+the initial new-follower scan, account verification, launch work, and runtime
+initialization are startup stages, not Runtime Hooks and not scheduler modules.
 
 Failures are classified as fatal, retryable, or optional. A missing Application ID
 or wrong account is fatal. A temporarily unavailable backend is optional and must
 not prevent local automation. A transient Android connection failure is retryable
 within the configured recovery policy.
 
-## 3. Background Tasks
+## 3. Runtime Hooks
 
 ### Purpose
 
-Background tasks perform session support work that is not a normal interaction
-module. They produce facts, queues, or synchronization records; they do not compete
-for module budgets.
+Runtime Hooks are event-driven extensions to normal module execution. A hook runs
+only when a module encounters its declared event. It executes inline, completes a
+small bounded responsibility, and immediately returns control to the same module
+and then to the Smart Interaction Scheduler.
 
-### Task categories
+Hooks are not startup work, modules, periodic jobs, or independent schedulers. They
+never choose execution order and never preempt the scheduler.
 
-| Task | Purpose | Typical timing | Scheduler interaction |
-|---|---|---|---|
-| Follow Back Ratio | Compare source-originated follows with resulting followers and update source performance | Session startup; optionally once per session | Completes before follower-source scoring is used |
-| New-follower detection | Compare the current follower snapshot with the previous durable snapshot | Startup and configured periodic interval | Produces a new-follower event queue |
-| Inbox checking | Detect unread or reply-eligible conversations | Startup and periodic interval | Produces reply events; does not behave as a source module |
-| Contact scraping | Collect permitted public/business contact details from profiles already visited | Inline capture or a bounded queued task | Uses the phone UI only when granted an execution slot |
-| Analytics update | Aggregate action results, limits, failures, profile counts, and source performance | Incrementally and at finalization | Updates scheduler facts without blocking ordinary rotation |
-| Backend synchronization | Upload outbox records and retrieve permitted remote changes | Startup, periodic, finalization | Network-only work may run concurrently; UI work may not |
-| Runtime health check | Verify ADB, automation bridge, foreground app, and account state | Startup and between module slices | May pause scheduling and start recovery |
-
-### Coordination rules
-
-- A phone has one serialized Android interaction channel. A task that touches the
-  Instagram UI must acquire it through the Account Session.
-- Network-only and local aggregation work may run concurrently when it cannot
-  mutate session decisions unsafely.
-- Every task has a deadline, retry policy, cancellation token, and idempotency key.
-- Periodic tasks declare their next due time. The Smart Interaction Scheduler checks
-  due tasks between module slices, never in the middle of an unsafe Android action.
-- Task failure is logged and classified. Optional task failure does not terminate
-  the session; health or identity failures may pause or stop it.
-- Task results are durable facts. Modules consume those facts through typed queues
-  or read-only state, not by reaching into another task's internal data.
-
-### Event-driven work
-
-New-follower DMs and future replies are event-driven actions:
+### Hook flow
 
 ```text
-Follower snapshot
-  -> detect newly gained follower
-  -> verify history and eligibility
-  -> create durable DM event
-  -> DM module receives event budget
-  -> send or defer
-  -> record terminal outcome
+Smart Scheduler selects module
+  -> module executes one bounded action
+  -> module emits a hook event
+  -> matching Runtime Hooks run inline
+  -> hook results attach to the module result
+  -> module returns control
+  -> Smart Scheduler makes the next decision
 ```
 
-An event remains pending, completed, rejected, or failed. It is not silently lost
-when a session ends or a send attempt fails.
+### Hook examples
+
+#### Contact Details Scraping
+
+```text
+Follow module opens a profile
+  -> contact surface is detected
+  -> Contact Scraping Hook reads available details
+  -> contact record is updated
+  -> control returns to Follow
+```
+
+#### AI Replies
+
+```text
+DM module opens a conversation
+  -> unread message is detected
+  -> AI Reply Hook builds context and generates a validated reply
+  -> reply result returns to DM
+  -> control returns to the Smart Scheduler after the DM slice
+```
+
+#### Other hook categories
+
+- tagged-account protection when a candidate is evaluated;
+- statistics updates after a confirmed or failed action;
+- future Save Post behavior after a qualifying Like event;
+- audit enrichment after a profile, source, or action event;
+- other bounded event-driven behavior added through explicit hook contracts.
+
+### Hook rules
+
+- A hook declares the event it handles and receives immutable event context.
+- Hooks run in deterministic registration order for the same event.
+- A hook must be bounded, cancellation-aware, and idempotent where it writes data.
+- A hook may enrich, allow, or reject the current module action through a structured
+  result, but it may not select another module or start an independent interaction.
+- Hook failure is recorded with the parent module result. A failure requiring app,
+  account, or device repair transfers control to Runtime Recovery.
+- Hooks use the Android UI only within the module's existing serialized execution
+  slice. They cannot create concurrent phone interaction.
+- Expensive network persistence uses a durable local record; Session Shutdown owns
+  final Backend API upload rather than allowing a hook to stall module rotation.
 
 ## 4. Smart Interaction Scheduler
 
@@ -196,7 +210,11 @@ when a session ends or a send attempt fails.
 
 The Smart Interaction Scheduler decides which eligible module receives the next
 bounded execution slice. Modules define goals and capabilities; they do not decide
-global ordering.
+global ordering. The scheduler is the heart of a running Account Session.
+
+It exclusively owns module rotation, interaction budgets, daily and hourly limit
+enforcement, module priorities, safe randomization, scrolling decisions, and the
+resulting execution order.
 
 The scheduler replaces a fixed sequence such as running every Follow action before
 every Like action.
@@ -206,9 +224,8 @@ Follow slice
   -> Like slice
   -> Follow slice
   -> DM event
-  -> Story slice
-  -> due background task
   -> Like slice
+  -> Continue
 ```
 
 ### Scheduler inputs
@@ -238,24 +255,27 @@ Each module exposes a common conceptual contract:
   consumed limits, cooldown, and discovered facts.
 
 A module cannot run an unbounded source loop. It returns control after its slice so
-the scheduler can rotate, process due background tasks, observe stop requests, and
-enforce global policy.
+the scheduler can rotate, observe stop requests, enforce global policy, and decide
+whether the current source should continue scrolling or yield to another source or
+module.
 
 ### Selection policy
 
 The scheduler follows these rules in order:
 
 1. Exclude disabled, blocked, exhausted, cooling-down, and source-empty modules.
-2. Reserve capacity for due event-driven work and urgent health tasks.
+2. Reserve capacity for eligible event-driven module work.
 3. Apply daily and hourly allowances before issuing work.
 4. Avoid immediately repeating the same module when another eligible module exists.
 5. Select from eligible modules using configured priority and randomized weighting.
 6. Issue a bounded slice and wait for its structured result.
 7. Update budgets, cooldowns, statistics, and health state.
-8. Run any newly due background task before the next selection.
+8. Evaluate the returned module and hook results before the next selection.
 
-Randomization changes selection among safe eligible choices. It never bypasses
-limits, schedules, safety rules, or event priority.
+Randomization changes selection among safe eligible choices. Scrolling policy
+decides whether a module continues the current source, uses a configured discovery
+strategy, changes source, or yields its slice. Neither randomization nor scrolling
+policy may bypass limits, schedules, safety rules, or event priority.
 
 ### Enable and disable behavior
 
@@ -332,8 +352,9 @@ IGBot to exceed its own allowance.
 
 ### Recovery model
 
-Recovery is stateful, bounded, and observable. It resumes only from a verified safe
-checkpoint; it never blindly repeats an ambiguous action.
+Runtime Recovery is entered only in response to a failure. It is not part of normal
+module rotation. Recovery is stateful, bounded, and observable. It resumes only
+from a verified safe checkpoint and never blindly repeats an ambiguous action.
 
 ### Instagram crash
 
@@ -367,6 +388,8 @@ detect block signal
 
 Severe or repeated blocks may end the account session. The scheduler must not
 automatically re-enable blocked modules without an explicit recovery policy.
+An account paused by an action block remains unavailable to the Phone Scheduler
+until its cooldown or operator-controlled recovery condition is satisfied.
 
 ### Login failure or challenge
 
@@ -394,12 +417,49 @@ new attempt.
 - Every cleanup restores only device state IGBot changed and records incomplete
   restoration for operator review.
 
-## 7. Contact Scraping
+## 7. Session Shutdown
+
+Session Shutdown is the final Account Session stage. It executes once after normal
+completion, schedule end, operator cancellation, or unrecoverable failure. Each
+step is best-effort during a damaged session, but failures are retained in the
+final result rather than silently ignored.
+
+### Shutdown order
+
+1. **Stop new work.** Close scheduler admission and reject new module slices and
+   Runtime Hook invocations.
+2. **Settle current work.** Complete or cancel the current safe action boundary and
+   reconcile ambiguous outcomes.
+3. **Finalize limits and statistics.** Commit confirmed reservations, release
+   unused reservations, aggregate module and hook results, and record the terminal
+   session status.
+4. **Persist runtime state.** Save session history, source performance, follower
+   snapshots, pending event queues, recovery outcomes, and the next safe resume
+   state.
+5. **Create synchronization records.** Write durable Backend API outbox entries for
+   statistics, analytics, health, contacts, and session completion.
+6. **Upload Backend API data.** Attempt a bounded outbox flush. Failure leaves
+   records durable for a later retry and does not corrupt local completion.
+7. **Close Instagram.** Stop the assigned package when session policy requires it
+   and release automation resources.
+8. **Restore owned device state.** Restore temporary keyboard, notification,
+   network, and automation state changed by this session where applicable.
+9. **Release phone ownership.** Return a complete terminal result to the Phone
+   Scheduler.
+10. **Prepare the next account.** The Phone Scheduler reloads eligible schedules
+    and selects the next account or enters `Waiting`.
+
+Session Shutdown never chooses the next module and never launches another account
+itself. It finalizes exactly one Account Session and hands control back to the Phone
+Scheduler.
+
+## 8. Contact Scraping
 
 ### Workflow
 
 Contact scraping is one global operator feature, not separate Email, Phone, and
-Website modules.
+Website modules. During a session it runs as a Runtime Hook triggered by an already
+open profile.
 
 ```text
 eligible profile encountered
@@ -432,16 +492,16 @@ so later observations can update stale details without losing history.
 
 ### Runtime rules
 
-- Scraping is opportunistic during profiles already opened by modules whenever
-  possible, avoiding duplicate navigation.
-- A dedicated queued scrape may run only through the serialized phone interaction
-  channel.
+- Scraping occurs inline while a module already has the relevant profile open,
+  avoiding duplicate navigation and returning control immediately afterward.
+- The hook uses the module's serialized phone interaction slot and cannot start a
+  second navigation flow.
 - Database writes are idempotent and do not block Android interaction longer than
   necessary.
 - Sensitive data handling, retention, lawful use, and backend access are governed
   outside module configuration and must be applied consistently.
 
-## 8. AI Runtime
+## 9. AI Runtime
 
 AI is a future content-decision service behind a provider-neutral boundary. Modules
 request content; they do not call a model provider directly.
@@ -483,7 +543,11 @@ secrets, unrelated accounts, and unrestricted local files are never model contex
 AI failure defers or rejects the related event according to policy. It never blocks
 unrelated enabled modules or silently falls back to unintended content.
 
-## 9. Website Synchronization
+AI Replies execute as Runtime Hooks when a conversation event is encountered. AI
+DM and Comment generation remain services invoked by their owning modules. AI
+never owns scheduling or starts an independent phone interaction.
+
+## 10. Website Synchronization
 
 ### Boundary
 
@@ -521,7 +585,7 @@ explicit restart under the established operator policy.
   account engine configuration.
 - Synchronization cannot command Android UI work outside a Phone Scheduler.
 
-## 10. Runtime Components and Boundaries
+## 11. Runtime Components and Boundaries
 
 ### Fleet Runtime
 
@@ -536,13 +600,15 @@ while waiting. It does not implement module behavior.
 
 ### Account Session
 
-Owns one bounded run for one account: startup, serialized phone access, background
-tasks, Smart Interaction Scheduler, recovery, cancellation, and finalization.
+Owns one bounded run for one account: Session Startup, serialized phone access,
+Smart Interaction Scheduler, inline Runtime Hooks, Runtime Recovery, cancellation,
+and Session Shutdown.
 
 ### Smart Interaction Scheduler
 
-Owns module eligibility, rotation, budgets, priorities, cooldowns, and due-task
-interleaving. It does not manipulate Android directly.
+Owns module eligibility, rotation, budgets, daily and hourly limit decisions,
+priorities, cooldowns, safe randomization, scrolling decisions, and execution order.
+It does not manipulate Android directly.
 
 ### Modules
 
@@ -550,10 +616,11 @@ Follow, Unfollow, Like, Story, Comment, and DM own their domain-specific candida
 requirements, action request, and structured result interpretation. They do not own
 phone selection, session lifecycle, global limits, or other modules.
 
-### Background Task Coordinator
+### Runtime Hook Dispatcher
 
-Owns startup, periodic, and event-producing support tasks and coordinates safe phone
-access with the Account Session.
+Matches module events to bounded inline hooks, preserves deterministic hook order,
+collects structured outcomes, and returns control to the parent module. It does not
+schedule modules or own independent phone work.
 
 ### Limit Ledger
 
@@ -564,6 +631,12 @@ source, retry, and safety allowances.
 
 Classifies failures, captures diagnostics, executes bounded recovery plans, and
 returns a verified result to the Account Session.
+
+### Session Shutdown Coordinator
+
+Finalizes limits and statistics, persists terminal state, creates and flushes
+Backend API outbox records, closes Instagram, restores owned device state, and
+returns phone ownership to the Phone Scheduler.
 
 ### Execution Provider
 
@@ -576,64 +649,98 @@ same conceptual operation/result boundary.
 Distributes immutable lifecycle, action, error, statistics, and synchronization
 events. Live Log is one consumer. It is not the runtime data store.
 
-## 11. Runtime Principles
+## 12. Runtime Principles
 
 1. **The phone is the execution unit.** One persistent scheduler owns each started
    phone; one account runs on that phone at a time.
 2. **Runtime owns behavior.** UI pages edit intent and display state; they do not
    schedule work or manipulate engine processes.
-3. **Modules define goals.** They expose eligibility and bounded work; they do not
+3. **Session Startup runs once.** It prepares the network, application, account,
+   health, FBR, initial follower state, and scheduler inputs before any module runs.
+4. **Modules define goals.** They expose eligibility and bounded work; they do not
    control the session or each other.
-4. **The scheduler makes decisions.** Rotation, priorities, budgets, cooldowns, and
-   due background tasks are centralized.
-5. **Background tasks are independent.** They produce facts and events and use the
-   phone only through coordinated execution slots.
-6. **Limits are authoritative and durable.** Provider counters are defensive
+5. **The Smart Interaction Scheduler owns execution order.** Rotation, priorities,
+   budgets, daily and hourly limits, cooldowns, randomization, and scrolling
+   decisions are centralized.
+6. **Runtime Hooks respond inline.** They handle events encountered during module
+   execution and immediately return control. They never interrupt or replace the
+   scheduler.
+7. **Runtime Recovery handles failures only.** Restart, retry, pause, and resume
+   occur through bounded recovery plans and verified checkpoints.
+8. **Session Shutdown finalizes once.** It persists state and statistics, creates
+   and flushes synchronization records, closes resources, and returns the phone to
+   its scheduler.
+9. **Limits are authoritative and durable.** Provider counters are defensive
    compatibility mechanisms, not IGBot's daily or hourly truth.
-7. **Confirmed outcomes drive accounting.** Attempts, ambiguous results, failures,
+10. **Confirmed outcomes drive accounting.** Attempts, ambiguous results, failures,
    and successes remain distinct.
-8. **Recovery is automatic but bounded.** Restart, retry, pause, and resume require
-   verified checkpoints and auditable reasons.
-9. **Configuration is snapshotted.** A session runs one validated revision.
+11. **Configuration is snapshotted.** A session runs one validated revision.
    Execution-related changes stop the scheduler rather than mutating a live run.
-10. **Compatibility is isolated.** The InstaAddict adapter translates terminology,
-    files, limits, and results without exposing legacy implementation details to the
-    UI or scheduler.
-11. **Known legacy defects are not product behavior.** Obsolete keys, ineffective
+12. **Compatibility is isolated.** The InstaAddict adapter translates IGBot
+    behavior into current InstaAddict operations, terminology, files, limits, and
+    results without exposing legacy details to the UI or scheduler.
+13. **Known legacy defects are not product behavior.** Obsolete keys, ineffective
     options, parser quirks, and fixed action order remain contained in the adapter.
-12. **Local operation is resilient.** Backend and AI outages do not corrupt local
+14. **Local operation is resilient.** Backend and AI outages do not corrupt local
     state or stop unrelated modules and phones.
-13. **Every action is observable.** State transitions, scheduling decisions,
+15. **Every action is observable.** State transitions, scheduling decisions,
     recovery, limit consumption, and synchronization outcomes are structured and
     auditable.
-14. **Secrets remain outside logs and engine configuration.** Credentials and API
+16. **Secrets remain outside logs and engine configuration.** Credentials and API
     keys cross only explicit protected boundaries.
-15. **Operator terminology is authoritative.** The UI and runtime model reflect the
+17. **Operator terminology is authoritative.** The UI and runtime model reflect the
     operator workflow; engine vocabulary is an internal translation detail.
 
-## 12. Reference Session
+### Execution-stage summary
+
+```text
+Session Startup
+  -> runs exactly once
+Smart Interaction Scheduler
+  -> owns execution order and limits
+Runtime Hooks
+  -> respond inline to events encountered by modules
+Runtime Recovery
+  -> runs only when failures occur
+Session Shutdown
+  -> finalizes exactly once
+Compatibility Layer
+  -> translates IGBot behavior into the current InstaAddict engine
+```
+
+## 13. Reference Session
 
 ```text
 Phone Scheduler selects Account A
-  -> validate phone, account, package, schedule, and configuration
-  -> optionally refresh mobile IP
-  -> launch Instagram and verify Account A
-  -> run health checks
-  -> calculate FBR
-  -> detect new followers and create DM events
-  -> capture initial analytics
-  -> construct Follow, Like, Story, Comment, Unfollow, and DM budgets
+  -> Session Startup runs once
+       -> validate phone, account, package, schedule, and configuration
+       -> optionally refresh mobile IP and wait for network
+       -> launch Instagram and wait after launch
+       -> verify Account A and Application ID
+       -> initialize runtime state
+       -> calculate FBR
+       -> perform initial new-follower scan
+       -> construct Follow, Like, Story, Comment, Unfollow, and DM budgets
+  -> Smart Interaction Scheduler starts
   -> run Follow slice
+       -> Contact Details Hook runs when contact details are encountered
+       -> control returns to Follow
   -> run Like slice
-  -> process one new-follower DM event
+       -> Statistics Hook records the confirmed action
+       -> control returns to Like
+  -> run DM slice for eligible new-follower work
+       -> AI Reply Hook runs only if an unread-message event is encountered
+       -> control returns to DM
   -> run Story slice
-  -> execute due health and follower checks
   -> run Follow slice
-  -> recover from an Instagram crash and verify state
-  -> continue from a safe scheduler boundary
+  -> Instagram crashes
+       -> Runtime Recovery restarts Instagram and verifies Account A
+       -> control returns at a safe Smart Scheduler boundary
   -> stop at Account A's schedule end
-  -> persist final statistics and limit usage
-  -> enqueue backend synchronization
+  -> Session Shutdown runs once
+       -> persist final statistics, limits, and runtime state
+       -> create and upload Backend API records
+       -> close Instagram and restore owned device state
   -> return phone ownership to Phone Scheduler
   -> select Account B or wait for the next schedule
 ```
