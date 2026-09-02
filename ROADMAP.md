@@ -141,6 +141,12 @@ This roadmap is the single source of truth for IGBot project progress. Preserve 
 - Improved tabs, inputs, switches, tables, dialogs, cards, and editor readability.
 - Shared visual identity applied across every existing workspace and module page.
 
+### Sprint 6.1
+
+- Independent native runtime package and subsystem boundaries.
+- Typed session, startup, scheduler, hook, recovery, shutdown, compatibility, and runtime-state contracts.
+- Provider-neutral composition root with InstaAddict isolated behind the compatibility boundary.
+
 ## Missing Features From Old Bot
 
 ### UI

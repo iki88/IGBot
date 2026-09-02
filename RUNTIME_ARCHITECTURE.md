@@ -64,6 +64,8 @@ buttons.
 - Phone Scheduler: `Stopped`, `Starting`, `Waiting`, `Running`, `Stopping`, `Error`.
 - Account Session: `Pending`, `Starting`, `Running`, `Paused`, `Recovering`,
   `Stopping`, `Completed`, `Failed`, `Cancelled`.
+- Account availability: `Ready`, `Scheduled`, `Paused`, `Blocked`,
+  `WaitingForOperator`, `Archived`.
 - Module: `Disabled`, `Ready`, `Running`, `CoolingDown`, `LimitReached`, `Blocked`,
   `Failed`.
 - Runtime Hook invocation: `Triggered`, `Running`, `Completed`, `Failed`.
@@ -71,6 +73,38 @@ buttons.
 State changes are published as events to the UI, audit log, statistics store, and
 future synchronization layer. The UI displays runtime state but does not calculate
 or own it.
+
+### RuntimeContext ownership
+
+`SessionController` creates exactly one `RuntimeContext` after a session has been
+admitted. `SessionContext` remains its immutable identity record; `RuntimeContext`
+owns the session-scoped references and evolving runtime state used during
+execution.
+
+```text
+SessionController
+  -> creates RuntimeContext
+  -> StartupPipeline receives RuntimeContext
+       -> every Startup Stage receives the same RuntimeContext
+  -> StartupResult is attached to RuntimeContext
+  -> Smart Interaction Scheduler receives the same RuntimeContext
+       -> Modules and Runtime Hooks receive the same RuntimeContext
+       -> Runtime Recovery receives the same RuntimeContext when required
+  -> Session Shutdown receives the same RuntimeContext
+  -> context lifetime ends with the Account Session
+```
+
+Runtime components receive `RuntimeContext` instead of separate account, phone,
+settings, logger, and state parameters. The context grows only through explicit
+typed runtime references as later subsystems are implemented. It is never global,
+never shared between Account Sessions, and never used concurrently by different
+phones.
+
+`RuntimeLogger` is a provider-independent reference owned by `RuntimeContext`. All
+native runtime components log through its `debug`, `info`, `warning`, and `error`
+interface. Console, Runtime UI, notification, file, and Backend API destinations
+are future adapters; runtime components neither select nor write to those
+destinations directly.
 
 ### Stop semantics
 
@@ -93,48 +127,68 @@ mandatory gates succeed or an explicit policy permits a degraded session.
 
 ### Startup order
 
-1. **Acquire phone ownership.** Confirm that no other Account Session owns the
-   phone's Android interaction channel.
-2. **Reload authoritative configuration.** Read account identity, device
-   assignment, Application ID, schedule, enabled modules, limits, and global
-   settings from their designated stores.
-3. **Validate identity and assignment.** Confirm that the account is active,
-   belongs to this phone, is not archived, and has one unambiguous configuration.
-4. **Validate the phone.** Confirm ADB connectivity and authorization and verify
-   that the selected phone still matches the stable Android serial.
-5. **Validate the application.** Require a valid Application ID and confirm that
-   the package is installed and launchable.
-6. **Apply optional network preparation.** If enabled, toggle Airplane Mode and
-   wait for mobile connectivity to return before opening Instagram.
-7. **Prepare device services.** Establish the Android automation connection,
-   normalize temporary input state, and run mandatory health checks.
-8. **Launch Instagram.** Open the assigned package and wait for the configured
-   launch delay.
-9. **Verify the selected Instagram account.** Confirm that the visible account
-   matches the session account. Attempt bounded account selection when necessary.
-10. **Verify session health.** Detect login challenges, unavailable UI, action
-    blocks, incompatible application state, and repeated startup crashes.
-11. **Create the session snapshot.** Record start time, configuration revision,
-    phone, account, enabled modules, schedules, and limit balances.
-12. **Run Follow Back Ratio.** When enabled and meaningful for the configured
-    sources, compare prior source interactions with the current follower state and
-    update source performance facts.
-13. **Run the initial new-follower scan.** Compare the current follower snapshot
-    with the previous durable snapshot and prepare any eligible new-follower DM
-    work for the DM module.
-14. **Initialize runtime state.** Record the initial analytics snapshot and prepare
-    the session's interaction history, health state, and scheduler inputs.
-15. **Build scheduler inputs.** Create module budgets, cooldown state, target queues,
-    and the first scheduling decision.
+Phone ownership, authoritative configuration loading, assignment validation, and
+the immutable session snapshot are Account Session admission requirements. They
+complete before the following startup pipeline begins:
 
-Every item in Session Startup executes exactly once for that Account Session. FBR,
-the initial new-follower scan, account verification, launch work, and runtime
-initialization are startup stages, not Runtime Hooks and not scheduler modules.
+1. **Wait for Internet availability.** Test Internet connectivity before changing
+   network state or launching Instagram. If unavailable, wait 60 seconds and retry
+   automatically. Repeat until connectivity is restored or the operator stops the
+   phone; no operator action is required.
+2. **Toggle Airplane Mode Between Sessions.** When enabled, AirplaneModeController
+   toggles Airplane Mode and waits until mobile connectivity and Internet access
+   have returned before completing its stage.
+3. **Launch Instagram.** Validate the assigned Application ID, open that package,
+   and establish the Android automation connection.
+4. **Wait After Launch.** Apply the configured launch delay before inspecting the
+   application.
+5. **Verify the correct account.** Confirm that the visible Instagram account is
+   the scheduled account. Detect login challenges and perform bounded account
+   selection or login recovery when required.
+6. **Run Follower Synchronization.** Perform exactly one follower scan. Compare it
+   with durable per-account interaction state, update Follow Back Ratio facts,
+   identify newly gained followers, and update the follower snapshot.
+7. **Build the Startup Result.** Produce the immutable scheduler input describing
+   follower synchronization, newly gained followers, enabled modules, module
+   budgets, limit balances, target readiness, cooldowns, and health state.
+8. **Enter the Smart Interaction Scheduler.** Hand the Startup Result to the
+   scheduler and begin module selection.
+
+InternetChecker is startup stage one. It depends only on the platform-independent
+NetworkProvider interface and the session RuntimeContext. When the provider reports
+no Internet, InternetChecker emits `No Internet connection. Retrying in 60
+seconds...` through RuntimeLogger, waits exactly 60 seconds, and checks again. This
+loop is normal startup behavior: it is not a failure, recovery event, or account
+error, and no later startup stage or scheduler entry may run until connectivity is
+restored.
+
+AndroidNetworkProvider owns the Android/ADB reachability probe behind the
+NetworkProvider boundary. InternetChecker never imports or invokes Android APIs,
+ADB, InstaAddict, UI automation, or platform subprocesses.
+
+Every startup item executes exactly once for that Account Session. Follower
+Synchronization is the only startup follower scan: FBR calculation and new-follower
+detection are outcomes of the same scan, never separate passes. Internet waiting,
+account verification, launch work, and Follower Synchronization are startup stages,
+not Runtime Hooks and not scheduler modules.
 
 Failures are classified as fatal, retryable, or optional. A missing Application ID
-or wrong account is fatal. A temporarily unavailable backend is optional and must
-not prevent local automation. A transient Android connection failure is retryable
-within the configured recovery policy.
+or wrong account is fatal after its recovery policy is exhausted. A temporarily
+unavailable Backend API is optional and must not prevent local automation. Internet
+unavailability remains inside the automatic 60-second retry gate. A transient
+Android connection failure is retryable within the configured recovery policy.
+
+### Startup Result
+
+The Startup Result is the sole handoff from Session Startup to the Smart
+Interaction Scheduler. It contains facts and queues, not executable startup work.
+
+If Follower Synchronization reports one or more newly gained followers and the DM
+module is enabled, the scheduler prioritizes one initial DM cycle before normal
+module rotation. The DM cycle remains subject to recipient eligibility, schedule
+end, daily and hourly limits, and the available DM budget. After that one cycle,
+normal scheduler rotation resumes. No second follower scan is performed to build
+or refresh this initial queue.
 
 ## 3. Runtime Hooks
 
@@ -168,7 +222,7 @@ Smart Scheduler selects module
 Follow module opens a profile
   -> contact surface is detected
   -> Contact Scraping Hook reads available details
-  -> contact record is updated
+  -> profile update is submitted to GlobalDatabaseWriter
   -> control returns to Follow
 ```
 
@@ -201,6 +255,8 @@ DM module opens a conversation
   account, or device repair transfers control to Runtime Recovery.
 - Hooks use the Android UI only within the module's existing serialized execution
   slice. They cannot create concurrent phone interaction.
+- Hooks never wait for Global User Database writes. They submit immutable updates
+  to GlobalDatabaseWriter and return immediately to the current module.
 - Expensive network persistence uses a durable local record; Session Shutdown owns
   final Backend API upload rather than allowing a hook to stall module rotation.
 
@@ -222,16 +278,22 @@ every Like action.
 ```text
 Follow slice
   -> Like slice
+  -> DM slice
   -> Follow slice
-  -> DM event
+  -> Unfollow slice
   -> Like slice
   -> Continue
 ```
 
+Modules always rotate. The scheduler never selects the same module twice in a row
+while another module is enabled, eligible, ready, and has remaining allowance. A
+module may repeat only when it is the sole eligible module.
+
 ### Scheduler inputs
 
 - enabled module set;
-- module-specific session budget;
+- module-specific session budget, configured as a fixed action count such as `15`
+  or an inclusive range such as `10-20`;
 - remaining daily and hourly allowance;
 - account schedule end time;
 - module cooldown and delay readiness;
@@ -259,23 +321,37 @@ the scheduler can rotate, observe stop requests, enforce global policy, and deci
 whether the current source should continue scrolling or yield to another source or
 module.
 
+A Module Budget defines the maximum number of actions assigned to that module
+before the scheduler rotates. A fixed budget uses that action count. A ranged
+budget resolves one value within the inclusive range according to the session's
+randomization policy and records the resolved value for auditability. A budget is
+never permission to exceed a daily or hourly limit.
+
 ### Selection policy
 
 The scheduler follows these rules in order:
 
-1. Exclude disabled, blocked, exhausted, cooling-down, and source-empty modules.
-2. Reserve capacity for eligible event-driven module work.
-3. Apply daily and hourly allowances before issuing work.
-4. Avoid immediately repeating the same module when another eligible module exists.
-5. Select from eligible modules using configured priority and randomized weighting.
-6. Issue a bounded slice and wait for its structured result.
-7. Update budgets, cooldowns, statistics, and health state.
-8. Evaluate the returned module and hook results before the next selection.
+1. Stop admission when the Account Session end time has arrived, even when module
+   budgets remain unfinished.
+2. Exclude disabled, blocked, exhausted, cooling-down, and source-empty modules.
+3. Apply authoritative daily and hourly allowances before issuing work. The Daily
+   Limit always overrides a larger Module Budget.
+4. Prioritize one initial new-follower DM cycle when required by the Startup Result.
+5. Exclude the previously selected module when another module is eligible.
+6. Select from the remaining eligible modules using configured priority and safe
+   randomized weighting.
+7. Issue one bounded budget slice and wait for its structured result.
+8. Update budgets, cooldowns, statistics, and health state.
+9. Evaluate the returned module and hook results before rotating again.
 
 Randomization changes selection among safe eligible choices. Scrolling policy
 decides whether a module continues the current source, uses a configured discovery
 strategy, changes source, or yields its slice. Neither randomization nor scrolling
 policy may bypass limits, schedules, safety rules, or event priority.
+
+Priority order is absolute: Account Session end time, safety and stop conditions,
+daily limit, hourly limit, then Module Budget and selection policy. Unfinished
+budgets are discarded at session end and never extend the configured schedule.
 
 ### Enable and disable behavior
 
@@ -325,6 +401,8 @@ Operator module goal
 - **Hourly global limit:** shared across all running accounts as defined by the
   global policy, using rolling or fixed-hour semantics chosen once for the product.
 - **Session budget:** the maximum work allocated to a module in one Account Session.
+- **Module budget:** a fixed or ranged slice that controls how many actions a
+  module may perform before mandatory rotation; it is bounded by all higher limits.
 - **Source budget:** optional bounded work for one source so a source cannot
   monopolize a session.
 - **Safety limit:** failures, crashes, blocks, and login attempts; these do not count
@@ -343,6 +421,10 @@ Operator module goal
   duplicate action.
 - Daily reset uses the configured operator timezone and records the boundary used.
 - Changing a configured limit never erases historical usage.
+- The scheduler clamps every Module Budget to the remaining daily and hourly
+  allowance before execution. It never issues work beyond the Daily Limit.
+- Session end cancels unissued budget and takes precedence over every remaining
+  allowance.
 
 Legacy InstaAddict limits are defensive provider caps while the adapter is active.
 They are not the authoritative daily ledger and must be set so they cannot permit
@@ -367,12 +449,14 @@ detect process/UI failure
   -> wait after launch
   -> verify account and package
   -> reconcile ambiguous action outcome
-  -> resume scheduler at a safe boundary
+  -> resume the existing session at a safe scheduler boundary
 ```
 
 Restarting Instagram is mandatory runtime behavior, not an operator toggle.
-Repeated crashes consume the crash-retry limit. Exhaustion fails the Account
-Session while leaving the Phone Scheduler available to evaluate later work.
+Recovery does not rerun Session Startup, Follower Synchronization, or initial DM
+priority. Repeated crashes consume the crash-retry limit. Exhaustion fails the
+Account Session while leaving the Phone Scheduler available to evaluate later
+work.
 
 ### Action block
 
@@ -381,7 +465,7 @@ detect block signal
   -> stop issuing interaction work
   -> record affected module and action
   -> capture evidence
-  -> apply configured pause/cooldown
+  -> pause only the affected account for the Global pause duration
   -> run a health recheck
   -> resume only if verified safe
 ```
@@ -389,21 +473,24 @@ detect block signal
 Severe or repeated blocks may end the account session. The scheduler must not
 automatically re-enable blocked modules without an explicit recovery policy.
 An account paused by an action block remains unavailable to the Phone Scheduler
-until its cooldown or operator-controlled recovery condition is satisfied.
+until the Global pause duration expires or an operator-controlled recovery
+condition is satisfied. The Phone Scheduler remains alive and continues scheduling
+other eligible accounts on that phone. Other phones and accounts are unaffected.
 
 ### Login failure or challenge
 
 ```text
 verify login state
-  -> retry bounded account selection/login recovery
+  -> retry according to Login Retry Limit
   -> increment daily login retry ledger
-  -> pause account after limit
+  -> enter WAITING_FOR_OPERATOR after the limit is exhausted
   -> notify operator and synchronize account state
 ```
 
 Credentials and challenge state are never written to logs. A paused account is
 skipped by the Phone Scheduler until the operator resolves it or policy permits a
-new attempt.
+new attempt. `WAITING_FOR_OPERATOR` belongs to the affected account only; the Phone
+Scheduler continues evaluating and running other eligible accounts.
 
 ### Device and automation failures
 
@@ -433,9 +520,9 @@ final result rather than silently ignored.
 3. **Finalize limits and statistics.** Commit confirmed reservations, release
    unused reservations, aggregate module and hook results, and record the terminal
    session status.
-4. **Persist runtime state.** Save session history, source performance, follower
-   snapshots, pending event queues, recovery outcomes, and the next safe resume
-   state.
+4. **Persist runtime state.** Enqueue durable session history, source performance,
+   follower snapshots, pending event queues, recovery outcomes, and the next safe
+   resume state. Shutdown does not wait for physical database writes.
 5. **Create synchronization records.** Write durable Backend API outbox entries for
    statistics, analytics, health, contacts, and session completion.
 6. **Upload Backend API data.** Attempt a bounded outbox flush. Failure leaves
@@ -466,29 +553,31 @@ eligible profile encountered
   -> capture profile identity and visible profile data
   -> inspect available business/contact surfaces when enabled
   -> normalize contact fields
-  -> attach source, account, and observation timestamp
-  -> upsert local contact record
+  -> submit shared profile facts to GlobalDatabaseWriter
+  -> record source and interaction provenance in the Per-Account Runtime Database
   -> enqueue synchronization event
 ```
 
 ### Data model
 
-Where available, a contact record may contain:
+Where available, the shared profile record may contain:
 
-- Instagram username and stable observed profile identifier;
-- display name;
+- Instagram username;
+- full name;
 - biography;
+- follower, following, and post counts;
+- private, verified, and business flags;
 - email addresses;
 - phone numbers;
 - websites and other public links;
-- visible business category and other available business contact information;
-- source module and source target;
-- observing IGBot account and phone;
-- first-seen and last-seen timestamps;
-- validation and provenance for every field.
+- other available business contact information;
+- last-updated timestamp.
 
 Missing data is not represented as a negative fact. Every value retains provenance
-so later observations can update stale details without losing history.
+inside the write request so later observations can update stale details safely. The
+Global User Database stores the resulting profile facts only; observing account,
+module, source, session, and interaction history belong exclusively to the
+Per-Account Runtime Database and audit stream.
 
 ### Runtime rules
 
@@ -496,8 +585,9 @@ so later observations can update stale details without losing history.
   avoiding duplicate navigation and returning control immediately afterward.
 - The hook uses the module's serialized phone interaction slot and cannot start a
   second navigation flow.
-- Database writes are idempotent and do not block Android interaction longer than
-  necessary.
+- The hook submits an immutable update and does not wait for database persistence.
+- GlobalDatabaseWriter makes Global User Database writes idempotent, batched, and
+  asynchronous.
 - Sensitive data handling, retention, lawful use, and backend access are governed
   outside module configuration and must be applied consistently.
 
@@ -585,7 +675,80 @@ explicit restart under the established operator policy.
   account engine configuration.
 - Synchronization cannot command Android UI work outside a Phone Scheduler.
 
-## 11. Runtime Components and Boundaries
+## 11. Database Architecture
+
+Runtime knowledge is divided between two independent databases. They have
+different ownership, retention, and query responsibilities and must never be
+collapsed into a single interaction record.
+
+### Global User Database
+
+The Global User Database is a shared profile knowledge base used across all IGBot
+accounts and phones. It contains only the latest known profile information:
+
+- username;
+- full name;
+- biography;
+- followers;
+- following;
+- posts;
+- private;
+- verified;
+- business;
+- email;
+- phone;
+- website;
+- last updated.
+
+It contains no account interaction history, module results, source relationships,
+session identifiers, followed state, DM state, or account-specific decisions. A
+profile observed by many IGBot accounts remains one shared profile entity.
+
+### Per-Account Runtime Database
+
+Each managed Instagram account owns an independent Runtime Database. It describes
+only what that IGBot account did or learned through its own runtime activity. A
+record may contain:
+
+- `followed` and `follow_date`;
+- `unfollowed` and `unfollow_date`;
+- `follow_back` and `follow_back_date`;
+- `dm_sent` and `dm_date`;
+- `discovered_by`;
+- `source_account`;
+- `session_id`.
+
+Per-account data is never promoted to the Global User Database as interaction
+history. Shared profile facts discovered during an interaction are submitted
+separately to GlobalDatabaseWriter. Account transfer or archive changes assignment
+and availability; it does not merge one account's Runtime Database into another.
+
+### GlobalDatabaseWriter
+
+GlobalDatabaseWriter is the only component permitted to write to the Global User
+Database. Runtime sessions, modules, hooks, recovery, UI, synchronization, and
+compatibility adapters never write to that database directly.
+
+Its responsibilities are:
+
+- receive immutable profile updates from concurrent runtime instances;
+- validate and normalize profile fields without adding interaction history;
+- coalesce repeated observations and batch database writes;
+- persist asynchronously through a bounded, durable queue;
+- apply idempotent updates and preserve the newest valid observation;
+- publish persistence success or failure for audit and retry handling.
+
+Submitting a profile update must be fast and non-blocking for phone automation. A
+temporary database failure retains or retries queued updates according to storage
+policy; it never stalls Android interaction. Backpressure is observable and uses a
+durable fallback rather than blocking a phone session.
+
+Per-Account Runtime Database changes also pass through asynchronous persistence
+owned by that account's runtime state boundary. Ordering is preserved per account,
+but the current Android action and Smart Interaction Scheduler never wait for a
+physical database write.
+
+## 12. Runtime Components and Boundaries
 
 ### Fleet Runtime
 
@@ -597,6 +760,35 @@ and application shutdown coordination. It never performs account interactions.
 Owns one phone, loads assigned accounts, interprets account schedules, selects the
 next eligible account, guarantees single-session phone ownership, and remains alive
 while waiting. It does not implement module behavior.
+
+### RuntimeContext
+
+Owns the references and mutable state for exactly one Account Session, including
+its immutable session identity, RuntimeLogger, runtime settings, session state,
+Startup Result, and future scheduler state. Every session component receives this
+same context. RuntimeContext is not a service locator and never owns business
+logic.
+
+### RuntimeLogger
+
+Defines the only logging interface used by the native runtime. It emits
+provider-independent debug, information, warning, and error messages with optional
+structured fields. Destination adapters, persistence, UI delivery, and Backend API
+delivery remain outside runtime components.
+
+### InternetChecker
+
+Owns only the first Session Startup connectivity gate. It polls NetworkProvider,
+logs the fixed 60-second retry message through RuntimeLogger, waits between
+unavailable observations, and returns a structured startup-stage result after
+connectivity is restored or the provider itself fails.
+
+### NetworkProvider
+
+Defines the platform-independent Internet availability observation consumed by
+InternetChecker. AndroidNetworkProvider implements this boundary using an isolated
+ADB reachability probe. Future platforms may replace that provider without
+changing InternetChecker, StartupPipeline, or SessionController.
 
 ### Account Session
 
@@ -621,6 +813,12 @@ phone selection, session lifecycle, global limits, or other modules.
 Matches module events to bounded inline hooks, preserves deterministic hook order,
 collects structured outcomes, and returns control to the parent module. It does not
 schedule modules or own independent phone work.
+
+### GlobalDatabaseWriter
+
+Receives profile observations from every runtime instance, batches and persists
+them asynchronously, and is the exclusive writer to the Global User Database. It
+does not own interaction history or perform Android work.
 
 ### Limit Ledger
 
@@ -649,14 +847,15 @@ same conceptual operation/result boundary.
 Distributes immutable lifecycle, action, error, statistics, and synchronization
 events. Live Log is one consumer. It is not the runtime data store.
 
-## 12. Runtime Principles
+## 13. Runtime Principles
 
 1. **The phone is the execution unit.** One persistent scheduler owns each started
    phone; one account runs on that phone at a time.
 2. **Runtime owns behavior.** UI pages edit intent and display state; they do not
    schedule work or manipulate engine processes.
 3. **Session Startup runs once.** It prepares the network, application, account,
-   health, FBR, initial follower state, and scheduler inputs before any module runs.
+   health, one Follower Synchronization scan, and the Startup Result before any
+   module runs.
 4. **Modules define goals.** They expose eligibility and bounded work; they do not
    control the session or each other.
 5. **The Smart Interaction Scheduler owns execution order.** Rotation, priorities,
@@ -690,6 +889,30 @@ events. Live Log is one consumer. It is not the runtime data store.
     keys cross only explicit protected boundaries.
 17. **Operator terminology is authoritative.** The UI and runtime model reflect the
     operator workflow; engine vocabulary is an internal translation detail.
+18. **Automation never waits for database writes.** Runtime components submit
+    immutable updates to asynchronous persistence boundaries and continue Android
+    work without waiting for physical writes.
+19. **Phone automation has priority over persistence.** Queueing, batching,
+    backpressure, retry, and durable fallback belong to database writers and cannot
+    take ownership of the phone interaction channel.
+20. **The Global User Database has one writer.** GlobalDatabaseWriter is the only
+    component allowed to persist shared profile facts; runtime instances never
+    write to it directly.
+21. **Profile facts and interaction history remain separate.** Shared profile data
+    belongs to the Global User Database. Follow, Unfollow, DM, source, and session
+    facts belong to the relevant Per-Account Runtime Database.
+22. **RuntimeContext is session-scoped.** One context is created by
+    SessionController and shared by startup, scheduling, modules, hooks, recovery,
+    compatibility, and shutdown for that Account Session only.
+23. **Runtime components never own global state.** Account, phone, settings,
+    logger, Startup Result, and evolving runtime state are accessed through the
+    supplied RuntimeContext rather than globals or parallel parameter lists.
+24. **RuntimeLogger is the sole runtime logging interface.** Runtime components do
+    not print directly, select destinations, write log files, or call UI logging
+    facilities.
+25. **Every component has one responsibility.** Context sharing does not permit a
+    stage, module, hook, recovery strategy, adapter, or logger to assume another
+    subsystem's ownership.
 
 ### Execution-stage summary
 
@@ -708,22 +931,24 @@ Compatibility Layer
   -> translates IGBot behavior into the current InstaAddict engine
 ```
 
-## 13. Reference Session
+## 14. Reference Session
 
 ```text
 Phone Scheduler selects Account A
   -> Session Startup runs once
-       -> validate phone, account, package, schedule, and configuration
-       -> optionally refresh mobile IP and wait for network
+       -> wait for Internet, retrying every 60 seconds while unavailable
+       -> optionally toggle Airplane Mode and wait for the mobile network
        -> launch Instagram and wait after launch
-       -> verify Account A and Application ID
-       -> initialize runtime state
-       -> calculate FBR
-       -> perform initial new-follower scan
-       -> construct Follow, Like, Story, Comment, Unfollow, and DM budgets
+       -> verify Account A and its Application ID
+       -> run one Follower Synchronization scan
+            -> update FBR
+            -> detect newly gained followers
+       -> build Startup Result and fixed or ranged module budgets
   -> Smart Interaction Scheduler starts
+  -> run one prioritized DM cycle when Startup Result contains new followers
   -> run Follow slice
        -> Contact Details Hook runs when contact details are encountered
+       -> submit profile facts to GlobalDatabaseWriter without waiting
        -> control returns to Follow
   -> run Like slice
        -> Statistics Hook records the confirmed action
@@ -735,6 +960,7 @@ Phone Scheduler selects Account A
   -> run Follow slice
   -> Instagram crashes
        -> Runtime Recovery restarts Instagram and verifies Account A
+       -> Session Startup does not run again
        -> control returns at a safe Smart Scheduler boundary
   -> stop at Account A's schedule end
   -> Session Shutdown runs once
