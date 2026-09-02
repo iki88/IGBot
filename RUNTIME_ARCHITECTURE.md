@@ -136,8 +136,9 @@ complete before the following startup pipeline begins:
    automatically. Repeat until connectivity is restored or the operator stops the
    phone; no operator action is required.
 2. **Toggle Airplane Mode Between Sessions.** When enabled, AirplaneModeController
-   toggles Airplane Mode and waits until mobile connectivity and Internet access
-   have returned before completing its stage.
+   performs one verified Airplane Mode on/off cycle. It does not wait for Internet
+   restoration; Internet availability and retry timing belong exclusively to
+   InternetChecker.
 3. **Launch Instagram.** Validate the assigned Application ID, open that package,
    and establish the Android automation connection.
 4. **Wait After Launch.** Apply the configured launch delay before inspecting the
@@ -165,6 +166,20 @@ restored.
 AndroidNetworkProvider owns the Android/ADB reachability probe behind the
 NetworkProvider boundary. InternetChecker never imports or invokes Android APIs,
 ADB, InstaAddict, UI automation, or platform subprocesses.
+
+AirplaneModeController likewise depends on a platform-neutral AirplaneModeProvider.
+For authorized, developer-managed Samsung Android 11+ phones, the production
+Android provider uses the connectivity service shell command (`cmd connectivity
+airplane-mode enable|disable`) and queries the same service after each transition.
+This is preferred over writing `Settings.Global` directly because applications
+cannot write that protected setting and changing the stored flag alone is not a
+verified radio transition. A Settings Intent only displays the operator-facing
+Airplane Mode settings screen; it does not toggle the setting. UIAutomator can
+drive that screen but is not the primary mechanism because it depends on visible
+OEM UI, localization, device unlock state, and instrumentation. Samsung firmware,
+carrier policy, or enterprise policy may still reject the shell command, so both
+transitions must be verified and a rejection must fail the startup stage rather
+than silently falling back to UI interaction.
 
 Every startup item executes exactly once for that Account Session. Follower
 Synchronization is the only startup follower scan: FBR calculation and new-follower

@@ -60,6 +60,14 @@ class RecordingStage:
         )
 
 
+class SkippedAirplaneModeStage:
+    def execute(self, context):
+        return StartupStageResult(
+            StartupStageName.AIRPLANE_MODE,
+            StartupStageStatus.SKIPPED,
+        )
+
+
 class RecordingScheduler:
     def __init__(self, events):
         self._events = events
@@ -154,9 +162,9 @@ def test_internet_checker_is_first_pipeline_stage(tmp_path):
     context = make_context(tmp_path)
     provider = SequenceNetworkProvider((NetworkCheckResult(True),), events)
     checker = InternetChecker(provider, sleeper=lambda _: None)
-    pipeline = StartupPipeline.with_internet_checker(
+    pipeline = StartupPipeline.with_initial_stages(
         checker,
-        (RecordingStage(events),),
+        RecordingStage(events),
     )
 
     result = pipeline.execute(context)
@@ -182,7 +190,7 @@ def test_scheduler_starts_only_after_connectivity_is_restored(tmp_path):
     )
     scheduler = RecordingScheduler(events)
     controller = SessionController(
-        StartupPipeline.with_internet_checker(checker),
+        StartupPipeline.with_initial_stages(checker, SkippedAirplaneModeStage()),
         scheduler,
         logger,
     )

@@ -22,13 +22,14 @@ class StartupPipeline:
             raise ValueError("StartupPipeline requires at least one stage")
 
     @classmethod
-    def with_internet_checker(
+    def with_initial_stages(
         cls,
         internet_checker: StartupStage,
+        airplane_mode_controller: StartupStage,
         stages: Iterable[StartupStage] = (),
     ) -> StartupPipeline:
-        """Build the pipeline with InternetChecker fixed as startup stage one."""
-        return cls((internet_checker, *stages))
+        """Fix Internet and Airplane Mode as startup stages one and two."""
+        return cls((internet_checker, airplane_mode_controller, *stages))
 
     @property
     def stages(self) -> tuple[StartupStage, ...]:

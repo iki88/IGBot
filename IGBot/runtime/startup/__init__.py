@@ -1,5 +1,6 @@
 """Executable Session Startup pipeline and its public contracts."""
 
+from IGBot.runtime.startup.airplane_mode_controller import AirplaneModeController
 from IGBot.runtime.startup.contracts import StartupStage
 from IGBot.runtime.startup.internet_checker import InternetChecker
 from IGBot.runtime.startup.models import (
@@ -11,6 +12,7 @@ from IGBot.runtime.startup.models import (
 from IGBot.runtime.startup.pipeline import StartupPipeline
 
 __all__ = [
+    "AirplaneModeController",
     "InternetChecker",
     "StartupPipeline",
     "StartupResult",

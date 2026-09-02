@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from IGBot.runtime.android import discover_adb
 from IGBot.runtime.context import RuntimeContext
 from IGBot.runtime.network.models import NetworkCheckResult
 
@@ -25,7 +24,7 @@ class AndroidNetworkProvider:
         probe_host: str = "1.1.1.1",
     ) -> None:
         self._command_runner = command_runner
-        self._adb_executable = str(adb_executable or self._discover_adb())
+        self._adb_executable = str(adb_executable or discover_adb())
         self._probe_host = probe_host
 
     def check(self, context: RuntimeContext) -> NetworkCheckResult:
@@ -63,18 +62,3 @@ class AndroidNetworkProvider:
             return NetworkCheckResult(True)
         detail = (result.stderr or result.stdout or "Internet probe failed.").strip()
         return NetworkCheckResult(False, detail)
-
-    @staticmethod
-    def _discover_adb() -> str | Path:
-        roots = [Path(__file__).resolve().parents[3]]
-        bundled_root = getattr(sys, "_MEIPASS", None)
-        if bundled_root:
-            roots.append(Path(bundled_root))
-        if getattr(sys, "frozen", False):
-            roots.append(Path(sys.executable).resolve().parent)
-
-        for root in roots:
-            candidate = root / "tools" / "scrcpy" / "adb.exe"
-            if candidate.is_file():
-                return candidate.resolve()
-        return shutil.which("adb") or "adb"
