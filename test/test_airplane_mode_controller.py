@@ -64,6 +64,14 @@ class RecordingFinalStage:
         )
 
 
+class SkippedAccountVerifier:
+    def execute(self, context):
+        return StartupStageResult(
+            StartupStageName.ACCOUNT_VERIFICATION,
+            StartupStageStatus.SKIPPED,
+        )
+
+
 def make_context(tmp_path, *, enabled=False):
     session = SessionContext(
         session_id=uuid4(),
@@ -208,7 +216,8 @@ def test_pipeline_fixes_airplane_mode_immediately_after_internet(tmp_path):
     pipeline = StartupPipeline.with_initial_stages(
         internet,
         airplane,
-        (RecordingFinalStage(events),),
+        RecordingFinalStage(events),
+        SkippedAccountVerifier(),
     )
 
     result = pipeline.execute(context)
@@ -218,4 +227,5 @@ def test_pipeline_fixes_airplane_mode_immediately_after_internet(tmp_path):
         StartupStageName.INTERNET,
         StartupStageName.AIRPLANE_MODE,
         StartupStageName.INSTAGRAM_LAUNCH,
+        StartupStageName.ACCOUNT_VERIFICATION,
     ]

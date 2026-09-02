@@ -63,7 +63,7 @@ buttons.
 
 - Phone Scheduler: `Stopped`, `Starting`, `Waiting`, `Running`, `Stopping`, `Error`.
 - Account Session: `Pending`, `Starting`, `Running`, `Paused`, `Recovering`,
-  `Stopping`, `Completed`, `Failed`, `Cancelled`.
+  `WaitingForOperator`, `Stopping`, `Completed`, `Failed`, `Cancelled`.
 - Account availability: `Ready`, `Scheduled`, `Paused`, `Blocked`,
   `WaitingForOperator`, `Archived`.
 - Module: `Disabled`, `Ready`, `Running`, `CoolingDown`, `LimitReached`, `Blocked`,
@@ -140,19 +140,20 @@ complete before the following startup pipeline begins:
    restoration; Internet availability and retry timing belong exclusively to
    InternetChecker.
 3. **Launch Instagram.** Validate the assigned Application ID, open that package,
-   and establish the Android automation connection.
-4. **Wait After Launch.** Apply the configured launch delay before inspecting the
-   application.
-5. **Verify the correct account.** Confirm that the visible Instagram account is
-   the scheduled account. Detect login challenges and perform bounded account
-   selection or login recovery when required.
-6. **Run Follower Synchronization.** Perform exactly one follower scan. Compare it
+   apply the configured fixed or ranged launch delay, and verify that the exact
+   package is now the foreground application. This stage does not verify the
+   Instagram account and does not establish automation behavior.
+4. **Verify the correct account.** Open Profile and compare its complete username
+   with the immutable scheduled username. A mismatch stops the session in
+   `WaitingForOperator`; AccountVerifier never logs in, switches accounts, requests
+   credentials, or attempts recovery.
+5. **Run Follower Synchronization.** Perform exactly one follower scan. Compare it
    with durable per-account interaction state, update Follow Back Ratio facts,
    identify newly gained followers, and update the follower snapshot.
-7. **Build the Startup Result.** Produce the immutable scheduler input describing
+6. **Build the Startup Result.** Produce the immutable scheduler input describing
    follower synchronization, newly gained followers, enabled modules, module
    budgets, limit balances, target readiness, cooldowns, and health state.
-8. **Enter the Smart Interaction Scheduler.** Hand the Startup Result to the
+7. **Enter the Smart Interaction Scheduler.** Hand the Startup Result to the
    scheduler and begin module selection.
 
 InternetChecker is startup stage one. It depends only on the platform-independent
@@ -181,15 +182,40 @@ carrier policy, or enterprise policy may still reject the shell command, so both
 transitions must be verified and a rejection must fail the startup stage rather
 than silently falling back to UI interaction.
 
+InstagramLauncher depends on a platform-neutral ApplicationProvider. It launches
+only the immutable Application ID in SessionContext, waits only after the platform
+reports a successful launch request, and then requires that exact package to be in
+the foreground. `Wait After Launching Instagram` accepts either a fixed number of
+seconds such as `10` or an inclusive integer range such as `8-12`; one value is
+selected for each launch. A launch rejection, malformed delay, provider failure,
+missing foreground application, or different foreground package fails startup and
+prevents scheduler handoff. Account identity remains AccountVerifier's separate
+responsibility.
+
+AccountVerifier depends on a platform-neutral InstagramProfileProvider and a
+provider-neutral RuntimeNotifier. The Android provider supports the current
+Instagram UI and Instagram 372 by locating the Profile destination and username
+header semantically, with stable resource-ID suffixes preferred over screen
+coordinates. A fully visible username is compared immediately. A header containing
+`...` or `…` is never compared: the provider opens Account Switcher, reads the
+complete selected username, closes the switcher, and only then returns it for
+comparison. Verification produces `VERIFIED`, `USERNAME_MISMATCH`,
+`PROFILE_NOT_AVAILABLE`, or `PROFILE_NOT_LOADED` in addition to the generic startup
+stage status. A mismatch logs expected and detected usernames, emits an operator
+notification suggesting that IGBot metadata be updated, sets the session to
+`WaitingForOperator`, and prevents scheduler handoff without attempting login or
+account switching.
+
 Every startup item executes exactly once for that Account Session. Follower
 Synchronization is the only startup follower scan: FBR calculation and new-follower
 detection are outcomes of the same scan, never separate passes. Internet waiting,
 account verification, launch work, and Follower Synchronization are startup stages,
 not Runtime Hooks and not scheduler modules.
 
-Failures are classified as fatal, retryable, or optional. A missing Application ID
-or wrong account is fatal after its recovery policy is exhausted. A temporarily
-unavailable Backend API is optional and must not prevent local automation. Internet
+Failures are classified as fatal, retryable, operator-blocked, or optional. A
+missing Application ID is fatal. A username mismatch is operator-blocked and enters
+`WaitingForOperator` immediately without recovery. A temporarily unavailable
+Backend API is optional and must not prevent local automation. Internet
 unavailability remains inside the automatic 60-second retry gate. A transient
 Android connection failure is retryable within the configured recovery policy.
 
@@ -805,6 +831,14 @@ InternetChecker. AndroidNetworkProvider implements this boundary using an isolat
 ADB reachability probe. Future platforms may replace that provider without
 changing InternetChecker, StartupPipeline, or SessionController.
 
+### AccountVerifier
+
+Owns only loaded-account identity verification. It opens Instagram Profile through
+InstagramProfileProvider, resolves a complete username through Account Switcher
+when the visible header is truncated, compares it with SessionContext, and emits a
+structured verification result. It never performs login, account switching,
+credential access, recovery, follower synchronization, or scheduler work.
+
 ### Account Session
 
 Owns one bounded run for one account: Session Startup, serialized phone access,
@@ -952,7 +986,7 @@ Compatibility Layer
 Phone Scheduler selects Account A
   -> Session Startup runs once
        -> wait for Internet, retrying every 60 seconds while unavailable
-       -> optionally toggle Airplane Mode and wait for the mobile network
+       -> optionally perform a verified Airplane Mode cycle
        -> launch Instagram and wait after launch
        -> verify Account A and its Application ID
        -> run one Follower Synchronization scan

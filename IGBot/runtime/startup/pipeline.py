@@ -26,10 +26,20 @@ class StartupPipeline:
         cls,
         internet_checker: StartupStage,
         airplane_mode_controller: StartupStage,
+        instagram_launcher: StartupStage,
+        account_verifier: StartupStage,
         stages: Iterable[StartupStage] = (),
     ) -> StartupPipeline:
-        """Fix Internet and Airplane Mode as startup stages one and two."""
-        return cls((internet_checker, airplane_mode_controller, *stages))
+        """Fix the implemented startup stages in authoritative order."""
+        return cls(
+            (
+                internet_checker,
+                airplane_mode_controller,
+                instagram_launcher,
+                account_verifier,
+                *stages,
+            )
+        )
 
     @property
     def stages(self) -> tuple[StartupStage, ...]:

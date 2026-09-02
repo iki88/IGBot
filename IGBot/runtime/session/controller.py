@@ -46,7 +46,8 @@ class SessionController:
             raise
         runtime_context.startup_result = startup_result
         if startup_result.startup_failed:
-            runtime_context.session_state = SessionState.FAILED
+            if runtime_context.session_state is not SessionState.WAITING_FOR_OPERATOR:
+                runtime_context.session_state = SessionState.FAILED
             return SessionStartResult(handle, runtime_context, startup_result, False)
 
         runtime_context.session_state = SessionState.RUNNING

@@ -68,6 +68,22 @@ class SkippedAirplaneModeStage:
         )
 
 
+class SkippedInstagramStage:
+    def execute(self, context):
+        return StartupStageResult(
+            StartupStageName.INSTAGRAM_LAUNCH,
+            StartupStageStatus.SKIPPED,
+        )
+
+
+class SkippedAccountVerifier:
+    def execute(self, context):
+        return StartupStageResult(
+            StartupStageName.ACCOUNT_VERIFICATION,
+            StartupStageStatus.SKIPPED,
+        )
+
+
 class RecordingScheduler:
     def __init__(self, events):
         self._events = events
@@ -165,6 +181,8 @@ def test_internet_checker_is_first_pipeline_stage(tmp_path):
     pipeline = StartupPipeline.with_initial_stages(
         checker,
         RecordingStage(events),
+        SkippedInstagramStage(),
+        SkippedAccountVerifier(),
     )
 
     result = pipeline.execute(context)
@@ -173,6 +191,8 @@ def test_internet_checker_is_first_pipeline_stage(tmp_path):
     assert [item.stage for item in result.stage_results] == [
         StartupStageName.INTERNET,
         StartupStageName.AIRPLANE_MODE,
+        StartupStageName.INSTAGRAM_LAUNCH,
+        StartupStageName.ACCOUNT_VERIFICATION,
     ]
     assert pipeline.stages[0] is checker
 
@@ -190,7 +210,12 @@ def test_scheduler_starts_only_after_connectivity_is_restored(tmp_path):
     )
     scheduler = RecordingScheduler(events)
     controller = SessionController(
-        StartupPipeline.with_initial_stages(checker, SkippedAirplaneModeStage()),
+        StartupPipeline.with_initial_stages(
+            checker,
+            SkippedAirplaneModeStage(),
+            SkippedInstagramStage(),
+            SkippedAccountVerifier(),
+        ),
         scheduler,
         logger,
     )

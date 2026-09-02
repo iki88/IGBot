@@ -25,6 +25,15 @@ class StartupStageStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class AccountVerificationState(StrEnum):
+    """Domain-specific outcomes produced by AccountVerifier."""
+
+    VERIFIED = "VERIFIED"
+    USERNAME_MISMATCH = "USERNAME_MISMATCH"
+    PROFILE_NOT_AVAILABLE = "PROFILE_NOT_AVAILABLE"
+    PROFILE_NOT_LOADED = "PROFILE_NOT_LOADED"
+
+
 @dataclass(frozen=True, slots=True)
 class StartupStageResult:
     """Result of one startup stage, including optional scheduler facts."""
@@ -34,6 +43,8 @@ class StartupStageResult:
     detail: str | None = None
     internet_available: bool | None = None
     account_verified: bool | None = None
+    account_verification: AccountVerificationState | None = None
+    detected_username: str | None = None
     new_followers_found: int | None = None
 
     def __post_init__(self) -> None:

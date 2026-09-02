@@ -48,6 +48,7 @@ class SessionState(StrEnum):
     RUNNING = "Running"
     PAUSED = "Paused"
     RECOVERING = "Recovering"
+    WAITING_FOR_OPERATOR = "WaitingForOperator"
     STOPPING = "Stopping"
     COMPLETED = "Completed"
     FAILED = "Failed"
