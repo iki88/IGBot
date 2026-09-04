@@ -66,3 +66,9 @@ class SessionController:
     def context_for(self, session_id: UUID) -> RuntimeContext | None:
         """Return the session-owned RuntimeContext when one has been created."""
         return self._contexts.get(session_id)
+
+    def is_active(self, context: RuntimeContext) -> bool:
+        """Report whether this controller still owns a running session."""
+
+        owned = self._contexts.get(context.session.session_id)
+        return owned is context and context.session_state is SessionState.RUNNING

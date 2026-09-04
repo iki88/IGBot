@@ -17,6 +17,16 @@ class LimitScope(StrEnum):
     HOURLY = "Hourly"
 
 
+class ModuleExecutionOutcome(StrEnum):
+    """Structured outcomes consumed by the Scheduler Loop."""
+
+    SUCCESS = "SUCCESS"
+    NO_CANDIDATES = "NO_CANDIDATES"
+    SCROLL_BLOCK = "SCROLL_BLOCK"
+    DAILY_LIMIT_REACHED = "DAILY_LIMIT_REACHED"
+    ACTION_BLOCK = "ACTION_BLOCK"
+
+
 @dataclass(frozen=True, slots=True)
 class ModuleBudget:
     """Current scheduler budget for one enabled interaction module."""
@@ -55,6 +65,7 @@ class ModuleExecutionResult:
     execution_finished: bool
     next_module_state: ModuleState
     detail: str | None = None
+    outcome: ModuleExecutionOutcome = ModuleExecutionOutcome.SUCCESS
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,3 +78,13 @@ class SchedulerResult:
     execution_finished: bool
     next_module_state: ModuleState | None
     detail: str | None = None
+    outcome: ModuleExecutionOutcome | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SchedulerLoopResult:
+    """Terminal report for one persistent account-session scheduler loop."""
+
+    cycles: tuple[SchedulerResult, ...]
+    session_ended: bool
+    initial_dm_executed: bool

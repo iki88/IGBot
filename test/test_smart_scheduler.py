@@ -9,6 +9,7 @@ from IGBot.runtime.scheduler import (
     BudgetCalculator,
     ExecutionBudget,
     ExecutionCoordinator,
+    ModuleExecutionOutcome,
     ModuleExecutionResult,
     ModulePoolBuilder,
     ModuleSelector,
@@ -191,6 +192,7 @@ def test_scheduler_framework_returns_structured_cycle_result(tmp_path):
         execution_finished=True,
         next_module_state=ModuleState.BACKOFF,
         detail="Source exhausted.",
+        outcome=ModuleExecutionOutcome.SUCCESS,
     )
     executor = RecordingExecutor(execution)
     scheduler = Scheduler(
@@ -215,6 +217,7 @@ def test_scheduler_framework_returns_structured_cycle_result(tmp_path):
         execution_finished=True,
         next_module_state=ModuleState.BACKOFF,
         detail="Source exhausted.",
+        outcome=ModuleExecutionOutcome.SUCCESS,
     )
     assert executor.calls[0][0] is context
     assert executor.calls[0][1] is selected

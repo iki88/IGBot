@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from datetime import datetime
 from typing import Protocol
 
 from IGBot.runtime.context import RuntimeContext
@@ -74,6 +75,22 @@ class BudgetedRuntimeModule(RuntimeModule, Protocol):
         """Return the authoritative remaining daily allowance."""
         ...
 
+    def start(self) -> object:
+        """Enter RUNNING through the module-owned state machine."""
+        ...
+
+    def mark_ready(self) -> object:
+        """Return completed work to READY when currently RUNNING."""
+        ...
+
+    def enter_backoff(self, backoff_until: datetime) -> object:
+        """Enter BACKOFF until the supplied UTC boundary."""
+        ...
+
+    def mark_daily_limit_reached(self) -> object:
+        """Enter DAILY_LIMIT_REACHED."""
+        ...
+
 
 class ModuleProvider(Protocol):
     """Supply modules belonging to the current RuntimeContext."""
@@ -93,4 +110,12 @@ class ModuleExecutor(Protocol):
         budget: ExecutionBudget,
     ) -> ModuleExecutionResult:
         """Execute an already selected module through its provider."""
+        ...
+
+
+class SessionActivityProvider(Protocol):
+    """Report whether SessionController still owns an active session."""
+
+    def is_active(self, context: RuntimeContext) -> bool:
+        """Return false as soon as the scheduled session ends."""
         ...

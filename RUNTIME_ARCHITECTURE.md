@@ -395,9 +395,31 @@ clamps it to the selected module's authoritative remaining Daily Limit.
 `ExecutionCoordinator` delegates the resulting request through a provider-neutral
 execution contract without implementing module behavior. `Scheduler` composes
 those services for one evaluation cycle and returns a structured
-`SchedulerResult` containing selection, budget, execution boundaries, and the
-reported next module state. Persistent looping, rotation policy, priorities,
-weights, hooks, and recovery remain later scheduler/runtime responsibilities.
+`SchedulerResult` containing selection, budget, execution boundaries, the
+structured execution outcome, and the reported next module state.
+
+`SchedulerLoop` owns persistent cycle orchestration. It obtains the session's
+modules once from a provider, checks `SessionController.is_active()` before every
+bounded execution cycle, builds the eligible pool, selects a module, resolves its
+budget, coordinates execution, applies the returned outcome, and repeats. An
+inactive session stops admission immediately; unfinished module budgets never
+start another cycle. Execution providers remain responsible for honoring session
+cancellation while a bounded call is already in progress.
+
+The loop consumes these provider-neutral outcomes:
+
+- `SUCCESS` returns a completed running module to `READY`.
+- `NO_CANDIDATES` places only that module in a randomized 15–20 minute backoff.
+- `SCROLL_BLOCK` places only that module in a 60 minute backoff.
+- `DAILY_LIMIT_REACHED` removes that module from the eligible pool for the day.
+- `ACTION_BLOCK` is handed to `RecoveryController`; it is not converted into a
+  module state by the scheduler.
+
+If no module is eligible, the loop remains alive, waits briefly, and reevaluates
+until the session ends. If Startup Result reports newly discovered followers and
+DM is enabled and eligible, the loop executes exactly one initial DM cycle before
+normal unweighted random rotation. Startup priority is consumed once even when DM
+is not eligible, so it cannot stall normal scheduling.
 
 ### Selection policy
 

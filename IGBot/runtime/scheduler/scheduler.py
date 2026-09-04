@@ -9,7 +9,7 @@ from IGBot.runtime.context import RuntimeContext
 from IGBot.runtime.scheduler.budget import BudgetCalculator
 from IGBot.runtime.scheduler.contracts import BudgetedRuntimeModule
 from IGBot.runtime.scheduler.execution import ExecutionCoordinator
-from IGBot.runtime.scheduler.models import SchedulerResult
+from IGBot.runtime.scheduler.models import ModuleExecutionOutcome, SchedulerResult
 from IGBot.runtime.scheduler.pool import ModulePoolBuilder
 from IGBot.runtime.scheduler.selector import ModuleSelector
 
@@ -49,6 +49,35 @@ class Scheduler:
             )
 
         selected = cast(BudgetedRuntimeModule, selected)
+        return self.evaluate_selected(context, selected)
+
+    def select(
+        self, modules: Iterable[BudgetedRuntimeModule]
+    ) -> BudgetedRuntimeModule | None:
+        """Build the eligible pool and select one module without executing it."""
+
+        pool = self._pool_builder.build(modules)
+        selected = self._selector.select(pool)
+        return cast(BudgetedRuntimeModule | None, selected)
+
+    def evaluate_selected(
+        self,
+        context: RuntimeContext,
+        selected: BudgetedRuntimeModule,
+        *,
+        start_module: bool = False,
+    ) -> SchedulerResult:
+        """Budget and coordinate one already selected eligible module."""
+
+        if not selected.is_eligible():
+            return SchedulerResult(
+                selected_module=None,
+                budget=None,
+                execution_started=False,
+                execution_finished=False,
+                next_module_state=selected.state,
+                detail="Selected module is not eligible.",
+            )
         budget = self._budget_calculator.calculate(selected)
         if budget.final == 0:
             return SchedulerResult(
@@ -58,8 +87,11 @@ class Scheduler:
                 execution_finished=False,
                 next_module_state=selected.state,
                 detail="Daily limit reached.",
+                outcome=ModuleExecutionOutcome.DAILY_LIMIT_REACHED,
             )
 
+        if start_module:
+            selected.start()
         execution = self._execution_coordinator.coordinate(context, selected, budget)
         return SchedulerResult(
             selected_module=selected.module,
@@ -68,4 +100,5 @@ class Scheduler:
             execution_finished=execution.execution_finished,
             next_module_state=execution.next_module_state,
             detail=execution.detail,
+            outcome=execution.outcome,
         )
