@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from IGBot.runtime.follower_synchronization.models import (
+        FollowerSynchronizationResult,
+    )
 
 
 class StartupStageName(StrEnum):
@@ -46,6 +52,7 @@ class StartupStageResult:
     account_verification: AccountVerificationState | None = None
     detected_username: str | None = None
     new_followers_found: int | None = None
+    follower_synchronization: FollowerSynchronizationResult | None = None
 
     def __post_init__(self) -> None:
         if self.new_followers_found is not None and self.new_followers_found < 0:
@@ -63,3 +70,4 @@ class StartupResult:
     startup_failed: bool
     stage_results: tuple[StartupStageResult, ...]
     failure_reason: str | None = None
+    follower_synchronization: FollowerSynchronizationResult | None = None

@@ -212,6 +212,16 @@ detection are outcomes of the same scan, never separate passes. Internet waiting
 account verification, launch work, and Follower Synchronization are startup stages,
 not Runtime Hooks and not scheduler modules.
 
+Follower Synchronization is bounded by the positive session-scoped
+`follower_synchronization_limit`; no fallback number is embedded in the Android
+reader. The reader uses stable Instagram resource IDs exposed by UIAutomator2,
+never OCR or inferred/truncated usernames. It updates only the per-account
+Runtime Database `users` and `follow` repositories in one transaction. Existing
+Follow records receive UTC follow-back state, while previously unknown followers
+are inserted as `ORGANIC` discoveries. Its structured result reports scan
+completion, follow-back updates, organic discoveries, and whether the bound was
+reached.
+
 Failures are classified as fatal, retryable, operator-blocked, or optional. A
 missing Application ID is fatal. A username mismatch is operator-blocked and enters
 `WaitingForOperator` immediately without recovery. A temporarily unavailable

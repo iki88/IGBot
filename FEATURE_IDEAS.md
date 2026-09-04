@@ -45,6 +45,41 @@ Future scheduler improvements will be collected here.
 - Save Posts — Future IGBot Runtime Extension allowing operators to enable automatic saving of liked posts with a configurable chance, such as `Save Posts` and `Chance to Save Posts: 1%`.
 - Replace the free-text Allowed Alphabets editor with a checklist for Latin, Cyrillic, Arabic, Greek, Hebrew, and Chinese/Japanese/Korean.
 
+### DM Module
+
+#### Start DM From Date
+
+Optional operator filter.
+
+Default: Disabled.
+
+When enabled, the DM module will send Direct Messages only to users whose:
+
+users.first_seen >= selected date
+
+Purpose:
+
+- Ignore followers acquired before a chosen date.
+- Skip previously purchased or fake followers.
+- Start welcome-message campaigns only for newly acquired followers.
+- Resume DM campaigns without messaging historical followers.
+
+Implementation:
+
+UI:
+
+☐ Start DM From Date
+
+[ Date Picker ]
+
+Runtime:
+
+The DM module filters eligible users using:
+
+users.first_seen >= selected_date
+
+This feature is optional and disabled by default.
+
 ## User Experience
 
 Future workflow improvements will be collected here.

@@ -29,17 +29,20 @@ class StartupPipeline:
         instagram_launcher: StartupStage,
         account_verifier: StartupStage,
         stages: Iterable[StartupStage] = (),
+        *,
+        follower_synchronization: StartupStage | None = None,
     ) -> StartupPipeline:
         """Fix the implemented startup stages in authoritative order."""
-        return cls(
-            (
-                internet_checker,
-                airplane_mode_controller,
-                instagram_launcher,
-                account_verifier,
-                *stages,
-            )
-        )
+        ordered = [
+            internet_checker,
+            airplane_mode_controller,
+            instagram_launcher,
+            account_verifier,
+        ]
+        if follower_synchronization is not None:
+            ordered.append(follower_synchronization)
+        ordered.extend(stages)
+        return cls(ordered)
 
     @property
     def stages(self) -> tuple[StartupStage, ...]:
@@ -85,6 +88,14 @@ class StartupPipeline:
             startup_failed=failed_result is not None,
             stage_results=stage_results,
             failure_reason=failed_result.detail if failed_result else None,
+            follower_synchronization=next(
+                (
+                    result.follower_synchronization
+                    for result in reversed(stage_results)
+                    if result.follower_synchronization is not None
+                ),
+                None,
+            ),
         )
 
     @staticmethod
