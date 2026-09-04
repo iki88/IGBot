@@ -20,6 +20,7 @@ from IGBot.runtime.startup import StartupStageName
 RUNTIME_MODULES = (
     "IGBot.runtime",
     "IGBot.runtime.compatibility",
+    "IGBot.runtime.database",
     "IGBot.runtime.hooks",
     "IGBot.runtime.logging",
     "IGBot.runtime.network",

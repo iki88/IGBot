@@ -764,6 +764,35 @@ history. Shared profile facts discovered during an interaction are submitted
 separately to GlobalDatabaseWriter. Account transfer or archive changes assignment
 and availability; it does not merge one account's Runtime Database into another.
 
+The database file is named `runtime.db`. Its frozen schema has exactly six tables:
+`users`, `follow`, `like`, `comment`, `story`, and `dm`. `users` contains only the
+shared target identity, UTC first-seen time, and `first_discovered_by` provenance.
+Every module table independently owns its `source`, aggregate interaction state,
+UTC timestamps, and follow-back state where applicable. Follow also owns Unfollow
+state because both describe the same relationship lifecycle. DM retains only the
+latest message and reply; Instagram remains the conversation source of truth.
+Runtime components never execute SQL directly. A connection-owning
+`RuntimeDatabase` initializes the schema and exposes one independent repository
+per table.
+
+The frozen columns are:
+
+- `users`: `id`, `username`, `first_seen`, `first_discovered_by`;
+- `follow`: `user_id`, `source`, `follow_date`, `follow_back`,
+  `follow_back_date`, `unfollowed`, `unfollow_date`, `last_session_id`;
+- `like`: `user_id`, `source`, `likes_count`, `last_like_date`, `follow_back`,
+  `follow_back_date`;
+- `comment`: `user_id`, `source`, `comments_count`, `last_comment_date`,
+  `follow_back`, `follow_back_date`;
+- `story`: `user_id`, `source`, `story_views_count`, `last_story_date`,
+  `follow_back`, `follow_back_date`;
+- `dm`: `user_id`, `source`, `dm_count`, `last_dm_date`, `last_message`,
+  `last_reply`.
+
+All date and time values use UTC ISO-8601 representation. Each module has an
+independent repository; there is no shared module repository or SQL access from
+runtime components.
+
 ### GlobalDatabaseWriter
 
 GlobalDatabaseWriter is the only component permitted to write to the Global User
