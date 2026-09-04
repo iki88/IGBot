@@ -24,6 +24,7 @@ RUNTIME_MODULES = (
     "IGBot.runtime.follower_synchronization",
     "IGBot.runtime.hooks",
     "IGBot.runtime.logging",
+    "IGBot.runtime.modules",
     "IGBot.runtime.network",
     "IGBot.runtime.recovery",
     "IGBot.runtime.scheduler",

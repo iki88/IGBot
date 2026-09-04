@@ -66,8 +66,7 @@ buttons.
   `WaitingForOperator`, `Stopping`, `Completed`, `Failed`, `Cancelled`.
 - Account availability: `Ready`, `Scheduled`, `Paused`, `Blocked`,
   `WaitingForOperator`, `Archived`.
-- Module: `Disabled`, `Ready`, `Running`, `CoolingDown`, `LimitReached`, `Blocked`,
-  `Failed`.
+- Module: `READY`, `RUNNING`, `BACKOFF`, `DAILY_LIMIT_REACHED`, `DISABLED`.
 - Runtime Hook invocation: `Triggered`, `Running`, `Completed`, `Failed`.
 
 State changes are published as events to the UI, audit log, statistics store, and
@@ -371,6 +370,16 @@ A module cannot run an unbounded source loop. It returns control after its slice
 the scheduler can rotate, observe stop requests, enforce global policy, and decide
 whether the current source should continue scrolling or yield to another source or
 module.
+
+Every Follow, Like, Comment, Story, and DM module uses one shared Module State
+Machine. The module owns its state; the scheduler sees only the common
+`is_eligible()` contract. Eligibility requires `READY`, operator enablement, valid
+configuration, an unexhausted daily limit, and no active backoff. `backoff_until`
+is module metadata rather than a state: once the injected UTC clock reaches it,
+the module returns from `BACKOFF` to `READY`. `DAILY_LIMIT_REACHED` similarly
+returns to `READY` on the next UTC day. Recovery states such as
+`WAITING_FOR_OPERATOR`, `ACCOUNT_PAUSED`, and `SESSION_FAILED` are account/session
+recovery concerns and never module states.
 
 A Module Budget defines the maximum number of actions assigned to that module
 before the scheduler rotates. A fixed budget uses that action count. A ranged

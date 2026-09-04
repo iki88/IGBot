@@ -56,15 +56,13 @@ class SessionState(StrEnum):
 
 
 class ModuleState(StrEnum):
-    """Availability of an interaction module within a session."""
+    """Unified lifecycle state of every interaction module."""
 
-    DISABLED = "Disabled"
-    READY = "Ready"
-    RUNNING = "Running"
-    COOLING_DOWN = "CoolingDown"
-    LIMIT_REACHED = "LimitReached"
-    BLOCKED = "Blocked"
-    FAILED = "Failed"
+    READY = "READY"
+    RUNNING = "RUNNING"
+    BACKOFF = "BACKOFF"
+    DAILY_LIMIT_REACHED = "DAILY_LIMIT_REACHED"
+    DISABLED = "DISABLED"
 
 
 class HookState(StrEnum):
