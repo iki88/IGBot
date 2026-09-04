@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Protocol
 
 from IGBot.runtime.context import RuntimeContext
-from IGBot.runtime.scheduler.models import ModuleBudget, SchedulingDecision
+from IGBot.runtime.modules import RuntimeModule
+from IGBot.runtime.scheduler.models import (
+    ExecutionBudget,
+    ModuleBudget,
+    ModuleExecutionResult,
+    SchedulingDecision,
+)
 
 
 class SchedulerEntryPoint(Protocol):
@@ -52,4 +58,39 @@ class SchedulerController(SchedulerEntryPoint, Protocol):
 
     def request_stop(self, context: RuntimeContext) -> None:
         """Request an orderly scheduler stop."""
+        ...
+
+
+class BudgetedRuntimeModule(RuntimeModule, Protocol):
+    """Scheduler inputs exposed uniformly by an interaction module."""
+
+    @property
+    def budget_configuration(self) -> int | str:
+        """Return a fixed budget or inclusive range expression."""
+        ...
+
+    @property
+    def daily_remaining(self) -> int:
+        """Return the authoritative remaining daily allowance."""
+        ...
+
+
+class ModuleProvider(Protocol):
+    """Supply modules belonging to the current RuntimeContext."""
+
+    def modules_for(self, context: RuntimeContext) -> Iterable[BudgetedRuntimeModule]:
+        """Return the session's interaction modules."""
+        ...
+
+
+class ModuleExecutor(Protocol):
+    """Future execution boundary consumed by ExecutionCoordinator."""
+
+    def execute(
+        self,
+        context: RuntimeContext,
+        module: BudgetedRuntimeModule,
+        budget: ExecutionBudget,
+    ) -> ModuleExecutionResult:
+        """Execute an already selected module through its provider."""
         ...

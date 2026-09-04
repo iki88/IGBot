@@ -387,6 +387,18 @@ budget resolves one value within the inclusive range according to the session's
 randomization policy and records the resolved value for auditability. A budget is
 never permission to exceed a daily or hourly limit.
 
+The scheduler framework separates five responsibilities. `ModulePoolBuilder`
+collects modules and includes only those whose common `is_eligible()` contract
+returns true. `ModuleSelector` performs an unweighted random choice from that
+pool. `BudgetCalculator` resolves a positive fixed value or inclusive range and
+clamps it to the selected module's authoritative remaining Daily Limit.
+`ExecutionCoordinator` delegates the resulting request through a provider-neutral
+execution contract without implementing module behavior. `Scheduler` composes
+those services for one evaluation cycle and returns a structured
+`SchedulerResult` containing selection, budget, execution boundaries, and the
+reported next module state. Persistent looping, rotation policy, priorities,
+weights, hooks, and recovery remain later scheduler/runtime responsibilities.
+
 ### Selection policy
 
 The scheduler follows these rules in order:

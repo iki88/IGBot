@@ -6,11 +6,17 @@ from datetime import datetime
 from typing import Protocol
 
 from IGBot.runtime.context import RuntimeContext
+from IGBot.runtime.modules.state_machine import InteractionModule
 from IGBot.runtime.state import ModuleState
 
 
 class RuntimeModule(Protocol):
     """State surface exposed by every interaction module to scheduling."""
+
+    @property
+    def module(self) -> InteractionModule:
+        """Return the stable interaction-module identity."""
+        ...
 
     @property
     def context(self) -> RuntimeContext:
