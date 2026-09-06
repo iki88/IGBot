@@ -319,8 +319,8 @@ bounded execution slice. Modules define goals and capabilities; they do not deci
 global ordering. The scheduler is the heart of a running Account Session.
 
 It exclusively owns module rotation, interaction budgets, daily and hourly limit
-enforcement, module priorities, safe randomization, scrolling decisions, and the
-resulting execution order.
+enforcement, module priorities, safe randomization, and the resulting execution
+order. Candidate discovery and source navigation remain below the scheduler.
 
 The scheduler replaces a fixed sequence such as running every Follow action before
 every Like action.
@@ -371,6 +371,140 @@ the scheduler can rotate, observe stop requests, enforce global policy, and deci
 whether the current source should continue scrolling or yield to another source or
 module.
 
+### Candidate providers
+
+Candidate discovery is a module-owned boundary below the scheduler. The shared
+`CandidateProvider` contract exposes
+`next_candidate(RuntimeContext) -> CandidateResult`. Runtime modules choose and
+call providers; the scheduler never calls, configures, or inspects one.
+
+The framework separates these responsibilities:
+
+- `FollowersProvider` discovers accounts from configured followers lists.
+- `SpecificAccountsProvider` discovers accounts from an explicit username list.
+- `CandidateQualifier` applies Runtime Database history exclusion, visible
+  qualification rules, and optional profile-level filters in that order.
+- `Candidate` contains only discovered account identity and provenance: username,
+  optional display name, source, and provider type. It contains no interaction,
+  limit, database-record, or scheduler state.
+- `CandidateResult` returns one structured discovery outcome and optional valid
+  Candidate without changing module or scheduler state.
+
+`FollowersProvider` progresses through module-configured source accounts, requests
+that its injected platform discovery boundary open each followers list, and passes
+the configured source-scrolling timeout and Random Search Letters policy into each
+bounded follower read. Visible-source filters run before any profile navigation.
+When biography filtering is enabled, the shared qualifier requests a biography
+through a separate profile-reader boundary and applies the biography filter only
+after visible filters accept the account. The production Android discovery and
+profile-reader adapters use UIAutomator2; those platform details do not leak into
+the provider contract.
+
+Normal scrolling and Random Search Letters are alternative tools within the
+FollowersProvider search strategy. Random Search Letters are not mandatory for
+every source. A smaller source may use bounded normal scrolling exclusively; a
+larger source may use configured random prefixes to enter different areas of the
+followers list before continuing bounded discovery. Neither strategy permits
+unbounded scrolling or bypasses source timeout, cancellation, filtering, or
+history checks.
+
+Before returning a Candidate, FollowersProvider must respect the current module's
+Per-Account Runtime Database history and exclude users that module has already
+processed. The provider and CandidateQualifier do not execute SQL directly; the
+owning module supplies a repository-backed history boundary scoped to its own
+module table.
+
+`SpecificAccountsProvider` advances through its module-configured username list,
+opens one account through an injected discovery boundary, and applies the same
+shared qualification workflow. It has no followers-list scrolling, scrolling
+timeout, or Random Search Letters behavior. It maintains a durable progress cursor
+and resumes after the last processed username in later sessions. Starting a new
+session does not implicitly reset the cursor. It also uses the current module's
+repository-backed history boundary and skips usernames already processed by that
+module.
+
+Exhausted-list repetition is explicitly outside CandidateProvider responsibility.
+`Repeat Source List` is an owning-module policy that may instruct a provider to
+start another traversal; the provider never decides to reset itself. Version 1
+defaults are:
+
+- Follow: Repeat Source List disabled.
+- Like: Repeat Source List enabled.
+- Comment: Repeat Source List enabled.
+- Story: Repeat Source List enabled.
+
+A repeated traversal still respects that module's Runtime Database history and
+does not make a previously processed user eligible by itself.
+
+Providers return only structured discovery outcomes: `CANDIDATE_FOUND`,
+`CURRENT_SOURCE_EXHAUSTED`, `ALL_SOURCES_EXHAUSTED`, `SCROLL_BLOCK`, or
+`FILTER_REJECTED`. They never perform Follow, Like, Comment, Story, or DM actions;
+write SQL; change module state; apply scheduler backoff; or communicate with the
+scheduler. The owning runtime module selects and owns its provider, interprets the
+provider result, performs any interaction through its execution boundary, and
+returns only `ModuleExecutionResult` to the scheduler. Provider instances are
+session/module scoped because their source cursors are mutable and must never be
+shared between concurrent account sessions.
+
+### Follow module preparation boundary
+
+The Runtime Follow Module owns a bounded pre-interaction workflow:
+
+```text
+Scheduler selects Follow
+  -> Follow Module requests CandidateProvider
+  -> Candidate Provider returns discovery result
+  -> open the discovered Candidate profile
+  -> FollowCandidateQualifier applies Follow settings
+       -> username filter
+       -> display-name filter
+       -> biography filter
+       -> private-account policy
+  -> when enabled, dispatch the Profile Opened event for Contact Scraping
+  -> return READY_TO_FOLLOW
+```
+
+Candidate discovery remains entirely inside CandidateProvider. Profile opening is
+an injected provider boundary, and qualification is side-effect free. Contact
+Scraping runs inline through HookManager only when its Global setting is enabled;
+the Follow Module neither implements scraping nor writes its result directly.
+
+The pre-interaction domain outcomes are `READY_TO_FOLLOW`, `FILTER_REJECTED`,
+`PRIVATE_SKIPPED`, `NO_CANDIDATES`, and `SCROLL_BLOCK`. They are carried inside a
+structured `ModuleExecutionResult` while scheduler-control outcomes remain
+separate. `NO_CANDIDATES` and `SCROLL_BLOCK` map to their scheduler backoff facts;
+filter and private-account rejection simply complete the bounded preparation
+cycle. `READY_TO_FOLLOW` means only that a candidate profile passed preparation.
+It is not a Follow attempt or success and consumes no Follow success limit.
+
+This preparation boundary performs no Follow tap, button verification, Ghost
+Block detection, Runtime Database update, Global User Database update, analytics
+update, or scheduler decision.
+
+### Follow module confirmation and Ghost Block detection
+
+The Follow Module owns the Follow interaction and its confirmation. Tapping Follow
+is an attempt, not a successful action. A Follow is counted and committed to
+limits and Runtime Database history only after button-state verification confirms
+`Following`.
+
+When Global Ghost Block Detection is enabled, confirmation uses this sequence:
+
+```text
+Tap Follow
+  -> verify the button becomes Following
+  -> wait the configured Verification Delay
+  -> verify the button remains Following
+  -> if the state reverted, report Ghost Block
+  -> otherwise confirm Follow success
+```
+
+Ghost Block detection belongs to the Follow Module because it observes the result
+of that module's action. The module reports the structured failure and evidence;
+RecoveryManager owns pause, retry, account recovery, and resume policy. Ghost
+Block is independent from Instagram's Try Again Later detection: either signal may
+occur without the other and they must remain separately classified and audited.
+
 Every Follow, Like, Comment, Story, and DM module uses one shared Module State
 Machine. The module owns its state; the scheduler sees only the common
 `is_eligible()` contract. Eligibility requires `READY`, operator enablement, valid
@@ -412,8 +546,14 @@ The loop consumes these provider-neutral outcomes:
 - `NO_CANDIDATES` places only that module in a randomized 15–20 minute backoff.
 - `SCROLL_BLOCK` places only that module in a 60 minute backoff.
 - `DAILY_LIMIT_REACHED` removes that module from the eligible pool for the day.
-- `ACTION_BLOCK` is handed to `RecoveryController`; it is not converted into a
+- `ACTION_BLOCK` is handed to `RecoveryManager`; it is not converted into a
   module state by the scheduler.
+
+Backoff duration is exclusively scheduler policy. `ExecutionCoordinator` and its
+execution provider report facts only; they never select a duration or mutate
+module backoff metadata. `NO_CANDIDATES` maps to a randomized 15–20 minute module
+backoff, `SCROLL_BLOCK` maps to a 60 minute module backoff, and `ACTION_BLOCK`
+transfers to RecoveryManager for the configured Global pause policy.
 
 If no module is eligible, the loop remains alive, waits briefly, and reevaluates
 until the session ends. If Startup Result reports newly discovered followers and
@@ -438,10 +578,11 @@ The scheduler follows these rules in order:
 8. Update budgets, cooldowns, statistics, and health state.
 9. Evaluate the returned module and hook results before rotating again.
 
-Randomization changes selection among safe eligible choices. Scrolling policy
-decides whether a module continues the current source, uses a configured discovery
-strategy, changes source, or yields its slice. Neither randomization nor scrolling
-policy may bypass limits, schedules, safety rules, or event priority.
+Randomization changes selection among safe eligible choices. The selected module
+and its Candidate Provider decide whether discovery continues the current source,
+uses a configured search strategy, changes source, or returns a provider outcome.
+Neither randomization nor candidate discovery may bypass limits, schedules, safety
+rules, or event priority.
 
 Priority order is absolute: Account Session end time, safety and stop conditions,
 daily limit, hourly limit, then Module Budget and selection policy. Unfinished
@@ -525,6 +666,20 @@ They are not the authoritative daily ledger and must be set so they cannot permi
 IGBot to exceed its own allowance.
 
 ## 6. Runtime Recovery
+
+### Global Runtime Safety policy
+
+Global Settings own application-wide Runtime Safety policy. Ghost Block Detection
+is enabled by default. Its Verification Delay defaults to 2 seconds and defines
+the pause between the Follow Module's first `Following` observation and its second
+confirmation. The delay is a safety verification interval, not an interaction
+delay and not a scheduler backoff.
+
+Ghost Block Detection and Try Again Later detection are independent settings and
+runtime signals. Ghost Block detects a Follow button that initially changes to
+`Following` and then reverts. Try Again Later detects Instagram's explicit
+restriction surface. They retain separate evidence, outcomes, and recovery
+classification.
 
 ### Recovery model
 
@@ -956,7 +1111,7 @@ does not own interaction history or perform Android work.
 Atomically reserves, commits, releases, resets, and reports daily, hourly, session,
 source, retry, and safety allowances.
 
-### Recovery Coordinator
+### RecoveryManager
 
 Classifies failures, captures diagnostics, executes bounded recovery plans, and
 returns a verified result to the Account Session.
@@ -990,8 +1145,8 @@ events. Live Log is one consumer. It is not the runtime data store.
 4. **Modules define goals.** They expose eligibility and bounded work; they do not
    control the session or each other.
 5. **The Smart Interaction Scheduler owns execution order.** Rotation, priorities,
-   budgets, daily and hourly limits, cooldowns, randomization, and scrolling
-   decisions are centralized.
+   budgets, daily and hourly limits, cooldowns, randomization, and scheduler
+   backoff policy are centralized. It never discovers candidates.
 6. **Runtime Hooks respond inline.** They handle events encountered during module
    execution and immediately return control. They never interrupt or replace the
    scheduler.
@@ -1044,6 +1199,18 @@ events. Live Log is one consumer. It is not the runtime data store.
 25. **Every component has one responsibility.** Context sharing does not permit a
     stage, module, hook, recovery strategy, adapter, or logger to assume another
     subsystem's ownership.
+26. **Modules own interactions.** They choose providers, perform bounded actions,
+    verify outcomes, update module history, and report structured execution
+    results.
+27. **Candidate Providers own discovery.** They navigate configured sources,
+    qualify candidates, and return structured discovery results without performing
+    interactions or changing scheduler state.
+28. **RecoveryManager owns account recovery.** Modules detect and report failures;
+    pause, retry, recovery, and resume decisions remain outside modules and
+    providers.
+29. **Global Settings own Runtime Safety policy.** Shared detection switches,
+    verification delays, pause durations, and safety thresholds are authoritative
+    global configuration rather than provider decisions.
 
 ### Execution-stage summary
 

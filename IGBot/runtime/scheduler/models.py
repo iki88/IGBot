@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Protocol
 
 from IGBot.runtime.modules import InteractionModule
 from IGBot.runtime.state import ModuleState
@@ -25,6 +26,15 @@ class ModuleExecutionOutcome(StrEnum):
     SCROLL_BLOCK = "SCROLL_BLOCK"
     DAILY_LIMIT_REACHED = "DAILY_LIMIT_REACHED"
     ACTION_BLOCK = "ACTION_BLOCK"
+
+
+class ModuleDomainResult(Protocol):
+    """Module-specific structured result carried through scheduling."""
+
+    @property
+    def status(self) -> str:
+        """Return the module-owned outcome identity."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +76,7 @@ class ModuleExecutionResult:
     next_module_state: ModuleState
     detail: str | None = None
     outcome: ModuleExecutionOutcome = ModuleExecutionOutcome.SUCCESS
+    module_result: ModuleDomainResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +90,7 @@ class SchedulerResult:
     next_module_state: ModuleState | None
     detail: str | None = None
     outcome: ModuleExecutionOutcome | None = None
+    module_result: ModuleDomainResult | None = None
 
 
 @dataclass(frozen=True, slots=True)

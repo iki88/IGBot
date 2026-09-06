@@ -101,4 +101,5 @@ class Scheduler:
             next_module_state=execution.next_module_state,
             detail=execution.detail,
             outcome=execution.outcome,
+            module_result=execution.module_result,
         )
