@@ -481,6 +481,54 @@ This preparation boundary performs no Follow tap, button verification, Ghost
 Block detection, Runtime Database update, Global User Database update, analytics
 update, or scheduler decision.
 
+### Android Follow execution provider
+
+`AndroidFollowProvider` is the UIAutomator2 execution boundary for Follow-related
+Android navigation and button operations. It contains no filtering, scheduler,
+database, analytics, recovery, or InstaAddict logic. The runtime decides when an
+operation is permitted; the provider executes only the requested UI action and
+returns an Android-specific structured result.
+
+Source navigation opens Search, enters the configured source username, and opens
+an immediately visible result only when its username matches exactly. Otherwise it
+submits Search, selects Accounts, and again requires an exact username match.
+Result ordering is never treated as identity. Failure to find an exact account
+returns `SOURCE_NOT_FOUND`.
+
+The provider exposes bounded UI actions for opening Followers, tapping See More,
+entering a Random Search Letters prefix chosen by FollowersProvider, performing
+one followers-list scroll, opening one exact candidate profile, and returning one
+navigation level to the existing followers list. It does not choose scrolling
+strategy, timeout, prefix, source, or candidate. Returning with Android Back avoids
+reopening the followers list and preserves its position whenever Instagram retains
+that view state.
+
+Candidate profile inspection implements the Follow Module profile-provider
+contract and returns only the username, display name, biography, and private state
+needed by the runtime qualifier. It does not repeat or interpret filtering rules.
+When Contact is available and the runtime requests contact collection, the Android
+provider opens the Contact surface, passes its hierarchy to the injected
+`ContactScraper`, closes the surface in a guaranteed cleanup path, and returns to
+the profile. Missing Contact returns `CONTACT_NOT_AVAILABLE`; neither path writes
+data.
+
+Follow execution first observes the exact button state. `Following`, `Requested`,
+and `Follow back` are never tapped and return `ALREADY_FOLLOWING`, `REQUESTED`, or
+`FOLLOW_BACK`. Only an observed `Follow` state is tapped. After the configured
+verification delay (default 2 seconds), `Following` returns `SUCCESS`, `Requested`
+returns `REQUESTED`, and a reverted `Follow` returns
+`GHOST_BLOCK_DETECTED`. An unavailable or unverified state returns `FOLLOW_FAILED`.
+The provider then navigates back to the followers list exactly once while
+preserving the interaction outcome. It only detects Ghost Block; RecoveryManager
+owns all response policy.
+
+The complete Android result vocabulary is `SUCCESS`, `REQUESTED`,
+`ALREADY_FOLLOWING`, `FOLLOW_BACK`, `PRIVATE_SKIPPED`, `SOURCE_NOT_FOUND`,
+`CONTACT_SCRAPED`, `CONTACT_NOT_AVAILABLE`, `GHOST_BLOCK_DETECTED`, and
+`FOLLOW_FAILED`. `PRIVATE_SKIPPED` is available for runtime result translation but
+is not decided by the Android provider because private-account policy belongs to
+Follow qualification.
+
 ### Follow module confirmation and Ghost Block detection
 
 The Follow Module owns the Follow interaction and its confirmation. Tapping Follow
