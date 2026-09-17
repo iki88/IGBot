@@ -7,6 +7,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
+from IGBot.runtime.database.migrations import migrate_runtime_schema
 from IGBot.runtime.database.repositories import (
     CommentRepository,
     DMRepository,
@@ -50,6 +51,7 @@ class RuntimeDatabase:
             self.story,
             self.dm,
         )
+        migrate_runtime_schema(self._connection, repositories)
         with self._connection:
             for repository in repositories:
                 repository.initialize_schema()

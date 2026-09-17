@@ -51,7 +51,7 @@ class FollowerSynchronization:
         except ValueError as error:
             return self._failed(context, str(error))
 
-        context.logger.info("Follower Synchronization started", limit=limit)
+        context.logger.info("Follower Synchronization", status="started", limit=limit)
         try:
             read_result = self._reader.read(context, limit)
         except Exception as error:  # noqa: BLE001 - provider isolation boundary
@@ -89,8 +89,8 @@ class FollowerSynchronization:
             limit_reached=read_result.limit_reached,
         )
         context.logger.info(
-            "Follower Synchronization completed",
-            scanned=result.scanned_count,
+            "Follower Synchronization complete",
+            followers=result.scanned_count,
             follow_back_updates=result.follow_back_updates,
             organic_followers=len(result.newly_discovered_organic_followers),
             limit_reached=result.limit_reached,

@@ -53,6 +53,10 @@ class RecordingApplicationProvider:
         self.calls.append(("launch", context, package))
         return self.launch_result
 
+    def force_stop(self, context, package):
+        self.calls.append(("force_stop", context, package))
+        return ApplicationLaunchResult(True)
+
     def foreground(self, context):
         self.calls.append(("foreground", context))
         return self.foreground_result
@@ -84,14 +88,14 @@ def make_context(tmp_path, *, application_id="com.instagram.clone", delay=0):
     )
 
 
-def test_application_provider_exposes_launch_and_foreground_only():
+def test_application_provider_exposes_lifecycle_and_foreground_operations():
     methods = {
         name
         for name, value in ApplicationProvider.__dict__.items()
         if callable(value) and not name.startswith("_")
     }
 
-    assert methods == {"launch", "foreground"}
+    assert methods == {"launch", "force_stop", "foreground"}
 
 
 def test_launcher_uses_runtime_context_and_verifies_foreground(tmp_path):
@@ -228,6 +232,10 @@ def test_android_provider_launches_configured_package(tmp_path):
 
     def command_runner(command, **options):
         calls.append((command, options))
+        if "resolve-activity" in command:
+            return subprocess.CompletedProcess(
+                command, 0, "com.instagram.clone/.MainActivity\n", ""
+            )
         return subprocess.CompletedProcess(command, 0, "Status: ok", "")
 
     context = make_context(tmp_path)
@@ -237,7 +245,11 @@ def test_android_provider_launches_configured_package(tmp_path):
     ).launch(context, "com.instagram.clone")
 
     assert result == ApplicationLaunchResult(True)
-    assert calls[0][0] == [
+    assert calls[0][0][-2:] == [
+        "android.intent.category.LAUNCHER",
+        "com.instagram.clone",
+    ]
+    assert calls[1][0] == [
         "adb-test",
         "-s",
         "device-1",
@@ -245,12 +257,65 @@ def test_android_provider_launches_configured_package(tmp_path):
         "am",
         "start",
         "-W",
-        "-a",
-        "android.intent.action.MAIN",
+        "-n",
+        "com.instagram.clone/.MainActivity",
+    ]
+
+
+def test_android_provider_resolves_app_cloner_launcher_activity(tmp_path):
+    calls = []
+
+    def command_runner(command, **_options):
+        calls.append(command)
+        if "resolve-activity" in command:
+            return subprocess.CompletedProcess(command, 0, "No activity found\n", "")
+        if "query-activities" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                "com.instagram.androie/com.applisto.appcloner.classes.StartActivity\n",
+                "",
+            )
+        return subprocess.CompletedProcess(command, 0, "Status: ok", "")
+
+    context = make_context(tmp_path, application_id="com.instagram.androie")
+    result = AndroidApplicationProvider(
+        command_runner=command_runner,
+        adb_executable="adb-test",
+    ).launch(context, "com.instagram.androie")
+
+    assert result == ApplicationLaunchResult(True)
+    assert calls[-1][-2:] == [
+        "-n",
+        "com.instagram.androie/com.applisto.appcloner.classes.StartActivity",
+    ]
+
+
+def test_android_provider_uses_package_manager_fallback_without_resolved_activity(
+    tmp_path,
+):
+    calls = []
+
+    def command_runner(command, **_options):
+        calls.append(command)
+        if "resolve-activity" in command or "query-activities" in command:
+            return subprocess.CompletedProcess(command, 0, "No activity found\n", "")
+        return subprocess.CompletedProcess(command, 0, "Events injected: 1", "")
+
+    context = make_context(tmp_path, application_id="com.instagram.androie")
+    result = AndroidApplicationProvider(
+        command_runner=command_runner,
+        adb_executable="adb-test",
+    ).launch(context, "com.instagram.androie")
+
+    assert result == ApplicationLaunchResult(True)
+    assert calls[-1][-6:] == [
+        "monkey",
+        "-p",
+        "com.instagram.androie",
         "-c",
         "android.intent.category.LAUNCHER",
-        "-p",
-        "com.instagram.clone",
+        "1",
     ]
 
 

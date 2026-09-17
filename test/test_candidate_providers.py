@@ -193,6 +193,68 @@ def test_followers_provider_reports_source_progression(tmp_path):
     ]
 
 
+@pytest.mark.parametrize("failed_count", [1, 2])
+def test_followers_provider_immediately_tries_next_source_after_open_failure(
+    tmp_path, failed_count
+):
+    context = make_context(tmp_path)
+
+    class Discovery(SequenceFollowersDiscovery):
+        def open_source(self, context, source):
+            self.open_calls.append((context, source))
+            return len(self.open_calls) > failed_count
+
+    discovery = Discovery(
+        (
+            DiscoveryResult(
+                DiscoveryStatus.ACCOUNT_FOUND, CandidateObservation("target")
+            ),
+        )
+    )
+    provider = FollowersProvider(
+        ("source_one", "source_two", "source_three"),
+        discovery,
+        RecordingFilter(),
+        RecordingProfileReader(),
+        FollowersDiscoverySettings(60),
+    )
+
+    result = provider.next_candidate(context)
+
+    assert result.status is CandidateResultStatus.CANDIDATE_FOUND
+    assert result.candidate.source == (
+        "source_two" if failed_count == 1 else "source_three"
+    )
+    assert [call[1] for call in discovery.open_calls] == [
+        "source_one",
+        "source_two",
+        *(["source_three"] if failed_count == 2 else []),
+    ]
+
+
+def test_followers_provider_reports_no_candidates_only_after_every_source_fails(
+    tmp_path,
+):
+    context = make_context(tmp_path)
+    discovery = SequenceFollowersDiscovery((), openable=False)
+    provider = FollowersProvider(
+        ("source_one", "source_two"),
+        discovery,
+        RecordingFilter(),
+        RecordingProfileReader(),
+        FollowersDiscoverySettings(60),
+    )
+
+    result = provider.next_candidate(context)
+
+    assert result.status is CandidateResultStatus.ALL_SOURCES_EXHAUSTED
+    assert result.detail == "Every configured source failed: source_one, source_two"
+    assert [call[1] for call in discovery.open_calls] == ["source_one", "source_two"]
+    assert (
+        context.logger.messages[-1][1] == "[Search] All configured sources exhausted."
+    )
+
+
 def test_followers_provider_reports_scroll_block_without_scheduler_state(tmp_path):
     context = make_context(tmp_path)
     discovery = SequenceFollowersDiscovery(

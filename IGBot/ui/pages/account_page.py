@@ -214,6 +214,7 @@ class AccountPage(QWidget):
         values.update(self.story_page.values())
         values.update(self.dm_page.values())
         values.update(self.follow_page.sources.values())
+        values.update(self.follow_page.runtime_extension_values())
         return values
 
     def _source_pages(self):

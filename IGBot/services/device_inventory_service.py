@@ -143,7 +143,7 @@ class DeviceInventoryService:
         archived_directory = self._workspace_root / "archived"
         if not archived_directory.is_dir():
             return tuple(accounts)
-        for config_path in sorted(archived_directory.glob("*/config.y*ml")):
+        for config_path in sorted(archived_directory.glob("*/config.yml")):
             account = self._account_assignments._load_account(config_path)
             if account is not None:
                 accounts.append(account)

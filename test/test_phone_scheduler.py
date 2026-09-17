@@ -1,9 +1,10 @@
+import json
 import logging
 import threading
 from datetime import datetime
 
 from IGBot.core.device import AssignedAccount, DeviceRecord
-from IGBot.core.phone_scheduler import PhoneScheduler
+from IGBot.core.phone_scheduler import PhoneScheduler, RuntimeMode
 from IGBot.core.session_engine import SessionState
 
 
@@ -13,9 +14,22 @@ def account(tmp_path, username, window):
     config = directory / "config.yml"
     config.write_text(
         f'username: "{username}"\ndevice: "PHONE"\n'
-        f'app-id: "com.instagram.{username}"\nworking-hours: [{window}]\n',
+        f'app-id: "com.instagram.{username}"\n'
+        f'working-hours: [{window}]\nfollow-percentage: "100"\n'
+        'blogger-followers: ["source"]\n',
         encoding="utf-8",
     )
+    (directory / "account.json").write_text(
+        json.dumps(
+            {
+                "username": username,
+                "password": "secret",
+                "assigned_device_id": "PHONE",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (directory / "sessions.json").write_text("[]\n", encoding="utf-8")
     return AssignedAccount(username, "PHONE", f"com.instagram.{username}", config)
 
 
@@ -38,6 +52,112 @@ def test_schedule_decision_skips_disabled_and_selects_current_account(tmp_path, 
     assert decision.next_session == datetime(2026, 8, 26, 17, 30)  # noqa: DTZ001
     assert "Skipping account disabled (disabled)" in caplog.text
     assert "Skipping account future (next session 17:30)" in caplog.text
+
+
+def test_schedule_decision_excludes_account_without_application_id(tmp_path, caplog):
+    invalid = account(tmp_path, "invalid", "09.00-11.00")
+    invalid = AssignedAccount(
+        invalid.username, invalid.device_id, "", invalid.config_path
+    )
+    valid = account(tmp_path, "valid", "09.00-11.00")
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (invalid, valid)),
+        tmp_path,
+        device_validator=lambda _: True,
+    )
+
+    with caplog.at_level(logging.INFO):
+        decision = scheduler.evaluate(
+            (invalid, valid), datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+        )
+
+    assert decision.selected == valid
+    assert (
+        "invalid (not runtime-ready: no valid Application ID configured)" in caplog.text
+    )
+
+
+def test_schedule_decision_excludes_account_without_onboarding_evidence(
+    tmp_path, caplog
+):
+    testing_only = account(tmp_path, "testing_only", "09.00-11.00")
+    (testing_only.config_path.parent / "sessions.json").unlink()
+    ready = account(tmp_path, "ready", "09.00-11.00")
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (testing_only, ready)),
+        tmp_path,
+        device_validator=lambda _: True,
+    )
+
+    with caplog.at_level(logging.INFO):
+        decision = scheduler.evaluate(
+            (testing_only, ready), datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+        )
+
+    assert decision.selected == ready
+    assert "no completed onboarding/session history is available" in caplog.text
+
+
+def test_active_account_is_deferred_without_future_session_message(tmp_path, caplog):
+    first = account(tmp_path, "first", "22.00-23.00")
+    second = account(tmp_path, "second", "22.00-23.00")
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (first, second)),
+        tmp_path,
+        device_validator=lambda _: True,
+    )
+
+    with caplog.at_level(logging.INFO):
+        decision = scheduler.evaluate(
+            (first, second), datetime(2026, 8, 26, 22, 5)  # noqa: DTZ001
+        )
+
+    assert decision.selected == first
+    assert decision.next_session == datetime(2026, 8, 26, 22, 5)  # noqa: DTZ001
+    assert "Deferring eligible account second" in caplog.text
+    assert "second (next session 22:05)" not in caplog.text
+
+
+def test_failed_account_does_not_cascade_within_scheduling_cycle(tmp_path):
+    first = account(tmp_path, "first", "09.00-11.00")
+    second = account(tmp_path, "second", "09.00-11.00")
+    attempts = []
+    failed = threading.Event()
+
+    class FailingRuntime:
+        state = SessionState.IDLE
+
+        def __init__(self, selected, _workspace):
+            attempts.append(selected.username)
+
+        def start(self, _callback):
+            failed.set()
+            raise RuntimeError("failed")
+
+        def request_stop(self, _callback):
+            pass
+
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (first, second)),
+        tmp_path,
+        runtime_factory=FailingRuntime,
+        device_validator=lambda _: True,
+        clock=lambda: datetime(2026, 8, 26, 10, 0),  # noqa: DTZ001
+        decision_interval=60,
+    )
+    states = []
+    thread = threading.Thread(
+        target=scheduler.start, args=(states.append, lambda *_: None)
+    )
+
+    thread.start()
+    assert failed.wait(timeout=2)
+    assert _wait_for(lambda: scheduler.state is SessionState.WAITING)
+    assert attempts == ["first"]
+    scheduler.stop(states.append)
+    thread.join(timeout=2)
+
+    assert attempts == ["first"]
 
 
 def test_scheduler_remains_waiting_until_stopped_when_no_session(tmp_path):
@@ -117,6 +237,120 @@ def test_stop_terminates_active_account_and_phone_scheduler(tmp_path):
     assert SessionState.RUNNING in states
     assert states[-2:] == [SessionState.STOPPING, SessionState.STOPPED]
     assert ("current", SessionState.RUNNING) in account_states
+
+
+def test_default_scheduler_uses_native_runtime_without_legacy_subprocess(
+    tmp_path, monkeypatch, caplog
+):
+    current = account(tmp_path, "current", "09.00-11.00")
+    runtime_started = threading.Event()
+    runtime_released = threading.Event()
+    created = []
+
+    class NativeRuntime:
+        state = SessionState.IDLE
+
+        def __init__(self, selected, workspace):
+            created.append((selected, workspace))
+
+        def start(self, callback):
+            self.state = SessionState.RUNNING
+            callback(self.state)
+            runtime_started.set()
+            runtime_released.wait(timeout=2)
+            self.state = SessionState.STOPPED
+            callback(self.state)
+
+        def request_stop(self, _callback):
+            self.state = SessionState.STOPPING
+            runtime_released.set()
+
+    monkeypatch.setattr(
+        "IGBot.runtime.native_integration.create_native_runtime", NativeRuntime
+    )
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        device_validator=lambda _: True,
+        clock=lambda: datetime(2026, 8, 26, 10, 0),  # noqa: DTZ001
+    )
+    states = []
+    thread = threading.Thread(
+        target=scheduler.start, args=(states.append, lambda *_: None)
+    )
+
+    with caplog.at_level(logging.INFO):
+        thread.start()
+        assert runtime_started.wait(timeout=2)
+        scheduler.stop(states.append)
+        thread.join(timeout=2)
+
+    assert created == [(current, tmp_path)]
+    assert "Starting Native Runtime for current" in caplog.text
+    assert "Launching InstaAddict" not in caplog.text
+    assert "python -m InstaAddict" not in caplog.text
+    assert not thread.is_alive()
+
+
+def test_native_runtime_exception_is_reported_to_ui_boundary(tmp_path):
+    current = account(tmp_path, "broken", "09.00-11.00")
+    failures = []
+    runtime_started = threading.Event()
+
+    class FailingRuntime:
+        state = SessionState.IDLE
+
+        def __init__(self, *_args):
+            pass
+
+        def start(self, callback):
+            self.state = SessionState.RUNNING
+            callback(self.state)
+            runtime_started.set()
+            raise RuntimeError("native startup exploded")
+
+        def request_stop(self, _callback):
+            pass
+
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        runtime_factory=FailingRuntime,
+        device_validator=lambda _: True,
+        clock=lambda: datetime(2026, 8, 26, 10, 0),  # noqa: DTZ001
+    )
+    states = []
+    thread = threading.Thread(
+        target=scheduler.start,
+        args=(states.append, lambda *_: None, failures.append),
+    )
+
+    thread.start()
+    assert runtime_started.wait(timeout=2)
+    scheduler.stop(states.append)
+    thread.join(timeout=2)
+
+    assert failures == ["broken: native startup exploded"]
+    assert not thread.is_alive()
+
+
+def test_legacy_runtime_requires_explicit_compatibility_mode(tmp_path, monkeypatch):
+    current = account(tmp_path, "legacy", "09.00-11.00")
+    created = []
+
+    class LegacyRuntime:
+        pass
+
+    monkeypatch.setattr("IGBot.core.phone_scheduler.SessionEngine", LegacyRuntime)
+
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        runtime_mode=RuntimeMode.LEGACY,
+    )
+
+    created.append(scheduler._runtime_factory)
+    assert created == [LegacyRuntime]
 
 
 def _wait_for(predicate):

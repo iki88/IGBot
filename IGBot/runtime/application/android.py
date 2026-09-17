@@ -22,6 +22,7 @@ class AndroidApplicationProvider:
         r"(?:mCurrentFocus|mFocusedApp|mResumedActivity|topResumedActivity|"
         r"ResumedActivity)\s*[:=].*?\b([A-Za-z][A-Za-z0-9._]*)/"
     )
+    _COMPONENT_PATTERN = re.compile(r"(?m)^([A-Za-z][A-Za-z0-9._]*)/([A-Za-z0-9_.$]+)$")
 
     def __init__(
         self,
@@ -35,32 +36,117 @@ class AndroidApplicationProvider:
         self._adb_executable = str(adb_executable or discover_adb())
 
     def launch(self, context: RuntimeContext, package: str) -> ApplicationLaunchResult:
-        """Launch the package's exported MAIN/LAUNCHER activity."""
-        command = self._adb_command(
-            context,
-            "shell",
-            "am",
-            "start",
-            "-W",
-            "-a",
-            "android.intent.action.MAIN",
-            "-c",
-            "android.intent.category.LAUNCHER",
-            "-p",
-            package,
-        )
+        """Resolve and launch a package without assuming an activity name."""
+        component, resolution_failure = self._resolve_launcher(context, package)
+        if component is not None:
+            command = self._adb_command(
+                context, "shell", "am", "start", "-W", "-n", component
+            )
+        else:
+            # Some App Cloner packages remain launchable through PackageManager
+            # even though they expose no single default launcher component.
+            command = self._adb_command(
+                context,
+                "shell",
+                "monkey",
+                "-p",
+                package,
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "1",
+            )
         result, failure = self._execute(command, timeout=30)
+        if failure is not None:
+            return ApplicationLaunchResult(False, failure)
+        if result is None or result.returncode != 0:
+            detail = self._command_detail(result, "Instagram launch command failed.")
+            if resolution_failure:
+                detail = f"{detail} Launcher resolution: {resolution_failure}"
+            return ApplicationLaunchResult(False, detail)
+        output = "\n".join((result.stdout or "", result.stderr or ""))
+        lowered = output.lower()
+        if any(
+            marker in lowered
+            for marker in (
+                "error:",
+                "exception",
+                "unable to resolve intent",
+                "no activities found",
+            )
+        ):
+            return ApplicationLaunchResult(False, output.strip())
+        return ApplicationLaunchResult(True)
+
+    def force_stop(
+        self, context: RuntimeContext, package: str
+    ) -> ApplicationLaunchResult:
+        """Force-stop exactly the configured Android package."""
+        result, failure = self._execute(
+            self._adb_command(context, "shell", "am", "force-stop", package),
+            timeout=15,
+        )
         if failure is not None:
             return ApplicationLaunchResult(False, failure)
         if result is None or result.returncode != 0:
             return ApplicationLaunchResult(
                 False,
-                self._command_detail(result, "Instagram launch command failed."),
+                self._command_detail(result, "Instagram force-stop command failed."),
             )
-        output = "\n".join((result.stdout or "", result.stderr or ""))
-        if "error:" in output.lower() or "exception" in output.lower():
-            return ApplicationLaunchResult(False, output.strip())
         return ApplicationLaunchResult(True)
+
+    def _resolve_launcher(
+        self, context: RuntimeContext, package: str
+    ) -> tuple[str | None, str | None]:
+        commands = (
+            (
+                "shell",
+                "cmd",
+                "package",
+                "resolve-activity",
+                "--brief",
+                "--user",
+                "0",
+                "-a",
+                "android.intent.action.MAIN",
+                "-c",
+                "android.intent.category.LAUNCHER",
+                package,
+            ),
+            (
+                "shell",
+                "cmd",
+                "package",
+                "query-activities",
+                "--brief",
+                "--user",
+                "0",
+                "-a",
+                "android.intent.action.MAIN",
+                "-c",
+                "android.intent.category.LAUNCHER",
+                package,
+            ),
+        )
+        failures: list[str] = []
+        for arguments in commands:
+            result, failure = self._execute(
+                self._adb_command(context, *arguments), timeout=15
+            )
+            if failure:
+                failures.append(failure)
+                continue
+            if result is None or result.returncode != 0:
+                failures.append(
+                    self._command_detail(result, "Launcher activity query failed.")
+                )
+                continue
+            for match in self._COMPONENT_PATTERN.finditer(result.stdout or ""):
+                if match.group(1) == package:
+                    return match.group(0), None
+            output = (result.stderr or result.stdout or "").strip()
+            if output:
+                failures.append(output)
+        return None, next((item for item in failures if item), None)
 
     def foreground(self, context: RuntimeContext) -> ForegroundApplicationResult:
         """Inspect window state first, then activity state as a fallback."""

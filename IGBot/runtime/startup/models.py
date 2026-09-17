@@ -18,6 +18,7 @@ class StartupStageName(StrEnum):
     INTERNET = "Internet"
     AIRPLANE_MODE = "AirplaneMode"
     INSTAGRAM_LAUNCH = "InstagramLaunch"
+    INSTAGRAM_STATE_RECOVERY = "InstagramStateRecovery"
     WAIT_AFTER_LAUNCH = "WaitAfterLaunch"
     ACCOUNT_VERIFICATION = "AccountVerification"
     FOLLOWER_SYNCHRONIZATION = "FollowerSynchronization"

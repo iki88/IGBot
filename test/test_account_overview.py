@@ -246,10 +246,7 @@ def test_saving_without_tag_preserves_existing_metadata_tag(tmp_path):
 
 @pytest.mark.parametrize(
     ("username", "password", "app_id", "message"),
-    (
-        ("invalid name", "secret", "com.instagram.android", "username"),
-        ("original", "secret", "invalid", "application ID"),
-    ),
+    (("invalid name", "secret", "com.instagram.android", "username"),),
 )
 def test_save_rejects_invalid_values_without_modifying_configuration(
     tmp_path, username, password, app_id, message
@@ -261,6 +258,44 @@ def test_save_rejects_invalid_values_without_modifying_configuration(
         service.update_configuration(account, username, password, app_id)
 
     assert account.config_path.read_bytes() == original
+
+
+@pytest.mark.parametrize("app_id", ("", "not-yet-known"), ids=("missing", "unknown"))
+def test_save_allows_application_id_to_be_resolved_at_runtime(tmp_path, app_id):
+    service, account = _account(tmp_path)
+
+    updated = service.update_configuration(account, "original", "secret", app_id)
+
+    assert updated.app_id == app_id
+    assert yaml.safe_load(updated.config_path.read_bytes())["app-id"] == app_id
+
+
+@pytest.mark.parametrize(
+    "disabled_settings",
+    (
+        {"follow-percentage": "0", "follow-limit": ""},
+        {"unfollow": None, "unfollow-delay": ""},
+        {"likes-percentage": "0", "likes-count": ""},
+        {"stories-count": "0", "stories-percentage": ""},
+        {"pm-percentage": "0", "total-pm-limit": ""},
+        {"comment-percentage": "0", "total-comments-limit": ""},
+    ),
+    ids=("follow", "unfollow", "like", "story", "dm", "comment"),
+)
+def test_disabled_module_defaults_do_not_block_account_save(
+    tmp_path, disabled_settings
+):
+    service, account = _account(tmp_path)
+
+    updated = service.update_configuration(
+        account,
+        "original",
+        "secret",
+        account.app_id,
+        disabled_settings,
+    )
+
+    assert updated.username == account.username
 
 
 def test_save_rejects_duplicate_username(tmp_path):

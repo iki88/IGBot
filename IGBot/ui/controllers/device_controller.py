@@ -7,7 +7,9 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 from IGBot.core.device import AssignedAccount, DeviceFleetSnapshot, DeviceRecord
 from IGBot.services.account_template_service import AccountTemplateService
 from IGBot.services.device_inventory_service import DeviceInventoryService
+from IGBot.services.device_snapshot_service import DeviceSnapshotService
 from IGBot.services.scrcpy_service import ScrcpyService
+from IGBot.services.snapshot_folder_opener import SnapshotFolderOpener
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -59,7 +61,7 @@ class DeviceController(QObject):
     account_created = Signal(object)
     account_creation_failed = Signal(str)
     account_configuration_ready = Signal(object, object)
-    account_configuration_saved = Signal(object)
+    account_configuration_saved = Signal(object, object)
     account_configuration_failed = Signal(str)
     installed_packages_ready = Signal(list)
     installed_packages_failed = Signal(str)
@@ -72,12 +74,18 @@ class DeviceController(QObject):
     template_saved = Signal(str)
     template_applied = Signal(object)
     template_operation_failed = Signal(str)
+    snapshot_completed = Signal(object)
+    snapshot_failed = Signal(str)
+    snapshot_folder_completed = Signal(object)
+    snapshot_folder_failed = Signal(str)
 
     def __init__(
         self,
         service: DeviceInventoryService,
         parent: QObject | None = None,
         scrcpy_service: ScrcpyService | None = None,
+        snapshot_service: DeviceSnapshotService | None = None,
+        snapshot_folder_opener: SnapshotFolderOpener | None = None,
     ) -> None:
         super().__init__(parent)
         self._service = service
@@ -96,6 +104,8 @@ class DeviceController(QObject):
             else AccountTemplateService(workspace_root / "templates")
         )
         self._scrcpy = scrcpy_service or ScrcpyService(workspace_root)
+        self._snapshots = snapshot_service or DeviceSnapshotService(workspace_root)
+        self._snapshot_folder_opener = snapshot_folder_opener or SnapshotFolderOpener()
         self._scrcpy_cleanup_timer = QTimer(self)
         self._scrcpy_cleanup_timer.setInterval(1000)
         self._scrcpy_cleanup_timer.timeout.connect(self._scrcpy.cleanup)
@@ -259,7 +269,9 @@ class DeviceController(QObject):
                 account, username, password, app_id, settings, tag
             )
         )
-        task.signals.completed.connect(self._on_account_configuration_saved)
+        task.signals.completed.connect(
+            lambda updated: self._on_account_configuration_saved(account, updated)
+        )
         task.signals.failed.connect(self.account_configuration_failed)
         self._start_task(task)
 
@@ -308,9 +320,11 @@ class DeviceController(QObject):
         logger.info("%s scrcpy view for %s", action, result.serial)
         self.phone_view_ready.emit(result)
 
-    def _on_account_configuration_saved(self, account: AssignedAccount) -> None:
-        logger.info("Saved account configuration for %s", account.username)
-        self.account_configuration_saved.emit(account)
+    def _on_account_configuration_saved(
+        self, original: AssignedAccount, updated: AssignedAccount
+    ) -> None:
+        logger.info("Saved account configuration for %s", updated.username)
+        self.account_configuration_saved.emit(original, updated)
         self.refresh()
 
     @Slot(str)
@@ -320,6 +334,28 @@ class DeviceController(QObject):
             lambda directory: self.device_folder_ready.emit(str(directory))
         )
         task.signals.failed.connect(self._on_operation_failed)
+        self._start_task(task)
+
+    @Slot(str)
+    def take_snapshot(self, serial: str) -> None:
+        """Capture an idle device snapshot outside the Qt UI thread."""
+        if serial not in self._records:
+            self.snapshot_failed.emit(f"Device {serial} is not in the inventory")
+            return
+        task = _ServiceTask(lambda: self._snapshots.capture(serial))
+        task.signals.completed.connect(self.snapshot_completed)
+        task.signals.failed.connect(self.snapshot_failed)
+        self._start_task(task)
+
+    @Slot(object)
+    def open_snapshot_folder(self, directory: Path) -> None:
+        """Inspect/open the exact capture directory outside the Qt UI thread."""
+        resolved = Path(directory).resolve()
+        task = _ServiceTask(
+            lambda: (resolved, self._snapshot_folder_opener.open_if_needed(resolved))
+        )
+        task.signals.completed.connect(self.snapshot_folder_completed)
+        task.signals.failed.connect(self.snapshot_folder_failed)
         self._start_task(task)
 
     @Slot()

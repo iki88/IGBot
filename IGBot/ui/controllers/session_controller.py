@@ -22,7 +22,11 @@ class _SchedulerWorker(QRunnable):
 
     def run(self) -> None:
         try:
-            self.scheduler.start(self._state_callback, self._account_callback)
+            self.scheduler.start(
+                self._state_callback,
+                self._account_callback,
+                self._failed,
+            )
         except Exception as error:  # noqa: BLE001 - worker boundary
             self._failed(str(error))
         finally:

@@ -9,6 +9,11 @@ from atomicwrites import atomic_write
 from yaml.nodes import MappingNode
 
 from IGBot.core.device import AssignedAccount
+from IGBot.services.account_identity import (
+    AccountDirectoryKind,
+    AccountIdentityCatalog,
+    OrphanedAccount,
+)
 from IGBot.services.account_metadata_service import AccountMetadataService
 
 logger = logging.getLogger(__name__)
@@ -42,7 +47,6 @@ class AccountAssignmentService:
             "skip_follower",
             "skip_if_private",
             "skip_business",
-            "skip_non_business",
             "skip_if_link_in_bio",
             "follow_private_or_empty",
             "min_followers",
@@ -59,8 +63,10 @@ class AccountAssignmentService:
             "mandatory_words",
             "specific_alphabet",
             "biography_language",
-            "biography_banned_language",
         }
+    )
+    OBSOLETE_FOLLOW_FILTER_KEYS = frozenset(
+        {"skip_non_business", "biography_banned_language"}
     )
     TEXT_RESOURCE_NAMES = frozenset(
         {
@@ -90,6 +96,7 @@ class AccountAssignmentService:
     def __init__(self, accounts_directory: Path) -> None:
         self._accounts_directory = accounts_directory
         self.metadata = AccountMetadataService()
+        self.identities = AccountIdentityCatalog(accounts_directory)
 
     @property
     def accounts_directory(self) -> Path:
@@ -98,18 +105,19 @@ class AccountAssignmentService:
 
     def load_by_device(self) -> dict[str, tuple[AssignedAccount, ...]]:
         assignments: dict[str, list[AssignedAccount]] = {}
-        if not self._accounts_directory.is_dir():
-            return {}
-
-        for config_path in sorted(self._accounts_directory.glob("*/config.y*ml")):
-            account = self._load_account(config_path)
-            if account is None or not account.device_id:
+        for account in self.identities.discover():
+            if not account.device_id:
                 continue
             assignments.setdefault(account.device_id, []).append(account)
 
         return {
             device_id: tuple(accounts) for device_id, accounts in assignments.items()
         }
+
+    def orphaned_accounts(self) -> tuple[OrphanedAccount, ...]:
+        """Return recoverable account data directories missing ``config.yml``."""
+
+        return self.identities.orphans()
 
     def load_configuration(self, config_path: Path) -> dict:
         """Read an existing account configuration without changing its representation."""
@@ -120,10 +128,19 @@ class AccountAssignmentService:
         if metadata:
             configuration = dict(configuration)
             configuration["username"] = str(
-                metadata.get("username") or configuration.get("username") or ""
+                configuration.get("username")
+                or metadata.get("username")
+                or config_path.parent.name
             )
             configuration["password"] = str(metadata.get("password") or "")
             configuration["tag"] = str(metadata.get("tag") or "")
+            runtime_extensions = metadata.get("runtime_extensions")
+            if isinstance(runtime_extensions, dict):
+                follow_extensions = runtime_extensions.get("follow")
+                if isinstance(follow_extensions, dict):
+                    configuration["igbot-follow-mute-after-follow"] = bool(
+                        follow_extensions.get("mute_after_follow")
+                    )
         filters_path = config_path.parent / "filters.yml"
         if filters_path.is_file():
             filters = yaml.safe_load(filters_path.read_bytes())
@@ -157,10 +174,6 @@ class AccountAssignmentService:
             raise ValueError("Enter a valid Instagram username.")
         if not password:
             raise ValueError("An account password is required.")
-        if not re.fullmatch(
-            r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", app_id
-        ):
-            raise ValueError("Enter a valid Android application ID.")
 
         config_path = account.config_path
         root = self._accounts_directory.resolve()
@@ -174,23 +187,26 @@ class AccountAssignmentService:
             metadata_path.read_bytes() if metadata_path.is_file() else None
         )
         content = original.decode("utf-8")
+        engine_configuration = yaml.safe_load(original)
+        if not isinstance(engine_configuration, dict):
+            raise TypeError("The account configuration must contain a YAML mapping.")
         configuration = self.load_configuration(config_path)
         if (
-            str(configuration.get("username") or config_path.parent.name).strip()
+            str(engine_configuration.get("username") or config_path.parent.name).strip()
             != account.username
         ):
             raise ValueError("The account identity has changed.")
-        for candidate_path in self._accounts_directory.glob("*/config.y*ml"):
-            if candidate_path.resolve() == config_path.resolve():
+        for candidate in self.identities.discover():
+            if candidate.config_path.resolve() == config_path.resolve():
                 continue
-            candidate = self._load_account(candidate_path)
-            if candidate and candidate.username.casefold() == username.casefold():
+            if candidate.username.casefold() == username.casefold():
                 raise ValueError("An account with this username already exists.")
 
         document = yaml.compose(content, Loader=yaml.SafeLoader)
         if not isinstance(document, MappingNode):
             raise TypeError("The account configuration must contain a YAML mapping.")
         settings = dict(settings or {})
+        mute_after_follow = bool(settings.pop("igbot-follow-mute-after-follow", False))
         filter_settings = {
             key: settings.pop(key) for key in self.FILTER_SETTING_KEYS & settings.keys()
         }
@@ -241,8 +257,104 @@ class AccountAssignmentService:
         }
         if set(settings) - allowed_settings:
             raise ValueError("The account configuration contains unsupported settings.")
+        effective_settings = dict(configuration)
+        effective_settings.update(settings)
+        module_enabled = {
+            "follow": self._is_enabled_value(
+                effective_settings.get("follow-percentage")
+            ),
+            "unfollow": any(
+                self._is_enabled_value(effective_settings.get(key))
+                for key in (
+                    "unfollow",
+                    "unfollow-non-followers",
+                    "unfollow-any-non-followers",
+                    "unfollow-any-followers",
+                    "unfollow-any",
+                    "unfollow-from-file",
+                    "remove-followers-from-file",
+                )
+            ),
+            "like": self._is_enabled_value(effective_settings.get("likes-percentage")),
+            "story": self._is_enabled_value(effective_settings.get("stories-count")),
+            "dm": self._is_enabled_value(effective_settings.get("pm-percentage")),
+            "comment": self._is_enabled_value(
+                effective_settings.get("comment-percentage")
+            ),
+        }
+        setting_modules = {
+            **{
+                key: "follow"
+                for key in (
+                    "follow-percentage",
+                    "follow-limit",
+                    "total-follows-limit",
+                    "end-if-follows-limit-reached",
+                )
+            },
+            **{
+                key: "unfollow"
+                for key in (
+                    "unfollow",
+                    "unfollow-non-followers",
+                    "unfollow-any-non-followers",
+                    "unfollow-any-followers",
+                    "unfollow-any",
+                    "min-following",
+                    "sort-followers-newest-to-oldest",
+                    "unfollow-delay",
+                    "total-unfollows-limit",
+                    "delete-removed-followers",
+                    "unfollow-from-file",
+                    "remove-followers-from-file",
+                )
+            },
+            **{
+                key: "like"
+                for key in (
+                    "likes-count",
+                    "likes-percentage",
+                    "total-likes-limit",
+                    "end-if-likes-limit-reached",
+                    "carousel-count",
+                    "carousel-percentage",
+                    "watch-photo-time",
+                    "watch-video-time",
+                    "posts-from-file",
+                    "delete-interacted-users",
+                )
+            },
+            **{
+                key: "story"
+                for key in (
+                    "stories-count",
+                    "stories-percentage",
+                    "total-watches-limit",
+                    "end-if-watches-limit-reached",
+                )
+            },
+            **{
+                key: "dm"
+                for key in (
+                    "pm-percentage",
+                    "total-pm-limit",
+                    "end-if-pm-limit-reached",
+                )
+            },
+            **{
+                key: "comment"
+                for key in (
+                    "comment-percentage",
+                    "total-comments-limit",
+                    "max-comments-pro-user",
+                    "end-if-comments-limit-reached",
+                )
+            },
+        }
         for key, value in settings.items():
             if key in self.AUDIENCE_SOURCE_KEYS:
+                if not any(module_enabled.values()):
+                    continue
                 if value is not None and (
                     not isinstance(value, list)
                     or any(
@@ -250,6 +362,9 @@ class AccountAssignmentService:
                     )
                 ):
                     raise ValueError(f"{key} must be a list of audience targets.")
+                continue
+            module = setting_modules.get(key)
+            if module is not None and not module_enabled[module]:
                 continue
             if (
                 key in {"follow-percentage", "follow-limit", "total-follows-limit"}
@@ -385,10 +500,17 @@ class AccountAssignmentService:
             "mandatory_words",
             "specific_alphabet",
             "biography_language",
-            "biography_banned_language",
         }
         for key, value in filter_settings.items():
             if value is None:
+                continue
+            if key == "pm_to_private_or_empty":
+                filters_enabled = module_enabled["dm"]
+            elif key.startswith("comment_"):
+                filters_enabled = module_enabled["comment"]
+            else:
+                filters_enabled = module_enabled["follow"] or module_enabled["like"]
+            if not filters_enabled:
                 continue
             if key in filter_switches and type(value) is not bool:
                 raise ValueError(f"{key} must be a switch value.")
@@ -413,13 +535,21 @@ class AccountAssignmentService:
                 "mandatory_words",
                 "specific_alphabet",
                 "biography_language",
-                "biography_banned_language",
             } and (
                 not isinstance(value, list)
                 or any(not isinstance(item, str) or not item.strip() for item in value)
             ):
                 raise ValueError(f"{key} must be a list of non-empty values.")
-        if any(not isinstance(value, str) for value in text_resources.values()):
+        resource_modules = {
+            "pm_list.txt": "dm",
+            "comments_list.txt": "comment",
+            "unfollow_users.txt": "unfollow",
+            "remove_followers_users.txt": "unfollow",
+        }
+        if any(
+            module_enabled[resource_modules[name]] and not isinstance(value, str)
+            for name, value in text_resources.items()
+        ):
             raise ValueError("Account text resources must contain text.")
 
         fields = {}
@@ -450,7 +580,7 @@ class AccountAssignmentService:
             (app_key, app_id),
         ):
             node = fields.get(key)
-            if node is not None and str(configuration.get(key, "")) != value:
+            if node is not None and str(engine_configuration.get(key, "")) != value:
                 replacements.append(
                     (
                         node.start_mark.index,
@@ -530,8 +660,12 @@ class AccountAssignmentService:
             },
         }
         try:
-            if filter_settings:
-                self._update_yaml_fields(filters_path, filter_settings)
+            if filter_settings or filters_path.is_file():
+                cleaned_filter_settings = {
+                    key: None for key in self.OBSOLETE_FOLLOW_FILTER_KEYS
+                }
+                cleaned_filter_settings.update(filter_settings)
+                self._update_yaml_fields(filters_path, cleaned_filter_settings)
             for name, resource_content in text_resources.items():
                 resource_path = resource_paths[name]
                 if resource_content:
@@ -562,8 +696,24 @@ class AccountAssignmentService:
             raise ValueError("An account directory with this username already exists.")
         renamed = False
         try:
+            metadata = self.metadata.load(old_directory)
+            runtime_extensions = metadata.get("runtime_extensions")
+            if not isinstance(runtime_extensions, dict):
+                runtime_extensions = {}
+            runtime_extensions = dict(runtime_extensions)
+            follow_extensions = runtime_extensions.get("follow")
+            if not isinstance(follow_extensions, dict):
+                follow_extensions = {}
+            follow_extensions = dict(follow_extensions)
+            follow_extensions["mute_after_follow"] = mute_after_follow
+            runtime_extensions["follow"] = follow_extensions
             self.metadata.save(
-                old_directory, username, password, account.device_id, tag=tag
+                old_directory,
+                username,
+                password,
+                account.device_id,
+                tag=tag,
+                runtime_extensions=runtime_extensions,
             )
             if old_directory.resolve() != new_directory.resolve():
                 old_directory.rename(new_directory)
@@ -584,6 +734,16 @@ class AccountAssignmentService:
             raise RuntimeError(
                 "Account metadata update failed; the original account was restored."
             ) from error
+
+    @staticmethod
+    def _is_enabled_value(value: object) -> bool:
+        if value is None or value is False:
+            return False
+        if isinstance(value, str):
+            return value.strip() not in {"", "0"}
+        if isinstance(value, (int, float)):
+            return value != 0
+        return bool(value)
 
     @staticmethod
     def _write_configuration(path: Path, content: str) -> None:
@@ -668,46 +828,99 @@ class AccountAssignmentService:
         """Initialize an account using InstaAddict's existing local account templates."""
         username = username.strip()
         device_id = device_id.strip()
+        account_directory = self._accounts_directory.resolve() / username
+        logger.info("Add Account requested for username=%r", username)
+        logger.info("Add Account directory: %s", account_directory)
         if not username:
+            logger.info("Add Account failed: an Instagram username is required")
             raise ValueError("An Instagram username is required.")
         if not re.fullmatch(r"[A-Za-z0-9._]{1,30}", username):
+            logger.info("Add Account failed: the Instagram username is invalid")
             raise ValueError("Enter a valid Instagram username.")
         if not password:
+            logger.info("Add Account failed: an account password is required")
             raise ValueError("An account password is required.")
         if not device_id:
+            logger.info("Add Account failed: a managed destination phone is required")
             raise ValueError("A managed destination phone is required.")
 
         accounts_root = self._accounts_directory.resolve()
-        account_directory = accounts_root / username
         if account_directory.resolve().parent != accounts_root:
+            logger.info(
+                "Add Account failed: account directory is outside the managed root"
+            )
             raise ValueError(
                 "The account directory is outside the managed accounts root."
             )
-        existing = (
-            self._load_account(config_path)
-            for config_path in self._accounts_directory.glob("*/config.y*ml")
+        directory_kind = self.identities.classify(account_directory)
+        classification = (
+            "EMPTY"
+            if directory_kind is AccountDirectoryKind.AVAILABLE
+            else directory_kind.value
         )
+        logger.info("Add Account catalog classification: %s", classification)
+        existing = self.identities.discover()
         if any(
             account is not None and account.username.casefold() == username.casefold()
             for account in existing
         ):
+            logger.info(
+                "Add Account branch: canonical username duplicate; creation failed"
+            )
             raise ValueError("An account with this username already exists.")
-        if account_directory.exists():
+        if directory_kind is AccountDirectoryKind.ACCOUNT:
+            logger.info("Add Account branch: ACCOUNT; creation failed")
             raise ValueError("An account directory with this username already exists.")
+        if directory_kind is AccountDirectoryKind.OCCUPIED:
+            logger.info(
+                "Add Account branch: OCCUPIED; creation failed because the path "
+                "cannot be recovered"
+            )
+            raise ValueError("The account path is occupied and cannot be recovered.")
 
         template_config = templates_directory / "config.yml"
         if not templates_directory.is_dir() or not template_config.is_file():
+            logger.info(
+                "Add Account failed: InstaAddict account configuration template "
+                "is missing"
+            )
             raise RuntimeError(
                 "The InstaAddict account configuration template is missing."
             )
 
         account_created = False
+        recovering_orphan = directory_kind is AccountDirectoryKind.ORPHAN
+        original_files = (
+            {
+                path.relative_to(account_directory): path.read_bytes()
+                for path in account_directory.rglob("*")
+                if path.is_file()
+            }
+            if recovering_orphan
+            else {}
+        )
         try:
             accounts_root.mkdir(parents=True, exist_ok=True)
-            account_directory.mkdir()
-            account_created = True
-            shutil.copytree(templates_directory, account_directory, dirs_exist_ok=True)
-            config_path = account_directory / "config.yml"
+            if not recovering_orphan:
+                logger.info(
+                    "Add Account branch: EMPTY; creating a new account directory"
+                )
+                account_directory.mkdir()
+                account_created = True
+            else:
+                logger.info(
+                    "Add Account branch: ORPHAN; recovering existing account data"
+                )
+            for source in templates_directory.rglob("*"):
+                destination = account_directory / source.relative_to(
+                    templates_directory
+                )
+                if source.is_dir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                elif not destination.exists():
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, destination)
+            config_path = self.identities.config_path(account_directory)
             content = config_path.read_text(encoding="utf-8")
             encoded_username = json.dumps(username, ensure_ascii=False)
             encoded_device = json.dumps(device_id, ensure_ascii=False)
@@ -762,10 +975,40 @@ class AccountAssignmentService:
             account = self._load_account(config_path)
             if account is None:
                 raise RuntimeError("The new account configuration could not be loaded.")
+            logger.info(
+                "Add Account succeeded for username=%r using the %s branch",
+                username,
+                "ORPHAN" if recovering_orphan else "EMPTY",
+            )
             return account
-        except (OSError, RuntimeError, TypeError, ValueError, yaml.YAMLError):
+        except (
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            yaml.YAMLError,
+        ) as error:
+            logger.info(
+                "Add Account failed for username=%r in the %s branch: %s",
+                username,
+                "ORPHAN" if recovering_orphan else "EMPTY",
+                error,
+            )
             if account_created and account_directory.is_dir():
                 shutil.rmtree(account_directory)
+            elif recovering_orphan:
+                for path in sorted(account_directory.rglob("*"), reverse=True):
+                    if (
+                        path.is_file()
+                        and path.relative_to(account_directory) not in original_files
+                    ):
+                        path.unlink()
+                    elif path.is_dir() and not any(path.iterdir()):
+                        path.rmdir()
+                for relative_path, original in original_files.items():
+                    path = account_directory / relative_path
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(original)
             raise
 
     def unassign_device(self, device_id: str) -> tuple[Path, ...]:
@@ -802,22 +1045,9 @@ class AccountAssignmentService:
         return tuple(updated_paths)
 
     def _load_account(self, config_path: Path) -> AssignedAccount | None:
-        try:
-            config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-        except (OSError, yaml.YAMLError) as error:
-            logger.warning("Could not read account config %s: %s", config_path, error)
-            return None
-
-        if not isinstance(config, dict):
-            logger.warning("Account config %s does not contain a mapping", config_path)
-            return None
-
-        device_id = str(config.get("device") or "").strip()
-        username = str(config.get("username") or config_path.parent.name).strip()
-        app_id = str(config.get("app-id") or config.get("app_id") or "").strip()
-        return AssignedAccount(
-            username=username,
-            device_id=device_id,
-            app_id=app_id,
-            config_path=config_path,
-        )
+        account = self.identities.load(config_path)
+        if account is None:
+            logger.warning(
+                "Ignoring non-canonical account configuration %s", config_path
+            )
+        return account

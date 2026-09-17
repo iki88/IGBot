@@ -15,6 +15,7 @@ from IGBot.runtime.follower_synchronization.models import FollowerReadResult
 @dataclass(frozen=True, slots=True)
 class _Node:
     text: str
+    content_description: str
     resource_id: str
     bounds: tuple[int, int, int, int]
     scrollable: bool
@@ -36,6 +37,7 @@ class AndroidFollowerReader:
         "row_profile_header_container_followers",
         "profile_header_followers_stacked_familiar",
     )
+    _FOLLOWERS_VALUE_IDS = ("profile_header_familiar_followers_value",)
     _USERNAME_IDS = (
         "follow_list_username",
         "row_user_primary_name",
@@ -72,6 +74,11 @@ class AndroidFollowerReader:
             self._sleeper(self._navigation_wait)
 
             nodes = self._nodes(device.dump_hierarchy(compressed=False))
+            if self._has_zero_followers(nodes):
+                context.logger.info(
+                    "Follower Synchronization detected an empty followers list"
+                )
+                return FollowerReadResult(True)
             followers = self._find(nodes, self._FOLLOWERS_IDS)
             if followers is None:
                 return FollowerReadResult(
@@ -129,12 +136,25 @@ class AndroidFollowerReader:
             nodes.append(
                 _Node(
                     text=element.get("text", ""),
+                    content_description=element.get("content-desc", ""),
                     resource_id=element.get("resource-id", ""),
                     bounds=tuple(int(value) for value in bounds.groups()),
                     scrollable=element.get("scrollable", "false") == "true",
                 )
             )
         return tuple(nodes)
+
+    @classmethod
+    def _has_zero_followers(cls, nodes: tuple[_Node, ...]) -> bool:
+        for node in nodes:
+            if cls._id_has_suffix(node.resource_id, cls._FOLLOWERS_VALUE_IDS):
+                value = node.text.strip().replace(",", "").replace(".", "")
+                if value == "0":
+                    return True
+            description = "".join(node.content_description.casefold().split())
+            if description in {"0follower", "0followers"}:
+                return True
+        return False
 
     @classmethod
     def _find(

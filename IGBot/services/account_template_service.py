@@ -35,7 +35,6 @@ class AccountTemplateService:
             "skip_follower",
             "skip_if_private",
             "skip_business",
-            "skip_non_business",
             "skip_if_link_in_bio",
             "follow_private_or_empty",
             "min_followers",
@@ -50,7 +49,6 @@ class AccountTemplateService:
             "mandatory_words",
             "specific_alphabet",
             "biography_language",
-            "biography_banned_language",
         }
     )
     CONFIG_KEYS = frozenset(

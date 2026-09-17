@@ -18,6 +18,12 @@ class ApplicationProvider(Protocol):
         """Request launch of the configured package."""
         ...
 
+    def force_stop(
+        self, context: RuntimeContext, package: str
+    ) -> ApplicationLaunchResult:
+        """Force-stop the configured package before a controlled relaunch."""
+        ...
+
     def foreground(self, context: RuntimeContext) -> ForegroundApplicationResult:
         """Return the package currently in the foreground."""
         ...

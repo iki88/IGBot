@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 import pytest
@@ -75,6 +76,70 @@ def test_follow_configuration_saves_without_changing_unrelated_yaml(tmp_path):
     assert not any(str(key).startswith("igbot-") for key in parsed)
 
 
+def test_mute_after_follow_persists_as_account_runtime_metadata(tmp_path):
+    service, account = _configuration(tmp_path)
+    page = AccountPage()
+    page.set_account(account)
+    page.set_configuration(service.load_configuration(account.config_path))
+    page.follow_page.mute_after_follow.setChecked(True)
+
+    updated = service.update_configuration(
+        account,
+        "account",
+        "secret",
+        "com.example.app",
+        page.configuration_values(),
+    )
+
+    metadata = json.loads(
+        (updated.config_path.parent / "account.json").read_text(encoding="utf-8")
+    )
+    assert metadata["runtime_extensions"]["follow"]["mute_after_follow"] is True
+    assert (
+        service.load_configuration(updated.config_path)[
+            "igbot-follow-mute-after-follow"
+        ]
+        is True
+    )
+    assert "igbot-follow-mute-after-follow" not in yaml.safe_load(
+        updated.config_path.read_text(encoding="utf-8")
+    )
+
+
+def test_follow_only_save_keeps_selected_engine_identity_when_metadata_is_stale(
+    tmp_path,
+):
+    service, account = _configuration(tmp_path)
+    service.metadata.save(
+        account.config_path.parent,
+        "metadata_account",
+        "secret",
+        account.device_id,
+    )
+    page = AccountPage()
+    page.set_account(account)
+    page.set_configuration(service.load_configuration(account.config_path))
+    page.follow_page.follow_amount.maximum.setValue(8)
+
+    updated = service.update_configuration(
+        account,
+        page.username.text(),
+        page.password.text(),
+        page.application_id.text(),
+        page.configuration_values(),
+        page.tag.text(),
+    )
+
+    saved = service.load_configuration(updated.config_path)
+    assert updated.username == "account"
+    assert saved["follow-limit"] == "3-8"
+    assert saved["username"] == "account"
+    metadata = json.loads(
+        (updated.config_path.parent / "account.json").read_text(encoding="utf-8")
+    )
+    assert metadata["username"] == "account"
+
+
 def test_follow_exposes_only_production_methods_and_preserves_hidden_sources(tmp_path):
     service, account = _configuration(tmp_path)
     content = account.config_path.read_bytes() + b'hashtag-posts-top: ["cats"]\r\n'
@@ -126,7 +191,6 @@ def test_follow_filters_load_and_save_through_engine_filters_file(tmp_path):
         ("blacklist_words", ["giveaway", "follow me"]),
         ("specific_alphabet", ["LATIN", "CYRILLIC"]),
         ("biography_language", ["en", "de"]),
-        ("biography_banned_language", ["it", "fr"]),
     ),
 )
 def test_follow_word_filters_use_shared_popup_and_serialize_as_lists(
@@ -174,7 +238,13 @@ def test_follow_product_layout_and_runtime_extensions_are_not_persisted():
     required = page.word_filters["mandatory_words"]
     blocked = page.word_filters["blacklist_words"]
     assert required.name.text() == "Follow only if profile contains these words"
-    assert blocked.name.text() == "Don't follow if profile contains these words"
+    assert blocked.name.text() == "Don't follow if profile contain these words"
+    assert "skip_non_business" not in page.additional_settings.controls
+    assert "biography_banned_language" not in page.list_filters
+    assert (
+        page.additional_settings.controls["follow_private_or_empty"].text()
+        == "Follow private profiles"
+    )
     assert required.enabled.objectName() != "configurationSwitch"
     assert blocked.enabled.objectName() != "configurationSwitch"
     assert all(control.isChecked() for control in page.schedule_days.controls.values())
@@ -206,6 +276,28 @@ def test_follow_product_layout_and_runtime_extensions_are_not_persisted():
     for row in page.list_filters.values():
         assert row.name.objectName() == "checkboxLinkButton"
         assert row.layout().spacing() == 0
+
+
+def test_follow_save_removes_obsolete_filter_fields(tmp_path):
+    service, account = _configuration(tmp_path)
+    filters_path = account.config_path.parent / "filters.yml"
+    filters_path.write_text(
+        "skip_non_business: true\n"
+        "biography_banned_language: [de]\n"
+        "skip_business: false\n",
+        encoding="utf-8",
+    )
+    page = FollowConfigurationPage()
+    page.set_configuration(service.load_configuration(account.config_path))
+
+    service.update_configuration(
+        account, "account", "secret", "com.example.app", page.values()
+    )
+
+    saved = yaml.safe_load(filters_path.read_text(encoding="utf-8"))
+    assert "skip_non_business" not in saved
+    assert "biography_banned_language" not in saved
+    assert saved["skip_business"] is False
 
 
 def test_all_module_tabs_use_consistent_filled_status_indicators():

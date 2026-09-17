@@ -32,6 +32,7 @@ class PhoneAccountsPage(QWidget):
     rename_requested = Signal(str, str)
     folder_requested = Signal(str)
     delete_requested = Signal(str)
+    snapshot_requested = Signal(str)
     transfer_requested = Signal(str, str)
     archive_requested = Signal(str, str)
     restore_requested = Signal(str)
@@ -64,6 +65,12 @@ class PhoneAccountsPage(QWidget):
         self.options_menu.addAction("Open Device Folder", self._open_device_folder)
         self.options_menu.addSeparator()
         self.options_menu.addAction("Delete Device", self._delete_device)
+        self.snapshot_action = self.options_menu.addAction(
+            "Take Snapshot", self._take_snapshot
+        )
+        self.snapshot_action.setToolTip(
+            "Capture the selected idle phone's UI hierarchy and screenshot"
+        )
         self.options_button.setMenu(self.options_menu)
         self.page_header.add_action_widget(self.options_button)
 
@@ -284,6 +291,17 @@ class PhoneAccountsPage(QWidget):
     def _delete_device(self) -> None:
         if self._serial:
             self.delete_requested.emit(self._serial)
+
+    def _take_snapshot(self) -> None:
+        if self._serial and self.snapshot_action.isEnabled():
+            self.snapshot_requested.emit(self._serial)
+
+    def set_snapshot_enabled(self, enabled: bool) -> None:
+        """Allow manual snapshots only while the phone scheduler is idle."""
+        self.snapshot_action.setEnabled(enabled)
+        self.snapshot_action.setStatusTip(
+            "" if enabled else "Stop the phone before taking a snapshot."
+        )
 
     def _open_account(self, index) -> None:
         source_index = self.proxy_model.mapToSource(index)

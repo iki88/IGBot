@@ -174,6 +174,28 @@ def test_session_controller_transfers_completed_startup_to_scheduler(session_con
     assert controller.state_for(session_context.session_id) is SessionState.RUNNING
 
 
+def test_session_controller_injects_persisted_runtime_settings(session_context):
+    seen = []
+    stage = RecordingStage(
+        StartupStageResult(
+            StartupStageName.INTERNET,
+            StartupStageStatus.SUCCESS,
+            internet_available=True,
+        ),
+        seen,
+    )
+    controller = SessionController(
+        StartupPipeline((stage,)),
+        RecordingScheduler(),
+        RecordingLogger(),
+        runtime_settings={"wait_after_launching_instagram": "8-12"},
+    )
+
+    result = controller.start(session_context)
+
+    assert result.context.runtime_settings == {"wait_after_launching_instagram": "8-12"}
+
+
 def test_session_controller_does_not_start_scheduler_after_failure(session_context):
     stage = RecordingStage(
         StartupStageResult(

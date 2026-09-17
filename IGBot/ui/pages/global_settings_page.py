@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import ClassVar
 
-from PySide6.QtCore import QRegularExpression
+from PySide6.QtCore import QRegularExpression, Signal
 from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from IGBot.services.global_settings_service import GlobalSettingsService
 from IGBot.ui.widgets.configuration_widgets import (
     ConfigurationSection,
     WheelSafeDoubleSpinBox,
@@ -25,12 +26,9 @@ from IGBot.ui.widgets.page_header import PageHeader
 
 
 class GlobalSettingsPage(QScrollArea):
-    """Operator-focused global settings presentation.
+    """Operator-focused editor for canonical application-wide settings."""
 
-    Sprint 5.22 intentionally provides no persistence layer. Controls backed by
-    the legacy engine are identified in ``ENGINE_BINDINGS``; all other controls
-    are IGBot runtime-extension designs and must not be written to account YAML.
-    """
+    dirty_changed = Signal(bool)
 
     ENGINE_BINDINGS: ClassVar[dict[str, str]] = {
         "enable_block_detection": "disable-block-detection",
@@ -40,9 +38,17 @@ class GlobalSettingsPage(QScrollArea):
         {"enable_block_detection"}
     )
 
-    def __init__(self, workspace: Path, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        workspace: Path,
+        parent: QWidget | None = None,
+        settings_service: GlobalSettingsService | None = None,
+    ) -> None:
         super().__init__(parent)
         self.workspace = workspace
+        self.settings_service = settings_service or GlobalSettingsService(workspace)
+        self.is_dirty = False
+        self._loading = True
         self.setObjectName("globalSettingsPage")
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.NoFrame)
@@ -68,6 +74,119 @@ class GlobalSettingsPage(QScrollArea):
         layout.addWidget(self._build_integrations(container))
         layout.addStretch()
         self.setWidget(container)
+        self._connect_dirty_tracking()
+        self.set_values(self.settings_service.load())
+        self._loading = False
+
+    def values(self) -> dict[str, object]:
+        """Return one complete settings snapshot independent of widget state."""
+
+        return {
+            "start_all_phones_delay": self.start_all_phones_delay.value(),
+            "wait_after_launching_instagram": (
+                self.wait_after_instagram_launch.text().strip()
+            ),
+            "login_retry_limit_per_day": self.login_retry_limit.value(),
+            "enable_block_detection": self.enable_block_detection.isChecked(),
+            "pause_after_action_block": self.pause_after_action_block.value(),
+            "maximum_crash_retries": self.maximum_crash_retries.value(),
+            "toggle_airplane_mode_between_sessions": (
+                self.airplane_mode_reset.isChecked()
+            ),
+            "use_random_search_letters": self.random_search_letters.isChecked(),
+            "first_character_pool": self.first_character_pool.text(),
+            "second_character_pool": self.second_character_pool.text(),
+            "maximum_source_scrolling_time": self.maximum_scrolling_time.value(),
+            "enable_follow_back_ratio_check": (
+                self.follow_back_ratio_check.isChecked()
+            ),
+            **{
+                f"maximum_{name}_per_hour": control.value()
+                for name, control in self.hourly_limits.items()
+            },
+            "enable_contact_details_scraping": (
+                self.contact_details_scraping.isChecked()
+            ),
+            "ai_provider": self.ai_provider.currentData(),
+            "ai_model": self.ai_model.text(),
+            "openai_api_key": self.openai_api_key.text(),
+            "temperature": self.temperature.value(),
+            "backend_api_enabled": self.backend_api_integration.isChecked(),
+        }
+
+    def set_values(self, settings: dict[str, object]) -> None:
+        """Populate every control without creating a dirty edit."""
+
+        was_loading = self._loading
+        self._loading = True
+        self.start_all_phones_delay.setValue(int(settings["start_all_phones_delay"]))
+        self.wait_after_instagram_launch.setText(
+            str(settings["wait_after_launching_instagram"])
+        )
+        self.login_retry_limit.setValue(int(settings["login_retry_limit_per_day"]))
+        self.enable_block_detection.setChecked(bool(settings["enable_block_detection"]))
+        self.pause_after_action_block.setValue(
+            int(settings["pause_after_action_block"])
+        )
+        self.maximum_crash_retries.setValue(int(settings["maximum_crash_retries"]))
+        self.airplane_mode_reset.setChecked(
+            bool(settings["toggle_airplane_mode_between_sessions"])
+        )
+        self.random_search_letters.setChecked(
+            bool(settings["use_random_search_letters"])
+        )
+        self.first_character_pool.setText(str(settings["first_character_pool"]))
+        self.second_character_pool.setText(str(settings["second_character_pool"]))
+        self.maximum_scrolling_time.setValue(
+            int(settings["maximum_source_scrolling_time"])
+        )
+        self.follow_back_ratio_check.setChecked(
+            bool(settings["enable_follow_back_ratio_check"])
+        )
+        for name, control in self.hourly_limits.items():
+            control.setValue(int(settings[f"maximum_{name}_per_hour"]))
+        self.contact_details_scraping.setChecked(
+            bool(settings["enable_contact_details_scraping"])
+        )
+        provider_index = self.ai_provider.findData(settings["ai_provider"])
+        self.ai_provider.setCurrentIndex(max(provider_index, 0))
+        self.ai_model.setText(str(settings["ai_model"]))
+        self.openai_api_key.setText(str(settings["openai_api_key"]))
+        self.temperature.setValue(float(settings["temperature"]))
+        self.backend_api_integration.setChecked(bool(settings["backend_api_enabled"]))
+        self._loading = was_loading
+        self.mark_clean()
+
+    def save(self) -> None:
+        """Persist the current complete snapshot and clear dirty state."""
+
+        self.settings_service.save(self.values())
+        self.mark_clean()
+
+    def mark_clean(self) -> None:
+        if self.is_dirty:
+            self.is_dirty = False
+            self.dirty_changed.emit(False)
+
+    def _mark_dirty(self, *_args) -> None:
+        if self._loading or self.is_dirty:
+            return
+        self.is_dirty = True
+        self.dirty_changed.emit(True)
+
+    def _connect_dirty_tracking(self) -> None:
+        for control in self.findChildren(QLineEdit):
+            control.textChanged.connect(self._mark_dirty)
+        for control in self.findChildren(QCheckBox):
+            control.toggled.connect(self._mark_dirty)
+        for control in self.findChildren(QComboBox):
+            control.currentIndexChanged.connect(self._mark_dirty)
+        numeric_controls = (
+            *self.findChildren(WheelSafeSpinBox),
+            *self.findChildren(WheelSafeDoubleSpinBox),
+        )
+        for control in numeric_controls:
+            control.valueChanged.connect(self._mark_dirty)
 
     def _build_session_startup(self, parent: QWidget) -> ConfigurationSection:
         section = ConfigurationSection("Session Startup", parent)

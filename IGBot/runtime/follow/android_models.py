@@ -32,3 +32,9 @@ class AndroidFollowResult:
     detail: str | None = None
     profile: CandidateProfile | None = None
     contact_details: Mapping[str, str] = field(default_factory=dict)
+    muted: bool = False
+
+    @property
+    def succeeded(self) -> bool:
+        """Return whether a navigation-only Android operation succeeded."""
+        return self.status is AndroidFollowStatus.SUCCESS

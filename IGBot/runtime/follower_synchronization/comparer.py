@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime
 
 from IGBot.runtime.database import FollowRepository, UsersRepository
+from IGBot.runtime.database.timestamps import utc_timestamp
 from IGBot.runtime.follower_synchronization.models import FollowerComparison
 
 
@@ -14,7 +15,7 @@ def utc_text(value: datetime) -> str:
 
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("Follower Synchronization timestamps must be timezone-aware")
-    return value.astimezone(timezone.utc).isoformat()
+    return utc_timestamp(value)
 
 
 class RuntimeFollowerComparer:

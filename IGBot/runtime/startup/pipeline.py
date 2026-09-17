@@ -30,6 +30,7 @@ class StartupPipeline:
         account_verifier: StartupStage,
         stages: Iterable[StartupStage] = (),
         *,
+        instagram_state_recovery: StartupStage | None = None,
         follower_synchronization: StartupStage | None = None,
     ) -> StartupPipeline:
         """Fix the implemented startup stages in authoritative order."""
@@ -37,8 +38,10 @@ class StartupPipeline:
             internet_checker,
             airplane_mode_controller,
             instagram_launcher,
-            account_verifier,
         ]
+        if instagram_state_recovery is not None:
+            ordered.append(instagram_state_recovery)
+        ordered.append(account_verifier)
         if follower_synchronization is not None:
             ordered.append(follower_synchronization)
         ordered.extend(stages)
@@ -53,10 +56,17 @@ class StartupPipeline:
         """Execute stages sequentially and stop at the first failure."""
         results: list[StartupStageResult] = []
         for stage in self._stages:
+            stage_name = type(stage).__name__
+            context.logger.info("Startup stage started", stage=stage_name)
             result = stage.execute(context)
             if not isinstance(result, StartupStageResult):
                 raise TypeError("Startup stages must return StartupStageResult")
             results.append(result)
+            context.logger.info(
+                "Startup stage finished",
+                stage=stage_name,
+                status=result.status.value,
+            )
             if result.status is StartupStageStatus.FAILED:
                 break
         return self._build_result(tuple(results))

@@ -20,6 +20,7 @@ class FollowRecord:
     """Follow-family state for one target user."""
 
     user_id: int
+    username: str
     source: str | None = None
     follow_date: str | None = None
     follow_back: bool = False
@@ -27,6 +28,7 @@ class FollowRecord:
     unfollowed: bool = False
     unfollow_date: str | None = None
     last_session_id: str | None = None
+    muted: bool = False
 
 
 @dataclass(frozen=True, slots=True)

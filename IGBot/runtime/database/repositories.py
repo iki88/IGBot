@@ -7,7 +7,7 @@ contained here; runtime components consume repositories instead of connections.
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import astuple
+from dataclasses import astuple, replace
 
 from IGBot.runtime.database.models import (
     CommentRecord,
@@ -17,6 +17,7 @@ from IGBot.runtime.database.models import (
     StoryRecord,
     UserRecord,
 )
+from IGBot.runtime.database.timestamps import optional_utc_timestamp, utc_timestamp
 
 
 class UsersRepository:
@@ -31,9 +32,7 @@ class UsersRepository:
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                first_seen TEXT NOT NULL CHECK (
-                    first_seen GLOB '*Z' OR first_seen GLOB '*+00:00'
-                ),
+                first_seen TEXT NOT NULL,
                 first_discovered_by TEXT
             )
             """)
@@ -49,12 +48,12 @@ class UsersRepository:
             INSERT INTO users (username, first_seen, first_discovered_by)
             VALUES (?, ?, ?)
             """,
-            (username, first_seen, first_discovered_by),
+            (username, utc_timestamp(first_seen), first_discovered_by),
         )
         return UserRecord(
             id=cursor.lastrowid,
             username=username,
-            first_seen=first_seen,
+            first_seen=utc_timestamp(first_seen),
             first_discovered_by=first_discovered_by,
         )
 
@@ -69,6 +68,13 @@ class UsersRepository:
         ).fetchone()
         return UserRecord(*row) if row is not None else None
 
+    def update_username(self, user_id: int, username: str) -> None:
+        """Rename one identity; the Follow trigger synchronizes its copy."""
+
+        self._connection.execute(
+            "UPDATE users SET username = ? WHERE id = ?", (username, user_id)
+        )
+
 
 class FollowRepository:
     """Persist Follow-owned relationship state."""
@@ -80,52 +86,61 @@ class FollowRepository:
         self._connection.execute("""
             CREATE TABLE IF NOT EXISTS follow (
                 user_id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
                 source TEXT,
-                follow_date TEXT CHECK (
-                    follow_date IS NULL OR follow_date GLOB '*Z'
-                    OR follow_date GLOB '*+00:00'
-                ),
+                follow_date TEXT,
                 follow_back INTEGER NOT NULL DEFAULT 0
                     CHECK (follow_back IN (0, 1)),
-                follow_back_date TEXT CHECK (
-                    follow_back_date IS NULL OR follow_back_date GLOB '*Z'
-                    OR follow_back_date GLOB '*+00:00'
-                ),
+                follow_back_date TEXT,
                 unfollowed INTEGER NOT NULL DEFAULT 0
                     CHECK (unfollowed IN (0, 1)),
-                unfollow_date TEXT CHECK (
-                    unfollow_date IS NULL OR unfollow_date GLOB '*Z'
-                    OR unfollow_date GLOB '*+00:00'
-                ),
+                unfollow_date TEXT,
                 last_session_id TEXT,
+                muted INTEGER NOT NULL DEFAULT 0 CHECK (muted IN (0, 1)),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
+            """)
+        self._connection.execute("""
+            CREATE TRIGGER IF NOT EXISTS follow_username_sync
+            AFTER UPDATE OF username ON users
+            BEGIN
+                UPDATE follow SET username = NEW.username WHERE user_id = NEW.id;
+            END
             """)
 
     def save(self, record: FollowRecord) -> None:
         self._connection.execute(
             """
             INSERT INTO follow (
-                user_id, source, follow_date, follow_back, follow_back_date,
-                unfollowed, unfollow_date, last_session_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                user_id, username, source, follow_date, follow_back,
+                follow_back_date, unfollowed, unfollow_date, last_session_id, muted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
+                username = excluded.username,
                 source = excluded.source,
                 follow_date = excluded.follow_date,
                 follow_back = excluded.follow_back,
                 follow_back_date = excluded.follow_back_date,
                 unfollowed = excluded.unfollowed,
                 unfollow_date = excluded.unfollow_date,
-                last_session_id = excluded.last_session_id
+                last_session_id = excluded.last_session_id,
+                muted = excluded.muted
             """,
-            astuple(record),
+            astuple(
+                replace(
+                    record,
+                    follow_date=optional_utc_timestamp(record.follow_date),
+                    follow_back_date=optional_utc_timestamp(record.follow_back_date),
+                    unfollow_date=optional_utc_timestamp(record.unfollow_date),
+                )
+            ),
         )
 
     def get(self, user_id: int) -> FollowRecord | None:
         row = self._connection.execute(
             """
-            SELECT user_id, source, follow_date, follow_back, follow_back_date,
-                   unfollowed, unfollow_date, last_session_id
+            SELECT user_id, username, source, follow_date, follow_back,
+                   follow_back_date, unfollowed, unfollow_date, last_session_id, muted
             FROM follow WHERE user_id = ?
             """,
             (user_id,),
@@ -134,13 +149,15 @@ class FollowRepository:
             return None
         return FollowRecord(
             user_id=row[0],
-            source=row[1],
-            follow_date=row[2],
-            follow_back=bool(row[3]),
-            follow_back_date=row[4],
-            unfollowed=bool(row[5]),
-            unfollow_date=row[6],
-            last_session_id=row[7],
+            username=row[1],
+            source=row[2],
+            follow_date=row[3],
+            follow_back=bool(row[4]),
+            follow_back_date=row[5],
+            unfollowed=bool(row[6]),
+            unfollow_date=row[7],
+            last_session_id=row[8],
+            muted=bool(row[9]),
         )
 
 
@@ -156,16 +173,10 @@ class LikeRepository:
                 user_id INTEGER PRIMARY KEY,
                 source TEXT,
                 likes_count INTEGER NOT NULL DEFAULT 0 CHECK (likes_count >= 0),
-                last_like_date TEXT CHECK (
-                    last_like_date IS NULL OR last_like_date GLOB '*Z'
-                    OR last_like_date GLOB '*+00:00'
-                ),
+                last_like_date TEXT,
                 follow_back INTEGER NOT NULL DEFAULT 0
                     CHECK (follow_back IN (0, 1)),
-                follow_back_date TEXT CHECK (
-                    follow_back_date IS NULL OR follow_back_date GLOB '*Z'
-                    OR follow_back_date GLOB '*+00:00'
-                ),
+                follow_back_date TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
             """)
@@ -184,7 +195,13 @@ class LikeRepository:
                 follow_back = excluded.follow_back,
                 follow_back_date = excluded.follow_back_date
             """,
-            astuple(record),
+            astuple(
+                replace(
+                    record,
+                    last_like_date=optional_utc_timestamp(record.last_like_date),
+                    follow_back_date=optional_utc_timestamp(record.follow_back_date),
+                )
+            ),
         )
 
     def get(self, user_id: int) -> LikeRecord | None:
@@ -214,16 +231,10 @@ class CommentRepository:
                 source TEXT,
                 comments_count INTEGER NOT NULL DEFAULT 0
                     CHECK (comments_count >= 0),
-                last_comment_date TEXT CHECK (
-                    last_comment_date IS NULL OR last_comment_date GLOB '*Z'
-                    OR last_comment_date GLOB '*+00:00'
-                ),
+                last_comment_date TEXT,
                 follow_back INTEGER NOT NULL DEFAULT 0
                     CHECK (follow_back IN (0, 1)),
-                follow_back_date TEXT CHECK (
-                    follow_back_date IS NULL OR follow_back_date GLOB '*Z'
-                    OR follow_back_date GLOB '*+00:00'
-                ),
+                follow_back_date TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
             """)
@@ -242,7 +253,13 @@ class CommentRepository:
                 follow_back = excluded.follow_back,
                 follow_back_date = excluded.follow_back_date
             """,
-            astuple(record),
+            astuple(
+                replace(
+                    record,
+                    last_comment_date=optional_utc_timestamp(record.last_comment_date),
+                    follow_back_date=optional_utc_timestamp(record.follow_back_date),
+                )
+            ),
         )
 
     def get(self, user_id: int) -> CommentRecord | None:
@@ -272,16 +289,10 @@ class StoryRepository:
                 source TEXT,
                 story_views_count INTEGER NOT NULL DEFAULT 0
                     CHECK (story_views_count >= 0),
-                last_story_date TEXT CHECK (
-                    last_story_date IS NULL OR last_story_date GLOB '*Z'
-                    OR last_story_date GLOB '*+00:00'
-                ),
+                last_story_date TEXT,
                 follow_back INTEGER NOT NULL DEFAULT 0
                     CHECK (follow_back IN (0, 1)),
-                follow_back_date TEXT CHECK (
-                    follow_back_date IS NULL OR follow_back_date GLOB '*Z'
-                    OR follow_back_date GLOB '*+00:00'
-                ),
+                follow_back_date TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
             """)
@@ -300,7 +311,13 @@ class StoryRepository:
                 follow_back = excluded.follow_back,
                 follow_back_date = excluded.follow_back_date
             """,
-            astuple(record),
+            astuple(
+                replace(
+                    record,
+                    last_story_date=optional_utc_timestamp(record.last_story_date),
+                    follow_back_date=optional_utc_timestamp(record.follow_back_date),
+                )
+            ),
         )
 
     def get(self, user_id: int) -> StoryRecord | None:
@@ -329,10 +346,7 @@ class DMRepository:
                 user_id INTEGER PRIMARY KEY,
                 source TEXT,
                 dm_count INTEGER NOT NULL DEFAULT 0 CHECK (dm_count >= 0),
-                last_dm_date TEXT CHECK (
-                    last_dm_date IS NULL OR last_dm_date GLOB '*Z'
-                    OR last_dm_date GLOB '*+00:00'
-                ),
+                last_dm_date TEXT,
                 last_message TEXT,
                 last_reply TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -352,7 +366,11 @@ class DMRepository:
                 last_message = excluded.last_message,
                 last_reply = excluded.last_reply
             """,
-            astuple(record),
+            astuple(
+                replace(
+                    record, last_dm_date=optional_utc_timestamp(record.last_dm_date)
+                )
+            ),
         )
 
     def get(self, user_id: int) -> DMRecord | None:

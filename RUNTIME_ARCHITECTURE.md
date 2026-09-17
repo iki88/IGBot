@@ -29,6 +29,34 @@ Fleet Runtime
        -> wait for the next eligible account session
 ```
 
+### Desktop runtime entry point
+
+The desktop application starts the native runtime through one authoritative path:
+
+```text
+MainWindow
+  -> UI SessionController
+  -> PhoneScheduler
+  -> Native Runtime SessionController
+  -> StartupPipeline
+  -> SchedulerLoop
+  -> FollowModule
+  -> AndroidFollowProvider
+  -> Instagram
+```
+
+`PhoneScheduler` selects the configured account and creates its native Account
+Session. The native `SessionController` owns the shared `RuntimeContext`, runs the
+startup stages, and transfers control to `SchedulerLoop`. Runtime events flow back
+through the existing desktop logging and status boundaries; exceptions are never
+silently converted into successful completion.
+
+Native execution is the default and has no automatic legacy fallback. The legacy
+`SessionEngine`/InstaAddict subprocess path may be selected only through the
+explicit `legacy` compatibility mode. This keeps compatibility available for
+deliberate testing while guaranteeing that ordinary Start actions never create an
+InstaAddict subprocess.
+
 The phone is the unit the operator starts and stops. A started phone owns one
 persistent Phone Scheduler. The scheduler remains alive while no account is
 eligible and wakes when a schedule, configuration, or stop event requires it.
@@ -1101,6 +1129,27 @@ Defines the only logging interface used by the native runtime. It emits
 provider-independent debug, information, warning, and error messages with optional
 structured fields. Destination adapters, persistence, UI delivery, and Backend API
 delivery remain outside runtime components.
+
+### Global Settings
+
+`<IGBot workspace>/global_settings.json` is the single canonical source of Global
+Settings. It is an IGBot-owned document rather than an InstaAddict engine file or
+an account configuration because these values apply to the application and every
+account. Keeping it at the workspace boundary makes one installation's settings
+portable with that installation while preventing duplication across accounts.
+
+`GlobalSettingsService` is the sole persistence boundary. The Global Settings UI
+reads a complete snapshot from the service at startup and writes a complete
+snapshot only when the operator saves. Writes are atomic and verified before the
+editor is marked clean. Unsaved widget values remain draft state and are never
+authoritative runtime configuration.
+
+Runtime session composition reads a fresh persisted snapshot through
+`GlobalSettingsService.runtime_settings()` and supplies that view to
+`RuntimeContext`. Runtime components read settings only from that context. They
+never inspect UI widgets, maintain a second settings file, or write Global
+Settings. The UI is the writer; session composition and the UI are readers; the
+service is their shared storage boundary.
 
 ### InternetChecker
 

@@ -7,6 +7,8 @@ import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
+from math import ceil
 
 from IGBot.runtime.candidates import Candidate
 from IGBot.runtime.context import RuntimeContext
@@ -16,6 +18,7 @@ from IGBot.runtime.follow.android_models import (
 )
 from IGBot.runtime.follow.contracts import ContactScraper
 from IGBot.runtime.follow.models import CandidateProfile
+from IGBot.runtime.profile_ready import wait_for_profile_ready
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +28,30 @@ class _Node:
     resource_id: str
     bounds: tuple[int, int, int, int]
     scrollable: bool = False
+    class_name: str = ""
+    checkable: bool = False
+    checked: bool = False
+
+    @property
+    def center(self) -> tuple[int, int]:
+        left, top, right, bottom = self.bounds
+        return ((left + right) // 2, (top + bottom) // 2)
+
+
+class _SearchState(StrEnum):
+    RESULTS = "results"
+    SEARCH_RESULTS = "search_results"
+    ACCOUNTS_RESULTS = "accounts_results"
+    PROFILE = "profile"
+
+
+@dataclass(frozen=True, slots=True)
+class _MuteSwitch:
+    """One dynamically discovered switch on Instagram's Mute sheet."""
+
+    identity: tuple[str, ...]
+    bounds: tuple[int, int, int, int]
+    checked: bool
 
     @property
     def center(self) -> tuple[int, int]:
@@ -68,6 +95,16 @@ class AndroidFollowProvider:
         "profile_name",
     )
     _BIOGRAPHY_IDS = ("profile_header_bio_text", "profile_bio")
+    _BIOGRAPHY_CONTAINER_IDS = ("profile_user_info_compose_view",)
+    _CATEGORY_IDS = ("profile_header_business_category",)
+    _WEBSITE_IDS = ("text_view",)
+    _PROFILE_LINKS_IDS = ("profile_links_view",)
+    _ADDRESS_IDS = ("address_text",)
+    _POST_COUNT_IDS = ("profile_header_familiar_post_count_value",)
+    _FOLLOWER_COUNT_IDS = ("profile_header_familiar_followers_value",)
+    _FOLLOWING_COUNT_IDS = ("profile_header_familiar_following_value",)
+    _VERIFIED_IDS = ("action_bar_title_verified_badge",)
+    _CONTACT_DIALOG_IDS = ("contact_options_rv",)
     _CONTACT_IDS = (
         "button_container",
         "profile_header_contact_button",
@@ -84,6 +121,9 @@ class AndroidFollowProvider:
         "private_profile_empty_state",
         "private_account",
     )
+    _FOLLOWING_MUTE_ROW_IDS = ("follow_sheet_mute_row",)
+    _MUTE_TITLE_IDS = ("title_text_view",)
+    _BOTTOM_SHEET_IDS = ("bottom_sheet_container_view",)
 
     def __init__(
         self,
@@ -91,18 +131,34 @@ class AndroidFollowProvider:
         *,
         device_factory: Callable[[str], object] | None = None,
         sleeper: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
         navigation_wait: float = 1.0,
         verification_delay: float = 2.0,
+        search_timeout: float = 15.0,
+        search_poll_interval: float = 0.5,
+        profile_observer: (
+            Callable[[RuntimeContext, CandidateProfile], None] | None
+        ) = None,
+        mute_after_follow: bool = False,
     ) -> None:
         if navigation_wait < 0:
             raise ValueError("Navigation wait cannot be negative")
         if verification_delay < 0:
             raise ValueError("Verification delay cannot be negative")
+        if search_timeout < 0:
+            raise ValueError("Search timeout cannot be negative")
+        if search_poll_interval <= 0:
+            raise ValueError("Search poll interval must be positive")
         self._contact_scraper = contact_scraper
         self._device_factory = device_factory or self._connect
         self._sleeper = sleeper
+        self._clock = clock
         self._navigation_wait = navigation_wait
         self._verification_delay = verification_delay
+        self._search_timeout = search_timeout
+        self._search_poll_interval = search_poll_interval
+        self._profile_observer = profile_observer
+        self._mute_after_follow = mute_after_follow
 
     def locate_source(
         self, context: RuntimeContext, source_username: str
@@ -110,75 +166,240 @@ class AndroidFollowProvider:
         """Locate and open an exact source username through Instagram Search."""
 
         username = source_username.strip()
+        context.logger.info("[Search] Starting source search", source=username)
         if not username:
+            context.logger.error("[Search] Action failed", reason="empty source")
             return AndroidFollowResult(
                 AndroidFollowStatus.SOURCE_NOT_FOUND,
                 "Source username cannot be empty.",
             )
         try:
             device = self._device(context)
-            search_tab = self._find_navigation(
-                self._nodes(device.dump_hierarchy(compressed=False)),
-                self._SEARCH_TAB_IDS,
-                "search",
-            )
-            if search_tab is None:
-                return self._source_not_found(username, "Search tab is unavailable.")
-            self._tap(device, search_tab)
-
-            search_input = self._find_by_id(
-                self._fresh_nodes(device), self._SEARCH_INPUT_IDS
-            )
-            if search_input is None:
-                return self._source_not_found(username, "Search input is unavailable.")
-            self._tap(device, search_input)
-            device.send_keys(username, clear=True)
-            self._wait()
-
-            exact = self._exact_username(self._fresh_nodes(device), username)
-            if exact is not None:
-                self._tap(device, exact)
-                return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
-
-            search_action = self._find_text(self._fresh_nodes(device), "search")
-            if search_action is None:
-                return self._source_not_found(username, "Search action is unavailable.")
-            self._tap(device, search_action)
-
-            accounts_tab = self._find_navigation(
-                self._fresh_nodes(device), self._ACCOUNTS_TAB_IDS, "accounts"
-            )
-            if accounts_tab is None:
-                return self._source_not_found(username, "Accounts tab is unavailable.")
-            self._tap(device, accounts_tab)
-
-            exact = self._exact_username(self._fresh_nodes(device), username)
-            if exact is None:
-                return self._source_not_found(
-                    username, "Exact source username was not found."
+            search_nodes = self._nodes(device.dump_hierarchy(compressed=False))
+            if self._find_by_id(search_nodes, self._SEARCH_INPUT_IDS) is not None:
+                context.logger.info("[Search] Resetting existing Search field")
+            else:
+                context.logger.info("[Search] Opening Search tab")
+                context.logger.debug("[Search] Waiting for Search tab UI hierarchy")
+                search_tab = self._find_navigation(
+                    search_nodes, self._SEARCH_TAB_IDS, "search"
                 )
-            self._tap(device, exact)
-            return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
+                if search_tab is None:
+                    context.logger.info("[Search] Returning to Search navigation")
+                    device.press("back")
+                    search_nodes = self._nodes(device.dump_hierarchy(compressed=False))
+                    search_tab = self._find_navigation(
+                        search_nodes, self._SEARCH_TAB_IDS, "search"
+                    )
+                if search_tab is None:
+                    context.logger.error(
+                        "[Search] Action failed", reason="Search tab unavailable"
+                    )
+                    return self._source_not_found(
+                        username, "Search tab is unavailable."
+                    )
+                context.logger.info(
+                    "[Search] Search tab detected", resource_id=search_tab.resource_id
+                )
+                self._tap(device, search_tab)
+                context.logger.info("[Search] Search tab opened")
+                search_nodes = self._search_nodes(
+                    context, device, "Search field", retry=False
+                )
+            search_input = self._find_by_id(search_nodes, self._SEARCH_INPUT_IDS)
+            if search_input is None:
+                context.logger.error(
+                    "[Search] Action failed", reason="Search field unavailable"
+                )
+                return self._source_not_found(username, "Search input is unavailable.")
+            context.logger.info(
+                "[Search] Search field detected", resource_id=search_input.resource_id
+            )
+            self._tap(device, search_input)
+            context.logger.info("[Search] Searching source", source=username)
+            device.send_keys(username, clear=True)
+            context.logger.info("[Search] Source username entered", source=username)
+            return self._poll_source_search(context, device, username)
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
+            context.logger.error("[Search] Action failed", reason=str(error))
             return self._source_not_found(username, f"Source search failed: {error}")
+
+    def _poll_source_search(
+        self, context: RuntimeContext, device: object, username: str
+    ) -> AndroidFollowResult:
+        state = _SearchState.RESULTS
+        deadline = self._clock() + self._search_timeout
+        attempt = 0
+        while True:
+            attempt += 1
+            context.logger.debug(
+                "[Search] Waiting for UI element",
+                state=state.value,
+                attempt=attempt,
+                timeout_seconds=self._search_timeout,
+            )
+            hierarchy = device.dump_hierarchy(compressed=False)
+            nodes = self._nodes(hierarchy)
+            context.logger.debug(
+                "[Search] UI hierarchy received",
+                state=state.value,
+                attempt=attempt,
+                visible_nodes=len(nodes),
+            )
+
+            if state is _SearchState.PROFILE:
+                profile_username = self._profile_username(nodes)
+                if profile_username.casefold() == username.casefold():
+                    context.logger.info(
+                        "[Search] Source profile opened", source=username
+                    )
+                    return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
+            else:
+                if any(
+                    self._id_has_suffix(node.resource_id, ("row_search_keyword_title",))
+                    for node in nodes
+                ):
+                    context.logger.debug("[Search] Keyword suggestion ignored")
+                exact = self._exact_search_user_row(hierarchy, username)
+                if exact is not None:
+                    if state is _SearchState.RESULTS:
+                        context.logger.info("[Search] Exact account already visible")
+                    elif state is _SearchState.ACCOUNTS_RESULTS:
+                        context.logger.info(
+                            "[Search] Exact account detected after Accounts"
+                        )
+                    context.logger.info(
+                        "[Search] Exact source username detected",
+                        resource_id=exact.resource_id,
+                        attempt=attempt,
+                    )
+                    context.logger.info("[Search] Opening source profile")
+                    device.click(*exact.center)
+                    context.logger.info("[Search] Source profile click performed")
+                    state = _SearchState.PROFILE
+                elif state is _SearchState.RESULTS:
+                    search_action = self._find_text(nodes, "search")
+                    keyword_visible = (
+                        self._find_by_id(nodes, ("row_search_keyword_title",))
+                        is not None
+                    )
+                    if keyword_visible or search_action is not None or attempt >= 2:
+                        context.logger.info("[Search] Executing search")
+                        if search_action is not None:
+                            device.click(*search_action.center)
+                        else:
+                            device.press("enter")
+                        context.logger.info(
+                            "[Search] Waiting for refreshed search results"
+                        )
+                        state = _SearchState.SEARCH_RESULTS
+                elif state is _SearchState.SEARCH_RESULTS:
+                    accounts_tab = self._find_navigation(
+                        nodes, self._ACCOUNTS_TAB_IDS, "accounts"
+                    )
+                    if accounts_tab is None:
+                        accounts_tab = next(
+                            (
+                                node
+                                for node in nodes
+                                if self._id_has_suffix(
+                                    node.resource_id, ("tab_button_name_text",)
+                                )
+                                and node.text.strip().casefold() == "accounts"
+                            ),
+                            None,
+                        )
+                    if accounts_tab is not None:
+                        context.logger.info(
+                            "[Search] Accounts tab detected",
+                            resource_id=accounts_tab.resource_id,
+                        )
+                        context.logger.info("[Search] Opening Accounts tab")
+                        device.click(*accounts_tab.center)
+                        context.logger.info("[Search] Accounts tab switch performed")
+                        state = _SearchState.ACCOUNTS_RESULTS
+
+            if self._clock() >= deadline:
+                context.logger.error(
+                    "[Search] Source failed after all search strategies",
+                    state=state.value,
+                    attempts=attempt,
+                    source=username,
+                )
+                detail = (
+                    "Source profile did not open before timeout."
+                    if state is _SearchState.PROFILE
+                    else "Exact source username was not found before timeout."
+                )
+                return self._source_not_found(username, detail)
+
+            context.logger.debug(
+                "[Search] Retry scheduled",
+                state=state.value,
+                next_attempt=attempt + 1,
+                wait_seconds=self._search_poll_interval,
+            )
+            self._sleeper(self._search_poll_interval)
+
+    @classmethod
+    def _profile_username(cls, nodes: tuple[_Node, ...]) -> str:
+        node = cls._find_by_id(nodes, cls._PROFILE_USERNAME_IDS)
+        return (node.text or node.description).strip() if node is not None else ""
+
+    def _search_nodes(
+        self,
+        context: RuntimeContext,
+        device: object,
+        element: str,
+        *,
+        retry: bool,
+    ) -> tuple[_Node, ...]:
+        context.logger.debug(
+            "[Search] Waiting for UI element",
+            element=element,
+            wait_seconds=self._navigation_wait,
+        )
+        nodes = self._fresh_nodes(device)
+        context.logger.debug(
+            "[Search] UI hierarchy received",
+            element=element,
+            visible_nodes=len(nodes),
+        )
+        if not retry:
+            context.logger.debug(
+                "[Search] Retry not configured for this UI step", element=element
+            )
+        return nodes
 
     def open_followers(self, context: RuntimeContext) -> AndroidFollowResult:
         """Open the source profile's Followers list."""
 
         try:
+            context.logger.info("[Followers] Locating Followers control")
             device = self._device(context)
+            context.logger.debug("[Followers] Reading source profile hierarchy")
             nodes = self._nodes(device.dump_hierarchy(compressed=False))
             followers = self._find_by_id(nodes, self._FOLLOWERS_IDS)
             if followers is None:
                 followers = self._find_text(nodes, "followers")
             if followers is None:
+                context.logger.error(
+                    "[Followers] Action failed",
+                    reason="Followers control unavailable",
+                )
                 return AndroidFollowResult(
                     AndroidFollowStatus.FOLLOW_FAILED,
                     "Followers control is unavailable.",
                 )
+            context.logger.info(
+                "[Followers] Followers control found",
+                resource_id=followers.resource_id,
+            )
             self._tap(device, followers)
+            context.logger.info("[Followers] Followers list opened")
             return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
+            context.logger.error("[Followers] Action failed", reason=str(error))
             return AndroidFollowResult(
                 AndroidFollowStatus.FOLLOW_FAILED,
                 f"Opening Followers failed: {error}",
@@ -254,35 +475,139 @@ class AndroidFollowProvider:
         """Open an exact visible follower and read profile qualification facts."""
 
         try:
+            context.logger.info(
+                "[Candidate] Locating exact candidate", username=candidate.username
+            )
             device = self._device(context)
             exact = self._exact_username(self._fresh_nodes(device), candidate.username)
             if exact is None:
+                context.logger.error(
+                    "[Candidate] Action failed",
+                    reason="candidate not visible",
+                    username=candidate.username,
+                )
                 return AndroidFollowResult(
                     AndroidFollowStatus.FOLLOW_FAILED,
                     f"Candidate is not visible: {candidate.username}",
                 )
+            context.logger.info(
+                "[Candidate] Exact candidate found", resource_id=exact.resource_id
+            )
+            context.logger.info("[Candidate] Opening candidate profile")
             self._tap(device, exact)
-            nodes = self._fresh_nodes(device)
+            context.logger.debug("[Candidate] Verifying opened profile")
+            self._wait()
+            hierarchy = device.dump_hierarchy(compressed=False)
+            nodes = self._nodes(hierarchy)
             username_node = self._find_by_id(nodes, self._PROFILE_USERNAME_IDS)
             observed_username = (
                 username_node.text.strip() if username_node is not None else ""
             )
             if observed_username.casefold() != candidate.username.casefold():
+                context.logger.error(
+                    "[Candidate] Profile verification failed",
+                    expected=candidate.username,
+                    observed=observed_username,
+                )
                 return AndroidFollowResult(
                     AndroidFollowStatus.FOLLOW_FAILED,
                     "Opened profile does not match the selected candidate.",
                 )
+            context.logger.info("[Profile] Waiting for profile metrics...")
+            ready_hierarchy = wait_for_profile_ready(
+                device,
+                hierarchy,
+                username_ids=self._PROFILE_USERNAME_IDS,
+                metric_ids=(
+                    *self._FOLLOWER_COUNT_IDS,
+                    *self._FOLLOWING_COUNT_IDS,
+                    *self._POST_COUNT_IDS,
+                ),
+                clock=self._clock,
+                sleeper=self._sleeper,
+            )
+            if ready_hierarchy is None:
+                context.logger.warning("[Profile] Profile loading timeout.")
+                self.return_to_followers(context)
+                return AndroidFollowResult(
+                    AndroidFollowStatus.FOLLOW_FAILED, "Profile loading timeout."
+                )
+            context.logger.info("[Profile] Profile ready.")
+            hierarchy = ready_hierarchy
+            nodes = self._nodes(hierarchy)
             name = self._find_by_id(nodes, self._DISPLAY_NAME_IDS)
-            biography = self._find_by_id(nodes, self._BIOGRAPHY_IDS)
+            biography = self._profile_biography(hierarchy, nodes)
+            expansion = self._biography_expansion(hierarchy, biography)
+            if expansion is not None:
+                context.logger.info("[Candidate] Expanding biography")
+                device.click(*expansion.center)
+                for _attempt in range(3):
+                    self._wait()
+                    hierarchy = device.dump_hierarchy(compressed=False)
+                    nodes = self._nodes(hierarchy)
+                    expanded = self._profile_biography(hierarchy, nodes)
+                    if (
+                        expanded != biography
+                        and self._biography_expansion(hierarchy, expanded) is None
+                    ):
+                        biography = expanded
+                        context.logger.info("[Candidate] Biography expanded")
+                        break
+                else:
+                    raise RuntimeError("Biography did not expand after one tap")
+                ready_hierarchy = wait_for_profile_ready(
+                    device,
+                    hierarchy,
+                    username_ids=self._PROFILE_USERNAME_IDS,
+                    metric_ids=(
+                        *self._FOLLOWER_COUNT_IDS,
+                        *self._FOLLOWING_COUNT_IDS,
+                        *self._POST_COUNT_IDS,
+                    ),
+                    clock=self._clock,
+                    sleeper=self._sleeper,
+                )
+                if ready_hierarchy is None:
+                    context.logger.warning("[Profile] Profile loading timeout.")
+                    self.return_to_followers(context)
+                    return AndroidFollowResult(
+                        AndroidFollowStatus.FOLLOW_FAILED, "Profile loading timeout."
+                    )
+                hierarchy = ready_hierarchy
+                nodes = self._nodes(hierarchy)
+            category = self._find_by_id(nodes, self._CATEGORY_IDS)
+            website = self._find_by_id(nodes, self._WEBSITE_IDS)
+            address = self._find_by_id(nodes, self._ADDRESS_IDS)
+            follow_button = self._follow_button(nodes)
+            website_value = website.text.strip() if website is not None else ""
             profile = CandidateProfile(
                 candidate=candidate,
                 username=observed_username,
                 display_name=name.text.strip() if name is not None else "",
-                biography=biography.text.strip() if biography is not None else "",
+                biography=biography,
                 is_private=self._is_private(nodes),
+                category=category.text.strip() if category is not None else "",
+                website=website_value,
+                address=address.text.strip() if address is not None else "",
+                followers=self._profile_count(nodes, self._FOLLOWER_COUNT_IDS),
+                following=self._profile_count(nodes, self._FOLLOWING_COUNT_IDS),
+                posts=self._profile_count(nodes, self._POST_COUNT_IDS),
+                is_business=category is not None,
+                is_verified=self._find_by_id(nodes, self._VERIFIED_IDS) is not None,
+                follow_status=self._button_state(follow_button),
+                has_external_links=(
+                    self._find_by_id(nodes, self._PROFILE_LINKS_IDS) is not None
+                    or bool(website_value)
+                ),
             )
+            context.logger.info(
+                "[Candidate] Profile verified", username=observed_username
+            )
+            if self._profile_observer is not None:
+                self._profile_observer(context, profile)
             return AndroidFollowResult(AndroidFollowStatus.SUCCESS, profile=profile)
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
+            context.logger.error("[Candidate] Action failed", reason=str(error))
             return AndroidFollowResult(
                 AndroidFollowStatus.FOLLOW_FAILED,
                 f"Opening candidate profile failed: {error}",
@@ -302,18 +627,28 @@ class AndroidFollowProvider:
             device = self._device(context)
             contact = self._find_contact(self._fresh_nodes(device))
             if contact is None:
+                context.logger.info("[Contact] No Contact button found.")
                 return AndroidFollowResult(AndroidFollowStatus.CONTACT_NOT_AVAILABLE)
+            context.logger.info("[Contact] Opening Contact...")
             self._tap(device, contact)
             try:
                 hierarchy = device.dump_hierarchy(compressed=False)
+                if (
+                    self._find_by_id(self._nodes(hierarchy), self._CONTACT_DIALOG_IDS)
+                    is None
+                ):
+                    raise RuntimeError("Contact dialog did not open")
+                context.logger.info("[Contact] Contact dialog opened.")
                 details = dict(self._contact_scraper.scrape(context, hierarchy))
             finally:
+                context.logger.info("[Contact] Closing Contact.")
                 self._navigate_back(context, device)
             if not self._is_profile_screen(self._fresh_nodes(device)):
                 return AndroidFollowResult(
                     AndroidFollowStatus.FOLLOW_FAILED,
                     "Contact popup closed, but the profile screen did not return.",
                 )
+            context.logger.info("[Contact] Contact scraping complete.")
             return AndroidFollowResult(
                 AndroidFollowStatus.CONTACT_SCRAPED,
                 contact_details=details,
@@ -344,14 +679,10 @@ class AndroidFollowProvider:
                 )
             else:
                 device.click(*button.center)
-                self._sleeper(self._verification_delay)
-                verified = self._button_state(
-                    self._follow_button(
-                        self._nodes(device.dump_hierarchy(compressed=False))
-                    )
-                )
+                verified = self._poll_follow_state(context, device)
                 if verified == "following":
                     result = AndroidFollowResult(AndroidFollowStatus.SUCCESS)
+                    return self._mute_and_return(context, device, result)
                 elif verified == "requested":
                     result = AndroidFollowResult(AndroidFollowStatus.REQUESTED)
                 elif verified == "follow":
@@ -369,6 +700,184 @@ class AndroidFollowProvider:
                 AndroidFollowStatus.FOLLOW_FAILED,
                 f"Follow execution failed: {error}",
             )
+
+    def _mute_and_return(
+        self,
+        context: RuntimeContext,
+        device: object,
+        result: AndroidFollowResult,
+    ) -> AndroidFollowResult:
+        """Apply the optional post-follow mute action and restore Followers."""
+
+        if not self._mute_after_follow:
+            context.logger.info("[Mute] Mute users after following disabled. Skipping.")
+            return self._navigate_back(context, device, result)
+
+        warning = ""
+        mute_completed = False
+        try:
+            context.logger.info("[Mute] Opening Following menu...")
+            following = self._follow_button(self._fresh_nodes(device))
+            if self._button_state(following) != "following" or following is None:
+                raise RuntimeError("verified Following control is unavailable")
+            self._tap(device, following)
+            menu_nodes = self._fresh_nodes(device)
+            mute_row = self._find_by_id(menu_nodes, self._FOLLOWING_MUTE_ROW_IDS)
+            if mute_row is None:
+                raise RuntimeError("Following menu did not expose Mute")
+            context.logger.info("[Mute] Following menu opened.")
+            context.logger.info("[Mute] Opening Mute...")
+            self._tap(device, mute_row)
+            hierarchy = device.dump_hierarchy(compressed=False)
+            if not self._is_mute_page(hierarchy):
+                raise RuntimeError("Mute page did not open")
+            context.logger.info("[Mute] Mute page opened.")
+            self._enable_all_mute_switches(context, device, hierarchy)
+            context.logger.info("[Mute] Closing Mute.")
+            self._dismiss_mute_page(device, hierarchy)
+            if self._is_mute_page(device.dump_hierarchy(compressed=False)):
+                device.press("back")
+                self._wait()
+            if self._is_mute_page(device.dump_hierarchy(compressed=False)):
+                raise RuntimeError("Mute page did not close")
+            mute_completed = True
+        except Exception as error:  # noqa: BLE001 - optional Android UI boundary
+            warning = f"Mute could not be completed: {error}"
+            context.logger.warning("[Mute] Action failed.", reason=str(error))
+
+        context.logger.info("[Mute] Returning to Followers list.")
+        returned = self._navigate_back(context, device, result)
+        if warning:
+            detail = " ".join(value for value in (returned.detail, warning) if value)
+            returned = AndroidFollowResult(
+                returned.status,
+                detail,
+                profile=returned.profile,
+                contact_details=returned.contact_details,
+            )
+        followers_restored = self._is_followers_screen(self._fresh_nodes(device))
+        if followers_restored:
+            context.logger.info("[Mute] Mute completed.")
+        else:
+            context.logger.warning("[Mute] Followers list was not detected after mute.")
+        if (
+            mute_completed
+            and followers_restored
+            and returned.status is AndroidFollowStatus.SUCCESS
+        ):
+            returned = AndroidFollowResult(
+                returned.status,
+                returned.detail,
+                profile=returned.profile,
+                contact_details=returned.contact_details,
+                muted=True,
+            )
+        return returned
+
+    def _enable_all_mute_switches(
+        self, context: RuntimeContext, device: object, hierarchy: str
+    ) -> None:
+        seen: set[tuple[int, ...]] = set()
+        for _attempt in range(10):
+            switches = self._mute_switches(hierarchy)
+            new_switches = [
+                switch for switch in switches if switch.identity not in seen
+            ]
+            for switch in new_switches:
+                seen.add(switch.identity)
+                if switch.checked:
+                    context.logger.info("[Mute] Switch already enabled.")
+                    continue
+                context.logger.info("[Mute] Enabling mute switch...")
+                device.click(*switch.center)
+                self._wait()
+
+            context.logger.info("[Mute] Scrolling for additional mute switches...")
+            sheet = self._find_by_id(self._nodes(hierarchy), self._BOTTOM_SHEET_IDS)
+            if sheet is None:
+                break
+            left, top, right, bottom = sheet.bounds
+            x = (left + right) // 2
+            device.swipe(x, bottom - 1, x, top + 1, duration=0.4)
+            self._wait()
+            next_hierarchy = device.dump_hierarchy(compressed=False)
+            next_switches = self._mute_switches(next_hierarchy)
+            if not any(switch.identity not in seen for switch in next_switches):
+                break
+            hierarchy = next_hierarchy
+
+    def _dismiss_mute_page(self, device: object, hierarchy: str) -> None:
+        sheet = self._find_by_id(self._nodes(hierarchy), self._BOTTOM_SHEET_IDS)
+        if sheet is None:
+            raise RuntimeError("Mute bottom sheet is unavailable")
+        left, top, right, _bottom = sheet.bounds
+        device.click((left + right) // 2, max(1, top // 2))
+        self._wait()
+
+    @classmethod
+    def _is_mute_page(cls, hierarchy: str) -> bool:
+        nodes = cls._nodes(hierarchy)
+        title = cls._find_by_id(nodes, cls._MUTE_TITLE_IDS)
+        return (
+            title is not None
+            and cls._button_state(title) == "mute"
+            and cls._find_by_id(nodes, cls._BOTTOM_SHEET_IDS) is not None
+        )
+
+    @classmethod
+    def _mute_switches(cls, hierarchy: str) -> tuple[_MuteSwitch, ...]:
+        root = ET.fromstring(hierarchy)
+        switches: list[_MuteSwitch] = []
+
+        def visit(
+            element: ET.Element,
+            path: tuple[int, ...],
+            descriptors: tuple[str, ...],
+        ) -> None:
+            resource_id = element.get("resource-id", "").rsplit("/", 1)[-1]
+            label = (element.get("text", "") or element.get("content-desc", "")).strip()
+            descriptor = "|".join(value for value in (resource_id, label) if value)
+            trail = (*descriptors, descriptor) if descriptor else descriptors
+            if (
+                element.tag == "node"
+                and element.get("class") == "android.widget.ToggleButton"
+                and element.get("checkable") == "true"
+                and element.get("visible-to-user", "true") == "true"
+            ):
+                match = cls._BOUNDS_PATTERN.fullmatch(element.get("bounds", ""))
+                if match is not None:
+                    switches.append(
+                        _MuteSwitch(
+                            identity=trail or tuple(str(index) for index in path),
+                            bounds=tuple(int(value) for value in match.groups()),
+                            checked=element.get("checked") == "true",
+                        )
+                    )
+            for index, child in enumerate(element):
+                visit(child, (*path, index), trail)
+
+        visit(root, (), ())
+        return tuple(switches)
+
+    def _poll_follow_state(self, context: RuntimeContext, device: object) -> str:
+        """Observe the Follow button throughout the configured verification window."""
+        interval = min(0.5, self._verification_delay or 0)
+        polls = max(1, ceil(self._verification_delay / interval)) if interval else 1
+        state = ""
+        for attempt in range(polls + 1):
+            state = self._button_state(
+                self._follow_button(
+                    self._nodes(device.dump_hierarchy(compressed=False))
+                )
+            )
+            context.logger.debug(
+                "[Follow] Verification poll",
+                attempt=attempt + 1,
+                state=state or "unavailable",
+            )
+            if attempt < polls:
+                self._sleeper(interval)
+        return state
 
     def _navigate_back(
         self,
@@ -393,8 +902,22 @@ class AndroidFollowProvider:
 
     def return_to_followers(self, context: RuntimeContext) -> AndroidFollowResult:
         """Return one level to the existing followers list without reopening it."""
-
-        return self._navigate_back(context, self._device(context))
+        context.logger.info("[Candidate] Returning to Followers list...")
+        device = self._device(context)
+        result = self._navigate_back(context, device)
+        if result.status is not AndroidFollowStatus.SUCCESS:
+            return result
+        if not self._is_followers_screen(self._fresh_nodes(device)):
+            context.logger.error(
+                "[Candidate] Followers list recovery failed",
+                reason="followers list not detected",
+            )
+            return AndroidFollowResult(
+                AndroidFollowStatus.FOLLOW_FAILED,
+                "Followers list did not return after candidate rejection.",
+            )
+        context.logger.info("[Candidate] Followers list restored.")
+        return result
 
     def _device(self, context: RuntimeContext) -> object:
         return self._device_factory(context.session.phone_id)
@@ -425,6 +948,9 @@ class AndroidFollowProvider:
                     resource_id=element.get("resource-id", ""),
                     bounds=tuple(int(value) for value in bounds.groups()),
                     scrollable=element.get("scrollable", "false") == "true",
+                    class_name=element.get("class", ""),
+                    checkable=element.get("checkable", "false") == "true",
+                    checked=element.get("checked", "false") == "true",
                 )
             )
         return tuple(nodes)
@@ -485,6 +1011,29 @@ class AndroidFollowProvider:
         )
 
     @classmethod
+    def _exact_search_user_row(cls, hierarchy: str, username: str) -> _Node | None:
+        """Match only usernames nested inside clickable account-result rows."""
+
+        root = ET.fromstring(hierarchy)
+        for row in root.iter("node"):
+            if not cls._id_has_suffix(
+                row.get("resource-id", ""), ("row_search_user_container",)
+            ):
+                continue
+            if any(
+                cls._id_has_suffix(
+                    child.get("resource-id", ""), ("row_search_user_username",)
+                )
+                and child.get("text", "").strip().casefold() == username.casefold()
+                for child in row.iter("node")
+            ):
+                return cls._find_by_id(
+                    cls._nodes(ET.tostring(row, encoding="unicode")),
+                    ("row_search_user_container",),
+                )
+        return None
+
+    @classmethod
     def _find_scrollable(cls, nodes: tuple[_Node, ...]) -> _Node | None:
         return next(
             (
@@ -498,19 +1047,119 @@ class AndroidFollowProvider:
 
     @classmethod
     def _find_contact(cls, nodes: tuple[_Node, ...]) -> _Node | None:
-        return next(
+        labelled = cls._find_text(nodes, "contact")
+        container = next(
             (
                 node
                 for node in nodes
                 if cls._id_has_suffix(node.resource_id, cls._CONTACT_IDS)
-                and cls._button_state(node) == "contact"
+                and (
+                    cls._button_state(node) == "contact"
+                    or (labelled is not None and cls._contains(node, labelled))
+                )
             ),
             None,
-        ) or cls._find_text(nodes, "contact")
+        )
+        return container or labelled
+
+    @staticmethod
+    def _contains(container: _Node, child: _Node) -> bool:
+        left, top, right, bottom = container.bounds
+        child_left, child_top, child_right, child_bottom = child.bounds
+        return (
+            left <= child_left
+            and top <= child_top
+            and right >= child_right
+            and bottom >= child_bottom
+        )
+
+    @classmethod
+    def _profile_count(
+        cls, nodes: tuple[_Node, ...], identifiers: tuple[str, ...]
+    ) -> int | None:
+        node = cls._find_by_id(nodes, identifiers)
+        if node is None:
+            return None
+        value = node.text.strip().casefold().replace(",", "")
+        multiplier = 1
+        if value.endswith("k"):
+            value, multiplier = value[:-1], 1_000
+        elif value.endswith("m"):
+            value, multiplier = value[:-1], 1_000_000
+        try:
+            return int(float(value) * multiplier)
+        except ValueError:
+            return None
+
+    @classmethod
+    def _profile_biography(cls, hierarchy: str, nodes: tuple[_Node, ...]) -> str:
+        explicit = cls._find_by_id(nodes, cls._BIOGRAPHY_IDS)
+        if explicit is not None:
+            return explicit.text.strip()
+        root = ET.fromstring(hierarchy)
+        container = next(
+            (
+                element
+                for element in root.iter("node")
+                if cls._id_has_suffix(
+                    element.get("resource-id", ""), cls._BIOGRAPHY_CONTAINER_IDS
+                )
+            ),
+            None,
+        )
+        if container is None:
+            return ""
+        return next(
+            (
+                element.get("text", "").strip()
+                for element in container.iter("node")
+                if element.get("class") == "android.widget.TextView"
+                and not element.get("resource-id")
+                and element.get("text", "").strip()
+            ),
+            "",
+        )
+
+    @classmethod
+    def _biography_expansion(cls, hierarchy: str, biography: str) -> _Node | None:
+        """Find the clickable ancestor of a visibly truncated Compose biography."""
+
+        if not re.search(r"(?:…|\.{3})\s*(?:\S+\s*){1,3}$", biography):
+            return None
+        root = ET.fromstring(hierarchy)
+        container = next(
+            (
+                element
+                for element in root.iter("node")
+                if cls._id_has_suffix(
+                    element.get("resource-id", ""), cls._BIOGRAPHY_CONTAINER_IDS
+                )
+            ),
+            None,
+        )
+        if container is None:
+            return None
+        for parent in container.iter("node"):
+            if parent.get("clickable") != "true":
+                continue
+            if any(
+                child.get("class") == "android.widget.TextView"
+                and child.get("text", "").strip() == biography
+                for child in parent.iter("node")
+            ):
+                return cls._nodes(ET.tostring(parent, encoding="unicode"))[0]
+        return None
 
     @classmethod
     def _is_profile_screen(cls, nodes: tuple[_Node, ...]) -> bool:
         return cls._find_by_id(nodes, cls._PROFILE_USERNAME_IDS) is not None
+
+    @classmethod
+    def _is_followers_screen(cls, nodes: tuple[_Node, ...]) -> bool:
+        return (
+            cls._find_by_id(nodes, cls._FOLLOWER_LIST_IDS) is not None
+            or cls._find_by_id(nodes, cls._USERNAME_IDS) is not None
+        )
 
     @classmethod
     def _follow_button(cls, nodes: tuple[_Node, ...]) -> _Node | None:

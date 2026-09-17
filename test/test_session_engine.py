@@ -110,6 +110,24 @@ def test_validation_rejects_invalid_configuration_or_device(
         engine.validate()
 
 
+def test_start_without_application_id_fails_before_runtime_launch(tmp_path):
+    account = make_account(tmp_path, app_id="")
+    launches = []
+    states = []
+    engine = SessionEngine(
+        account,
+        tmp_path,
+        process_factory=lambda *args, **kwargs: launches.append((args, kwargs)),
+        device_validator=lambda _: True,
+    )
+
+    with pytest.raises(SessionValidationError, match="Application ID"):
+        engine.start(states.append)
+
+    assert states == [SessionState.STARTING, SessionState.ERROR]
+    assert launches == []
+
+
 def test_duplicate_start_is_rejected(tmp_path):
     account = make_account(tmp_path)
     engine = SessionEngine(account, tmp_path, device_validator=lambda _: True)

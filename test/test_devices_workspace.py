@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QObject, Signal
@@ -277,6 +278,170 @@ def test_phone_toolbar_actions_use_compact_icons(application):
     assert window.toolbar.view_phone_action.isEnabled()
     assert window.toolbar.iconSize().width() == 16
     assert not window.toolbar.options_button.icon().isNull()
+    window.close()
+
+
+def test_device_options_exposes_idle_only_snapshot_action(application, mocker):
+    device = DeviceRecord("phone-a", "Rack One", True)
+    window = MainWindow(_DeviceService())
+    window.device_controller._records = {device.serial: device}
+    window._open_phone_accounts(device, [])
+    capture = mocker.patch.object(window.device_controller, "take_snapshot")
+
+    actions = [
+        action.text() for action in window.phone_accounts_page.options_menu.actions()
+    ]
+    assert actions == [
+        "Rename Device",
+        "Open Device Folder",
+        "",
+        "Delete Device",
+        "Take Snapshot",
+    ]
+    assert window.phone_accounts_page.snapshot_action.isEnabled()
+    window.phone_accounts_page.snapshot_action.trigger()
+    capture.assert_called_once_with("phone-a")
+
+    mocker.patch.object(
+        window.session_controller, "state_for", return_value=SessionState.RUNNING
+    )
+    window._snapshot_in_progress = False
+    window._update_runtime_toolbar(None)
+    assert not window.phone_accounts_page.snapshot_action.isEnabled()
+    assert (
+        window.phone_accounts_page.snapshot_action.statusTip()
+        == "Stop the phone before taking a snapshot."
+    )
+    window.close()
+
+
+def test_snapshot_completion_verifies_pair_then_opens_exact_folder(
+    application, mocker, caplog, tmp_path
+):
+    window = MainWindow(_DeviceService())
+    opener = mocker.patch.object(window.device_controller, "open_snapshot_folder")
+    directory = tmp_path / "snapshots" / "phone-a"
+    directory.mkdir(parents=True)
+    hierarchy_path = directory / "2026-09-11_14-05-09.xml"
+    screenshot_path = directory / "2026-09-11_14-05-09.png"
+    hierarchy_path.write_text("<hierarchy />", encoding="utf-8")
+    screenshot_path.write_bytes(b"png")
+    snapshot = SimpleNamespace(
+        timestamp="2026-09-11_14-05-09",
+        directory=directory,
+        hierarchy_path=hierarchy_path,
+        screenshot_path=screenshot_path,
+    )
+    window._snapshot_in_progress = True
+
+    with caplog.at_level("INFO"):
+        window._snapshot_completed(snapshot)
+        application.processEvents()
+
+    opener.assert_called_once_with(snapshot.directory)
+    assert "[Snapshot] Opening snapshot folder." in caplog.text
+    assert window._snapshot_in_progress
+    window._snapshot_folder_completed((directory, False))
+    application.processEvents()
+    assert "[Snapshot] Snapshot completed." in caplog.text
+    assert "[Snapshot] Snapshot completed." in window.live_log.output.toPlainText()
+    window.close()
+
+
+def test_snapshot_completion_rejects_a_missing_output_file(
+    application, mocker, caplog, tmp_path
+):
+    window = MainWindow(_DeviceService())
+    opener = mocker.patch.object(window.device_controller, "open_snapshot_folder")
+    directory = tmp_path / "snapshots" / "phone-a"
+    directory.mkdir(parents=True)
+    hierarchy_path = directory / "capture.xml"
+    hierarchy_path.write_text("<hierarchy />", encoding="utf-8")
+    snapshot = SimpleNamespace(
+        directory=directory,
+        hierarchy_path=hierarchy_path,
+        screenshot_path=directory / "capture.png",
+    )
+
+    with caplog.at_level("ERROR"):
+        window._snapshot_completed(snapshot)
+
+    opener.assert_not_called()
+    assert "Verifying saved files failed" in caplog.text
+    assert "capture.png" in caplog.text
+    window.close()
+
+
+def test_snapshot_failure_is_written_to_live_log(application, caplog):
+    window = MainWindow(_DeviceService())
+
+    with caplog.at_level("ERROR"):
+        window._snapshot_failed("UIAutomator2 connection failed")
+        application.processEvents()
+
+    assert "[Snapshot] Failed:" in caplog.text
+    assert "UIAutomator2 connection failed" in window.live_log.output.toPlainText()
+    window.close()
+
+
+def test_late_save_completion_cannot_rebind_another_open_account(application):
+    window = MainWindow(_DeviceService())
+    account_a = AssignedAccount(
+        "account_a",
+        "phone-a",
+        "com.instagram.a",
+        Path("accounts/account_a/config.yml"),
+    )
+    account_b = AssignedAccount(
+        "account_b",
+        "phone-a",
+        "com.instagram.b",
+        Path("accounts/account_b/config.yml"),
+    )
+    updated_a = AssignedAccount(
+        "renamed_a",
+        "phone-a",
+        "com.instagram.a",
+        Path("accounts/renamed_a/config.yml"),
+    )
+    window.account_page.set_account(account_b)
+
+    window._on_account_configuration_saved(account_a, updated_a)
+
+    assert window.account_page.account == account_b
+    assert window.account_page.username.text() == "account_b"
+    assert window.account_page.page_header.title.text() == "account_b"
+    window.close()
+
+
+def test_late_configuration_load_cannot_replace_another_open_account(application):
+    window = MainWindow(_DeviceService())
+    account_a = AssignedAccount(
+        "account_a",
+        "phone-a",
+        "com.instagram.a",
+        Path("accounts/account_a/config.yml"),
+    )
+    account_b = AssignedAccount(
+        "account_b",
+        "phone-a",
+        "com.instagram.b",
+        Path("accounts/account_b/config.yml"),
+    )
+    window.account_page.set_account(account_b)
+
+    window._show_account_configuration(
+        account_a,
+        {
+            "username": "account_a",
+            "password": "secret-a",
+            "app-id": "com.instagram.a",
+        },
+    )
+
+    assert window.account_page.account == account_b
+    assert window.account_page.username.text() == "account_b"
+    assert window.account_page.application_id.text() == "com.instagram.b"
     window.close()
 
 

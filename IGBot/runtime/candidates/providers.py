@@ -43,16 +43,34 @@ class FollowersProvider:
     def next_candidate(self, context: RuntimeContext) -> CandidateResult:
         """Inspect one follower row and return a structured provider outcome."""
 
+        failed_sources: list[str] = []
+        while self._source_index < len(self._sources) and not self._source_open:
+            source = self._sources[self._source_index]
+            if self._discovery.open_source(context, source):
+                self._source_open = True
+                break
+            failed_sources.append(source)
+            self._source_index += 1
+            context.logger.warning(
+                "[Search] Source failed. Trying next configured source.", source=source
+            )
+
         if self._source_index >= len(self._sources):
-            return CandidateResult(CandidateResultStatus.ALL_SOURCES_EXHAUSTED)
+            if failed_sources:
+                context.logger.warning(
+                    "[Search] All configured sources exhausted.",
+                    failed_sources=", ".join(failed_sources),
+                )
+            return CandidateResult(
+                CandidateResultStatus.ALL_SOURCES_EXHAUSTED,
+                detail=(
+                    "Every configured source failed: " + ", ".join(failed_sources)
+                    if failed_sources
+                    else None
+                ),
+            )
 
         source = self._sources[self._source_index]
-        if not self._source_open:
-            if not self._discovery.open_source(context, source):
-                return self._finish_source(
-                    detail=f"Followers source could not be opened: {source}"
-                )
-            self._source_open = True
 
         discovered = self._discovery.next_follower(context, source, self._settings)
         if discovered.status is DiscoveryStatus.SOURCE_EXHAUSTED:

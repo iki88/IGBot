@@ -26,6 +26,10 @@ class CandidateProfileProvider(Protocol):
         """Return the opened profile or None when it cannot be inspected."""
         ...
 
+    def return_to_followers(self, context: RuntimeContext) -> AndroidFollowResult:
+        """Restore the Followers list after a non-fatal candidate rejection."""
+        ...
+
 
 class FollowCandidateQualifier(Protocol):
     """Apply Follow-owned filters to one opened candidate profile."""

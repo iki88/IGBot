@@ -1,4 +1,7 @@
+import json
+
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -7,8 +10,10 @@ from PySide6.QtWidgets import (
     QToolButton,
 )
 
+from IGBot.services.global_settings_service import GlobalSettingsService
 from IGBot.ui.pages.global_settings_page import GlobalSettingsPage
 from IGBot.ui.widgets.configuration_widgets import ConfigurationSection
+from IGBot.ui.widgets.top_toolbar import TopToolbar
 
 
 def test_global_settings_uses_continuous_product_layout(tmp_path):
@@ -159,3 +164,82 @@ def test_global_settings_uses_compact_information_tooltips(tmp_path):
     assert all(button.text() == "ⓘ" for button in info_buttons)
     assert all(button.toolTip().strip() for button in info_buttons)
     assert not page.findChildren(QLabel, "configurationDescription")
+
+
+def test_multiple_global_settings_persist_across_restart(tmp_path):
+    QApplication.instance() or QApplication([])
+    page = GlobalSettingsPage(tmp_path)
+    dirty_states = []
+    page.dirty_changed.connect(dirty_states.append)
+
+    page.start_all_phones_delay.setValue(12)
+    page.wait_after_instagram_launch.setText("8-12")
+    page.airplane_mode_reset.setChecked(True)
+    page.hourly_limits["follows"].setValue(35)
+    page.ai_model.setText("gpt-runtime")
+
+    assert page.is_dirty
+    assert dirty_states == [True]
+    page.save()
+    assert not page.is_dirty
+    assert dirty_states[-1] is False
+
+    restarted = GlobalSettingsPage(tmp_path)
+    assert restarted.start_all_phones_delay.value() == 12
+    assert restarted.wait_after_instagram_launch.text() == "8-12"
+    assert restarted.airplane_mode_reset.isChecked()
+    assert restarted.hourly_limits["follows"].value() == 35
+    assert restarted.ai_model.text() == "gpt-runtime"
+    assert not restarted.is_dirty
+
+
+def test_global_settings_shortcuts_request_save_and_clear_dirty_state(tmp_path):
+    QApplication.instance() or QApplication([])
+    page = GlobalSettingsPage(tmp_path)
+    toolbar = TopToolbar()
+    toolbar.set_context("settings")
+    page.dirty_changed.connect(toolbar.set_save_enabled)
+    saves = []
+    toolbar.save_requested.connect(lambda: (page.save(), saves.append(True)))
+
+    assert {shortcut.toString() for shortcut in toolbar.save_action.shortcuts()} == {
+        QKeySequence("Ctrl+S").toString(),
+        QKeySequence("Meta+S").toString(),
+    }
+    for _shortcut in toolbar.save_action.shortcuts():
+        page.login_retry_limit.setValue(page.login_retry_limit.value() + 1)
+        assert page.is_dirty
+        toolbar.save_action.trigger()
+        assert not page.is_dirty
+
+    assert saves == [True, True]
+
+
+def test_global_settings_save_button_tracks_dirty_state(tmp_path):
+    QApplication.instance() or QApplication([])
+    page = GlobalSettingsPage(tmp_path)
+    toolbar = TopToolbar()
+    toolbar.set_context("settings")
+    toolbar.set_save_enabled(page.is_dirty)
+    page.dirty_changed.connect(toolbar.set_save_enabled)
+
+    assert not page.is_dirty
+    assert toolbar.save_action.isVisible()
+    assert not toolbar.save_action.isEnabled()
+    page.maximum_crash_retries.setValue(2)
+    assert toolbar.save_action.isEnabled()
+    page.save()
+    assert not toolbar.save_action.isEnabled()
+
+
+def test_runtime_settings_are_loaded_from_persisted_canonical_file(tmp_path):
+    service = GlobalSettingsService(tmp_path)
+    settings = service.load()
+    settings["toggle_airplane_mode_between_sessions"] = True
+    service.save(settings)
+
+    runtime_settings = service.runtime_settings()
+
+    assert runtime_settings["toggle_airplane_mode_between_sessions"] is True
+    persisted = json.loads((tmp_path / "global_settings.json").read_text())
+    assert persisted["toggle_airplane_mode_between_sessions"] is True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from uuid import UUID
 
 from IGBot.runtime.context import RuntimeContext
@@ -24,10 +25,13 @@ class SessionController:
         startup_pipeline: StartupPipeline,
         scheduler: SchedulerEntryPoint,
         logger: RuntimeLogger,
+        *,
+        runtime_settings: Mapping[str, object] | None = None,
     ) -> None:
         self._startup_pipeline = startup_pipeline
         self._scheduler = scheduler
         self._logger = logger
+        self._runtime_settings = dict(runtime_settings or {})
         self._contexts: dict[UUID, RuntimeContext] = {}
 
     def start(self, context: SessionContext) -> SessionStartResult:
@@ -36,10 +40,13 @@ class SessionController:
             raise RuntimeError("Startup has already executed for this session.")
 
         handle = SessionHandle(context.session_id)
-        runtime_context = RuntimeContext(context, self._logger)
+        runtime_context = RuntimeContext(
+            context, self._logger, runtime_settings=dict(self._runtime_settings)
+        )
         runtime_context.session_state = SessionState.STARTING
         self._contexts[context.session_id] = runtime_context
         try:
+            self._logger.info("Running StartupPipeline")
             startup_result = self._startup_pipeline.execute(runtime_context)
         except Exception:
             runtime_context.session_state = SessionState.FAILED
@@ -52,6 +59,7 @@ class SessionController:
 
         runtime_context.session_state = SessionState.RUNNING
         try:
+            self._logger.info("Running SchedulerLoop")
             self._scheduler.start(runtime_context)
         except Exception:
             runtime_context.session_state = SessionState.FAILED

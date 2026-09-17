@@ -92,7 +92,12 @@ class TopToolbar(QToolBar):
         self.view_phone_action.triggered.connect(self.view_phone_requested)
         self.save_action = QAction("Save Changes", self)
         self.save_action.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
-        self.save_action.setShortcut(QKeySequence.Save)
+        self.save_action.setShortcuts(
+            (
+                QKeySequence("Ctrl+S"),
+                QKeySequence("Meta+S"),
+            )
+        )
         self.save_action.triggered.connect(self.save_requested)
         self._future_actions = (
             self.add_account_action,
@@ -150,14 +155,18 @@ class TopToolbar(QToolBar):
             self.options_button.setText("Device Options")
         elif context == "devices":
             self.view_phone_action.setVisible(True)
-        elif context == "account":
+        elif context in {"account", "settings"}:
             self.save_action.setVisible(True)
-            self.options_button.setText("Account Options")
+            if context == "account":
+                self.options_button.setText("Account Options")
 
         self.options_button.setMenu(options_menu)
         self.options_action.setVisible(
             context in {"phone", "account"} and options_menu is not None
         )
+
+    def set_save_enabled(self, enabled: bool) -> None:
+        self.save_action.setEnabled(enabled)
 
     def set_runtime_controls(self, can_start: bool, can_stop: bool) -> None:
         self._runtime_running = can_stop

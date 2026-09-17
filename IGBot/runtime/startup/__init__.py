@@ -13,12 +13,18 @@ from IGBot.runtime.startup.models import (
     StartupStageStatus,
 )
 from IGBot.runtime.startup.pipeline import StartupPipeline
+from IGBot.runtime.startup.state_recovery import (
+    InstagramStateProvider,
+    InstagramStateRecovery,
+)
 
 __all__ = [
     "AccountVerificationState",
     "AccountVerifier",
     "AirplaneModeController",
     "InstagramLauncher",
+    "InstagramStateProvider",
+    "InstagramStateRecovery",
     "InternetChecker",
     "StartupPipeline",
     "StartupResult",

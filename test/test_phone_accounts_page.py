@@ -266,3 +266,27 @@ def test_phone_account_table_uses_final_dense_operator_columns():
         == Qt.AlignCenter
     )
     assert application is not None
+
+
+def test_accounts_overview_displays_saved_timer_values(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    directory = tmp_path / "accounts" / "scheduled_account"
+    directory.mkdir(parents=True)
+    config_path = directory / "config.yml"
+    config_path.write_text(
+        "username: scheduled_account\n"
+        "device: phone-a\n"
+        "app-id: com.instagram.android\n"
+        "working-hours: [10.00-12.00, 15.30-17.00]\n",
+        encoding="utf-8",
+    )
+    account = AssignedAccount(
+        "scheduled_account", "phone-a", "com.instagram.android", config_path
+    )
+    page = PhoneAccountsPage()
+
+    page.set_all_accounts([account])
+
+    assert page.model.index(0, page.model.START_HOUR).data() == "10:00,15:30"
+    assert page.model.index(0, page.model.END_HOUR).data() == "12:00,17:00"
+    assert application is not None

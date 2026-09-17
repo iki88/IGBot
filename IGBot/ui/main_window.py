@@ -9,6 +9,7 @@ from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.core.session_engine import SessionState
 from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
 from IGBot.services.device_inventory_service import DeviceInventoryService
+from IGBot.services.global_settings_service import GlobalSettingsService
 from IGBot.ui.controllers.device_controller import DeviceController
 from IGBot.ui.controllers.session_controller import SessionController
 from IGBot.ui.pages.account_page import AccountPage
@@ -46,12 +47,13 @@ class MainWindow(QMainWindow):
         self._workspace_context = "devices"
         self._account_return_context = "devices"
         self._templates = ()
+        self._snapshot_in_progress = False
 
         service = device_service or DeviceInventoryService.for_workspace(Path.cwd())
+        workspace_root = getattr(service, "workspace_root", Path.cwd())
+        self.global_settings_service = GlobalSettingsService(workspace_root)
         self.device_controller = DeviceController(service, self)
-        self.session_controller = SessionController(
-            getattr(service, "workspace_root", Path.cwd()), self
-        )
+        self.session_controller = SessionController(workspace_root, self)
         self.sidebar = NavigationSidebar(self)
         self.toolbar = TopToolbar(self)
         self.pages = QStackedWidget(self)
@@ -60,7 +62,9 @@ class MainWindow(QMainWindow):
         self.live_log = LiveLogPanel(self)
         self.account_page = AccountPage(self)
         self.activity_log_page = ActivityLogPage(self.live_log, self)
-        self.global_settings_page = GlobalSettingsPage(Path.cwd(), self)
+        self.global_settings_page = GlobalSettingsPage(
+            workspace_root, self, self.global_settings_service
+        )
         self.templates_page = TemplatesPage(self)
         self.devices_page.add_device_button.hide()
 
@@ -106,7 +110,7 @@ class MainWindow(QMainWindow):
         self.toolbar.refresh_requested.connect(self.device_controller.refresh)
         self.toolbar.add_device_requested.connect(self.devices_page._show_add_device)
         self.toolbar.add_account_requested.connect(self._show_add_account_dialog)
-        self.toolbar.save_requested.connect(self._save_account_configuration)
+        self.toolbar.save_requested.connect(self._save_current_configuration)
         self.toolbar.view_phone_requested.connect(self._view_phone)
         self.toolbar.start_requested.connect(self._start_phone_scheduler)
         self.toolbar.stop_requested.connect(self._stop_phone_scheduler)
@@ -150,6 +154,7 @@ class MainWindow(QMainWindow):
         self.phone_accounts_page.account_open_requested.connect(self._open_account)
         self.account_page.back_requested.connect(self._return_from_account)
         self.account_page.dirty_changed.connect(self._set_account_dirty)
+        self.global_settings_page.dirty_changed.connect(self._set_global_settings_dirty)
         self.account_page.package_detection_requested.connect(
             self._detect_foreground_package
         )
@@ -160,6 +165,15 @@ class MainWindow(QMainWindow):
             self.device_controller.open_device_folder
         )
         self.phone_accounts_page.delete_requested.connect(self._delete_managed_device)
+        self.phone_accounts_page.snapshot_requested.connect(self._take_snapshot)
+        self.device_controller.snapshot_completed.connect(self._snapshot_completed)
+        self.device_controller.snapshot_failed.connect(self._snapshot_failed)
+        self.device_controller.snapshot_folder_completed.connect(
+            self._snapshot_folder_completed
+        )
+        self.device_controller.snapshot_folder_failed.connect(
+            self._snapshot_folder_failed
+        )
         self.phone_accounts_page.transfer_requested.connect(self._show_transfer_dialog)
         self.phone_accounts_page.archive_requested.connect(self._show_archive_dialog)
         self.phone_accounts_page.restore_requested.connect(self._show_restore_dialog)
@@ -316,6 +330,7 @@ class MainWindow(QMainWindow):
     def _update_runtime_toolbar(self, account) -> None:
         if self._workspace_context != "phone" or not self._managed_phone_serial:
             self.toolbar.set_runtime_controls(False, False)
+            self.phone_accounts_page.set_snapshot_enabled(False)
             return
         state = self.session_controller.state_for(self._managed_phone_serial)
         self.toolbar.set_runtime_controls(
@@ -323,6 +338,60 @@ class MainWindow(QMainWindow):
             state
             in {SessionState.STARTING, SessionState.RUNNING, SessionState.WAITING},
         )
+        idle = state in {
+            SessionState.IDLE,
+            SessionState.STOPPED,
+            SessionState.ERROR,
+        }
+        self.phone_accounts_page.set_snapshot_enabled(
+            idle and not self._snapshot_in_progress
+        )
+
+    def _take_snapshot(self, serial: str) -> None:
+        state = self.session_controller.state_for(serial)
+        if state not in {
+            SessionState.IDLE,
+            SessionState.STOPPED,
+            SessionState.ERROR,
+        }:
+            logger.warning("[Snapshot] Stop the phone before taking a snapshot.")
+            return
+        self._snapshot_in_progress = True
+        self.phone_accounts_page.set_snapshot_enabled(False)
+        self.device_controller.take_snapshot(serial)
+
+    def _snapshot_completed(self, snapshot) -> None:
+        missing = [
+            path
+            for path in (snapshot.hierarchy_path, snapshot.screenshot_path)
+            if not path.is_file() or path.stat().st_size == 0
+        ]
+        if missing:
+            self._snapshot_failed(
+                "Verifying saved files failed: "
+                + ", ".join(str(path) for path in missing)
+            )
+            return
+        if snapshot.hierarchy_path.parent.resolve() != snapshot.directory.resolve() or (
+            snapshot.screenshot_path.parent.resolve() != snapshot.directory.resolve()
+        ):
+            self._snapshot_failed("Saved files do not match the snapshot folder.")
+            return
+        logger.info("[Snapshot] Opening snapshot folder.")
+        self.device_controller.open_snapshot_folder(snapshot.directory)
+
+    def _snapshot_folder_completed(self, result) -> None:
+        self._snapshot_in_progress = False
+        logger.info("[Snapshot] Snapshot completed.")
+        self._update_runtime_toolbar(None)
+
+    def _snapshot_folder_failed(self, reason: str) -> None:
+        self._snapshot_failed(f"Opening snapshot folder failed: {reason}")
+
+    def _snapshot_failed(self, reason: str) -> None:
+        self._snapshot_in_progress = False
+        logger.error("[Snapshot] Failed:\n%s", reason)
+        self._update_runtime_toolbar(None)
 
     def _runtime_state_changed(self, serial: str, status: str) -> None:
         self.devices_page.set_runtime_status(serial, status)
@@ -442,9 +511,27 @@ class MainWindow(QMainWindow):
                 self.account_page.tag.text(),
             )
 
-    def _on_account_configuration_saved(self, account) -> None:
+    def _save_current_configuration(self) -> None:
+        if self._workspace_context == "settings":
+            self._save_global_settings()
+        else:
+            self._save_account_configuration()
+
+    def _save_global_settings(self) -> None:
+        if not self.global_settings_page.is_dirty:
+            return
+        try:
+            self.global_settings_page.save()
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            logger.error("Could not save Global Settings: %s", error)
+            ErrorDialog("Global Settings", str(error), self).exec()
+            return
+        logger.info("Global Settings saved")
+        self.statusBar().showMessage("Global Settings saved.", 3000)
+
+    def _on_account_configuration_saved(self, original, account) -> None:
         current = self.account_page.account
-        if current is not None:
+        if current is not None and current.config_path == original.config_path:
             self.account_page.account = account
             self.account_page.page_header.title.setText(account.username)
             self.toolbar.set_context_title(account.username)
@@ -459,6 +546,10 @@ class MainWindow(QMainWindow):
         if account is not None:
             suffix = " *" if dirty else ""
             self.account_page.page_header.title.setText(account.username + suffix)
+
+    def _set_global_settings_dirty(self, dirty: bool) -> None:
+        if self._workspace_context == "settings":
+            self.toolbar.set_save_enabled(dirty)
 
     def _load_installed_packages(self) -> None:
         account = self.account_page.account
@@ -506,6 +597,7 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentWidget(self.global_settings_page)
         self.toolbar.set_context_title("Global settings")
         self.toolbar.set_context("settings")
+        self.toolbar.set_save_enabled(self.global_settings_page.is_dirty)
         self.live_log.show()
 
     def _open_templates(self) -> None:

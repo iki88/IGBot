@@ -21,4 +21,6 @@ Pipfile.lock
 /accounts/
 /crashes/
 /logs/
+/global_settings.json
 __pycache__/
+snapshots/

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 
 import yaml
@@ -26,27 +29,45 @@ class ScheduleDecision:
     session_key: tuple[str, int, int, str] | None = None
 
 
+class RuntimeMode(StrEnum):
+    """Explicit account-runtime selection; native execution is authoritative."""
+
+    NATIVE = "native"
+    LEGACY = "legacy"
+
+
 class PhoneScheduler:
     """Own the lifecycle and sequential account selection for one phone."""
+
+    _APPLICATION_ID = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+")
 
     def __init__(
         self,
         device: DeviceRecord,
         workspace_root: Path,
         *,
-        runtime_factory: Callable[..., SessionEngine] = SessionEngine,
+        runtime_factory: Callable[..., object] | None = None,
+        runtime_mode: RuntimeMode = RuntimeMode.NATIVE,
         device_validator: Callable[[str], bool] = PhoneManager.is_connected,
         clock: Callable[[], datetime] = datetime.now,
         decision_interval: float = 30.0,
     ) -> None:
         self.device = device
         self.workspace_root = workspace_root
-        self._runtime_factory = runtime_factory
+        self._runtime_mode = runtime_mode
+        if runtime_factory is not None:
+            self._runtime_factory = runtime_factory
+        elif runtime_mode is RuntimeMode.LEGACY:
+            self._runtime_factory = SessionEngine
+        else:
+            from IGBot.runtime.native_integration import create_native_runtime
+
+            self._runtime_factory = create_native_runtime
         self._device_validator = device_validator
         self._clock = clock
         self._decision_interval = decision_interval
         self._stop_event = threading.Event()
-        self._runtime: SessionEngine | None = None
+        self._runtime: object | None = None
         self._state = SessionState.IDLE
         self._completed_sessions: set[tuple[str, int, int, str]] = set()
         self._schedule_date = None
@@ -59,6 +80,7 @@ class PhoneScheduler:
         self,
         state_changed: Callable[[SessionState], None],
         account_state_changed: Callable[[str, SessionState], None],
+        runtime_failed: Callable[[str], None] | None = None,
     ) -> None:
         if self._state in {
             SessionState.STARTING,
@@ -74,8 +96,15 @@ class PhoneScheduler:
             accounts = tuple(self.device.accounts)
             logger.info("Phone Scheduler started for %s", self.device.serial)
             logger.info("Loaded %d assigned accounts", len(accounts))
+            scheduling_cycle = 0
             while not self._stop_event.is_set():
+                scheduling_cycle += 1
                 now = self._clock()
+                logger.info(
+                    "Scheduling cycle %d evaluating accounts at %s",
+                    scheduling_cycle,
+                    now.strftime("%Y-%m-%d %H:%M:%S"),
+                )
                 if self._schedule_date != now.date():
                     self._completed_sessions.clear()
                     self._schedule_date = now.date()
@@ -101,7 +130,15 @@ class PhoneScheduler:
 
                 account = decision.selected
                 logger.info("Selected account %s for execution", account.username)
-                logger.info("Launching InstaAddict for %s", account.username)
+                logger.info(
+                    "%s for %s",
+                    (
+                        "Launching legacy InstaAddict compatibility runtime"
+                        if self._runtime_mode is RuntimeMode.LEGACY
+                        else "Starting Native Runtime"
+                    ),
+                    account.username,
+                )
                 self._set_state(SessionState.RUNNING, state_changed)
                 self._runtime = self._runtime_factory(account, self.workspace_root)
                 try:
@@ -115,10 +152,20 @@ class PhoneScheduler:
                         "Account session failed for %s: %s", account.username, error
                     )
                     account_state_changed(account.username, SessionState.ERROR)
+                    if runtime_failed is not None:
+                        runtime_failed(f"{account.username}: {error}")
                 finally:
                     self._runtime = None
                 if decision.session_key is not None:
                     self._completed_sessions.add(decision.session_key)
+                if not self._stop_event.is_set():
+                    logger.info(
+                        "Scheduling cycle %d completed; waiting %.1f seconds",
+                        scheduling_cycle,
+                        self._decision_interval,
+                    )
+                    self._set_state(SessionState.WAITING, state_changed)
+                    self._stop_event.wait(self._decision_interval)
             self._set_state(SessionState.STOPPED, state_changed)
             logger.info("Phone Scheduler stopped for %s", self.device.serial)
         except Exception:
@@ -153,7 +200,15 @@ class PhoneScheduler:
         selected_key = None
         next_session = None
         for account in accounts:
-            windows = self._load_windows(account)
+            configuration, readiness_failure = self._runtime_configuration(account)
+            if readiness_failure is not None:
+                logger.info(
+                    "Skipping account %s (not runtime-ready: %s)",
+                    account.username,
+                    readiness_failure,
+                )
+                continue
+            windows = self._load_windows(account, configuration)
             if not windows or all(start == end == 0 for start, end in windows):
                 logger.info("Skipping account %s (disabled)", account.username)
                 continue
@@ -167,11 +222,15 @@ class PhoneScheduler:
                 selected = account
                 selected_key = available_keys[0]
                 continue
-            upcoming = (
-                now
-                if available_keys
-                else min(self._next_start(start, now) for start, _ in windows)
-            )
+            if available_keys:
+                logger.info(
+                    "Deferring eligible account %s to the next scheduling cycle",
+                    account.username,
+                )
+                if next_session is None or now < next_session:
+                    next_session = now
+                continue
+            upcoming = min(self._next_start(start, now) for start, _ in windows)
             logger.info(
                 "Skipping account %s (next session %s)",
                 account.username,
@@ -181,17 +240,88 @@ class PhoneScheduler:
                 next_session = upcoming
         return ScheduleDecision(selected, next_session, selected_key)
 
-    @staticmethod
-    def _load_windows(account: AssignedAccount) -> tuple[tuple[int, int], ...]:
+    @classmethod
+    def _valid_application_id(cls, value: object) -> bool:
+        return bool(cls._APPLICATION_ID.fullmatch(str(value or "").strip()))
+
+    def _runtime_configuration(
+        self, account: AssignedAccount
+    ) -> tuple[dict | None, str | None]:
+        if account.device_id != self.device.serial:
+            return None, "phone assignment does not match"
+        if not self._valid_application_id(account.app_id):
+            return None, "no valid Application ID configured"
         try:
-            config = (
-                yaml.safe_load(account.config_path.read_text(encoding="utf-8")) or {}
+            configuration = yaml.safe_load(
+                account.config_path.read_text(encoding="utf-8")
             )
-        except (OSError, yaml.YAMLError) as error:
-            logger.error(
-                "Skipping account %s (invalid timer: %s)", account.username, error
+            metadata = json.loads(
+                (account.config_path.parent / "account.json").read_text(
+                    encoding="utf-8"
+                )
             )
-            return ()
+        except (OSError, yaml.YAMLError, json.JSONDecodeError) as error:
+            return None, f"account configuration is unavailable: {error}"
+        if not isinstance(configuration, dict) or not isinstance(metadata, dict):
+            return None, "account configuration is incomplete"
+        if str(configuration.get("username") or "").strip() != account.username:
+            return None, "configured username does not match account identity"
+        configured_device = str(configuration.get("device") or "").strip()
+        assigned_device = str(metadata.get("assigned_device_id") or "").strip()
+        if (
+            configured_device != self.device.serial
+            or assigned_device != self.device.serial
+        ):
+            return None, "persisted phone assignment does not match"
+        if not str(metadata.get("password") or ""):
+            return None, "credentials are incomplete"
+        configured_app = str(
+            configuration.get("app-id") or configuration.get("app_id") or ""
+        ).strip()
+        if configured_app != account.app_id:
+            return None, "persisted Application ID does not match inventory"
+        if not self._native_configuration_ready(configuration):
+            return None, "no enabled native module has complete configuration"
+        directory = account.config_path.parent
+        if not any(
+            (directory / name).is_file() for name in ("runtime.db", "sessions.json")
+        ):
+            return None, "no completed onboarding/session history is available"
+        return configuration, None
+
+    @staticmethod
+    def _native_configuration_ready(configuration: dict) -> bool:
+        enabled = configuration.get("follow-percentage") not in (
+            None,
+            False,
+            0,
+            "",
+            "0",
+        )
+        sources = configuration.get("blogger-followers")
+        if isinstance(sources, str):
+            configured = bool(sources.strip())
+        elif isinstance(sources, list):
+            configured = any(str(source).strip() for source in sources)
+        else:
+            configured = False
+        return enabled and configured
+
+    @staticmethod
+    def _load_windows(
+        account: AssignedAccount, config: dict | None = None
+    ) -> tuple[tuple[int, int], ...]:
+        if config is None:
+            try:
+                config = (
+                    yaml.safe_load(account.config_path.read_text(encoding="utf-8"))
+                    or {}
+                )
+            except (OSError, yaml.YAMLError) as error:
+                logger.error(
+                    "Skipping account %s (invalid timer: %s)", account.username, error
+                )
+                return ()
         raw = config.get("working-hours") or []
         if isinstance(raw, str):
             raw = [raw]

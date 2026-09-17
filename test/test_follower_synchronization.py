@@ -121,6 +121,7 @@ def test_synchronization_updates_follow_backs_and_inserts_organic_users(tmp_path
         database.follow.save(
             FollowRecord(
                 followed.id,
+                username=followed.username,
                 source="source_account",
                 follow_date="2026-09-01T10:01:00+00:00",
             )
@@ -161,10 +162,10 @@ def test_synchronization_updates_follow_backs_and_inserts_organic_users(tmp_path
         known = database.users.get_by_username("known_without_follow")
 
         assert organic.first_discovered_by == "ORGANIC"
-        assert organic.first_seen == "2026-09-04T12:30:00+00:00"
+        assert organic.first_seen == "2026-09-04 12:30:00"
         assert database.follow.get(organic.id) is None
         assert followed_state.follow_back is True
-        assert followed_state.follow_back_date == "2026-09-04T12:30:00+00:00"
+        assert followed_state.follow_back_date == "2026-09-04 12:30:00"
         assert database.follow.get(known.id) is None
         assert database.like.get(followed.id) is None
         assert database.comment.get(followed.id) is None
@@ -248,6 +249,67 @@ def test_android_reader_uses_resource_ids_and_respects_limit(tmp_path):
     )
     assert len(device.clicks) == 2
     assert len(device.swipes) == 1
+
+
+def test_android_reader_treats_zero_followers_as_successful_empty_scan(tmp_path):
+    device = FakeDevice(
+        (
+            hierarchy(
+                node(
+                    resource_id="com.instagram.clone:id/tab_avatar",
+                    bounds="[900,1800][1080,1920]",
+                )
+            ),
+            hierarchy(
+                node(
+                    text="0",
+                    resource_id=(
+                        "com.instagram.clone:id/"
+                        "profile_header_familiar_followers_value"
+                    ),
+                )
+            ),
+        )
+    )
+    context = make_context(tmp_path)
+    reader = AndroidFollowerReader(
+        device_factory=lambda _: device,
+        sleeper=lambda _: None,
+    )
+
+    result = reader.read(context, limit=100)
+
+    assert result == FollowerReadResult(True, (), limit_reached=False)
+    assert len(device.clicks) == 1
+    assert context.logger.messages[-1] == (
+        "info",
+        "Follower Synchronization detected an empty followers list",
+        {},
+    )
+
+
+def test_empty_follower_synchronization_logs_zero_and_succeeds(tmp_path):
+    context = make_context(tmp_path)
+    stage = FollowerSynchronization(
+        StubReader(FollowerReadResult(True)),
+        RuntimeFollowerComparer(),
+        RuntimeFollowerWriter(),
+    )
+
+    result = stage.execute(context)
+
+    assert result.status is StartupStageStatus.SUCCESS
+    assert result.new_followers_found == 0
+    assert (
+        "info",
+        "Follower Synchronization complete",
+        {
+            "followers": 0,
+            "follow_back_updates": 0,
+            "organic_followers": 0,
+            "limit_reached": False,
+        },
+    ) in context.logger.messages
 
 
 def test_pipeline_places_synchronization_after_account_verification(tmp_path):

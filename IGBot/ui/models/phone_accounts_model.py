@@ -1,3 +1,6 @@
+import re
+
+import yaml
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor, QFont
 
@@ -25,6 +28,8 @@ class PhoneAccountsModel(QAbstractTableModel):
         "Status",
         "Actions",
     )
+    START_HOUR = HEADERS.index("Start Hour")
+    END_HOUR = HEADERS.index("End Hour")
     USERNAME = HEADERS.index("Username")
     STATUS = HEADERS.index("Status")
     ACTIONS = HEADERS.index("Actions")
@@ -34,6 +39,7 @@ class PhoneAccountsModel(QAbstractTableModel):
         super().__init__(parent)
         self._accounts: list[AssignedAccount] = []
         self._statuses: dict[str, str] = {}
+        self._schedules: dict[str, tuple[str, str]] = {}
 
     def rowCount(self, parent=_ROOT_INDEX) -> int:
         return 0 if parent.isValid() else len(self._accounts)
@@ -71,6 +77,11 @@ class PhoneAccountsModel(QAbstractTableModel):
             return self._statuses.get(str(account.config_path.resolve()), "Idle")
         if index.column() == self.ACTIONS:
             return ""
+        if index.column() in {self.START_HOUR, self.END_HOUR}:
+            schedule = self._schedules.get(
+                str(account.config_path.resolve()), ("—", "—")
+            )
+            return schedule[index.column()]
         return "—"
 
     def headerData(
@@ -89,7 +100,51 @@ class PhoneAccountsModel(QAbstractTableModel):
     def set_accounts(self, accounts: list[AssignedAccount]) -> None:
         self.beginResetModel()
         self._accounts = list(accounts)
+        self._schedules = {
+            str(account.config_path.resolve()): self._load_schedule(account)
+            for account in self._accounts
+        }
         self.endResetModel()
+
+    @classmethod
+    def _load_schedule(cls, account: AssignedAccount) -> tuple[str, str]:
+        try:
+            configuration = yaml.safe_load(account.config_path.read_bytes())
+        except (OSError, yaml.YAMLError):
+            return "—", "—"
+        if not isinstance(configuration, dict):
+            return "—", "—"
+        windows = configuration.get("working-hours") or []
+        if isinstance(windows, str):
+            windows = [windows]
+        if not isinstance(windows, list):
+            return "—", "—"
+        starts: list[str] = []
+        ends: list[str] = []
+        for window in windows:
+            parts = str(window).split("-", 1)
+            if len(parts) != 2:
+                continue
+            start = cls._display_time(parts[0])
+            end = cls._display_time(parts[1])
+            if start is None or end is None:
+                continue
+            starts.append(start)
+            ends.append(end)
+        if not starts:
+            return "—", "—"
+        return ",".join(starts), ",".join(ends)
+
+    @staticmethod
+    def _display_time(value: str) -> str | None:
+        match = re.fullmatch(r"\s*(\d{1,2})(?:[.:](\d{1,2}))?\s*", value)
+        if match is None:
+            return None
+        hour = int(match.group(1))
+        minute = int(match.group(2) or 0)
+        if hour > 24 or minute > 59 or (hour == 24 and minute != 0):
+            return None
+        return f"{hour}:{minute:02d}"
 
     def account_at(self, row: int) -> AssignedAccount | None:
         if 0 <= row < len(self._accounts):

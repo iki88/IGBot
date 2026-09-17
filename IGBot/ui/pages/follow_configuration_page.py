@@ -39,16 +39,14 @@ class FollowConfigurationPage(QScrollArea):
     }
     ADDITIONAL_ENGINE_SETTINGS: ClassVar[dict[str, str]] = {
         "skip_business": "Skip business profiles",
-        "skip_non_business": "Skip non-business profiles",
         "skip_if_link_in_bio": "Skip profiles with link in Bio",
-        "follow_private_or_empty": "Follow private or empty profiles",
+        "follow_private_or_empty": "Follow private profiles",
     }
     LIST_FILTERS: ClassVar[dict[str, str]] = {
         "mandatory_words": "Follow only if profile contains these words",
-        "blacklist_words": "Don't follow if profile contains these words",
+        "blacklist_words": "Don't follow if profile contain these words",
         "specific_alphabet": "Allowed Alphabets",
         "biography_language": "Biography Language",
-        "biography_banned_language": "Blocked Biography Language",
     }
     WEEKDAYS: ClassVar[tuple[str, ...]] = (
         "Monday",
@@ -250,13 +248,16 @@ class FollowConfigurationPage(QScrollArea):
                 row.set_entries(value if isinstance(value, list) else [])
                 row.enabled.setChecked(bool(value))
             self.sources.set_configuration(configuration)
-            self._reset_runtime_extensions()
+            self._reset_runtime_extensions(configuration)
         finally:
             self._loading = False
 
-    def _reset_runtime_extensions(self) -> None:
+    def _reset_runtime_extensions(self, configuration: dict | None = None) -> None:
+        configuration = configuration or {}
         self.delay.set_value(None)
-        self.mute_after_follow.setChecked(False)
+        self.mute_after_follow.setChecked(
+            bool(configuration.get("igbot-follow-mute-after-follow"))
+        )
         self.same_tagged_account.setChecked(False)
         self.schedule_days.set_values({day.casefold(): True for day in self.WEEKDAYS})
 
@@ -282,6 +283,11 @@ class FollowConfigurationPage(QScrollArea):
         self._validate_profile_ranges(values)
         return values
 
+    def runtime_extension_values(self) -> dict:
+        """Return IGBot-only settings that must not enter engine YAML."""
+
+        return {"igbot-follow-mute-after-follow": self.mute_after_follow.isChecked()}
+
     def _edit_list_filter(self, key: str) -> None:
         row = self.list_filters[key]
         dialog = TargetEditorDialog(
@@ -295,7 +301,7 @@ class FollowConfigurationPage(QScrollArea):
 
     @staticmethod
     def _list_filter_validator(key: str):
-        if key in {"biography_language", "biography_banned_language"}:
+        if key == "biography_language":
             return lambda entry: bool(
                 re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]+)?", entry)
             )

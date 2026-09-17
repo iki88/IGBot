@@ -17,6 +17,7 @@ class FollowModuleResultStatus(StrEnum):
     PRIVATE_SKIPPED = "PRIVATE_SKIPPED"
     NO_CANDIDATES = "NO_CANDIDATES"
     SCROLL_BLOCK = "SCROLL_BLOCK"
+    CANCELLED = "CANCELLED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +36,16 @@ class FollowFilterSettings:
     display_name: TextFilterSettings = TextFilterSettings()
     biography: TextFilterSettings = TextFilterSettings()
     allow_private: bool = False
+    skip_business: bool = False
+    skip_link_in_bio: bool = False
+    min_followers: int | None = None
+    max_followers: int | None = None
+    min_following: int | None = None
+    max_following: int | None = None
+    min_posts: int | None = None
+    keywords: TextFilterSettings = TextFilterSettings()
+    allowed_alphabets: tuple[str, ...] = ()
+    biography_languages: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,12 +56,16 @@ class FollowModuleSettings:
     configured: bool
     budget: int | str
     daily_remaining: int
+    hourly_remaining: int = 100_000
     filters: FollowFilterSettings = FollowFilterSettings()
     contact_scraping_enabled: bool = False
+    follow_back_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.daily_remaining < 0:
             raise ValueError("Follow daily remaining cannot be negative")
+        if self.hourly_remaining < 0:
+            raise ValueError("Follow hourly remaining cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +77,16 @@ class CandidateProfile:
     display_name: str = ""
     biography: str = ""
     is_private: bool = False
+    category: str = ""
+    website: str = ""
+    address: str = ""
+    followers: int | None = None
+    following: int | None = None
+    posts: int | None = None
+    is_business: bool = False
+    is_verified: bool = False
+    follow_status: str = ""
+    has_external_links: bool = False
 
 
 @dataclass(frozen=True, slots=True)

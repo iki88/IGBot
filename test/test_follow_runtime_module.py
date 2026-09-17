@@ -11,6 +11,8 @@ from IGBot.runtime.candidates import (
     CandidateResultStatus,
 )
 from IGBot.runtime.follow import (
+    AndroidFollowResult,
+    AndroidFollowStatus,
     CandidateProfile,
     ConfiguredFollowCandidateQualifier,
     FollowFilterSettings,
@@ -54,22 +56,29 @@ class StubLogger:
 
 class StubCandidateProvider:
     def __init__(self, result):
-        self.result = result
+        self.results = list(result) if isinstance(result, tuple) else [result]
         self.calls = []
 
     def next_candidate(self, context):
         self.calls.append(context)
-        return self.result
+        if self.results:
+            return self.results.pop(0)
+        return CandidateResult(CandidateResultStatus.ALL_SOURCES_EXHAUSTED)
 
 
 class StubProfileProvider:
     def __init__(self, profile):
         self.profile = profile
         self.calls = []
+        self.return_calls = []
 
     def open_profile(self, context, candidate):
         self.calls.append((context, candidate))
         return self.profile
+
+    def return_to_followers(self, context):
+        self.return_calls.append(context)
+        return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
 
 
 class RecordingQualifier:
@@ -131,10 +140,14 @@ def make_module(
     candidate_result,
     *,
     profile=None,
+    profile_provider=None,
     qualifier=None,
     hooks=None,
     contact_scraping_enabled=False,
     filters=None,
+    daily_remaining=10,
+    hourly_remaining=100_000,
+    cancellation_requested=lambda: False,
 ):
     candidate = make_candidate()
     profile = profile or CandidateProfile(
@@ -144,7 +157,7 @@ def make_module(
         biography="Photography and travel",
     )
     candidate_provider = StubCandidateProvider(candidate_result)
-    profile_provider = StubProfileProvider(profile)
+    profile_provider = profile_provider or StubProfileProvider(profile)
     qualifier = qualifier or RecordingQualifier()
     hooks = hooks or RecordingHookManager()
     module = FollowModule(
@@ -153,7 +166,8 @@ def make_module(
             enabled=True,
             configured=True,
             budget=1,
-            daily_remaining=10,
+            daily_remaining=daily_remaining,
+            hourly_remaining=hourly_remaining,
             filters=filters or FollowFilterSettings(),
             contact_scraping_enabled=contact_scraping_enabled,
         ),
@@ -161,6 +175,7 @@ def make_module(
         profile_provider,
         qualifier,
         hooks,
+        cancellation_requested=cancellation_requested,
     )
     return module, candidate_provider, profile_provider, qualifier, hooks
 
@@ -184,6 +199,15 @@ def test_follow_module_prepares_candidate_and_runs_enabled_profile_hooks(tmp_pat
     assert profiles.calls == [(context, candidate)]
     assert qualifier.calls[0][0] is context
     assert hooks.events[0].payload["candidate"] is candidate
+    assert [message for _level, message, _fields in context.logger.messages] == [
+        "Follow candidate preparation started",
+        "Candidate processing started",
+        "Filter evaluation started",
+        "Filter evaluation completed",
+        "Contact scraping started",
+        "Contact scraping completed",
+        "Follow candidate ready",
+    ]
     assert context.logger.messages[-1] == (
         "info",
         "Follow candidate ready",
@@ -205,6 +229,102 @@ def test_follow_module_does_not_dispatch_hooks_when_contact_scraping_is_disabled
 
     assert result.module_result.status is FollowModuleResultStatus.READY_TO_FOLLOW
     assert hooks.events == []
+
+
+def test_verified_follow_updates_daily_and_hourly_runtime_counters(tmp_path):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    module, *_ = make_module(
+        context,
+        CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, candidate),
+        daily_remaining=3,
+        hourly_remaining=3,
+    )
+
+    assert module.record_verified_follow() == (False, False)
+    assert module.daily_remaining == 2
+    assert module.hourly_remaining == 2
+    assert module.is_eligible() is True
+
+    module.record_verified_follow()
+    assert module.record_verified_follow() == (True, True)
+    assert module.daily_remaining == 0
+    assert module.hourly_remaining == 0
+    assert module.is_eligible() is False
+
+
+def test_hourly_limit_removes_follow_from_eligibility_before_daily_limit(tmp_path):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    module, *_ = make_module(
+        context,
+        CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, candidate),
+        daily_remaining=3,
+        hourly_remaining=1,
+    )
+
+    assert module.record_verified_follow() == (False, True)
+    assert module.daily_remaining == 2
+    assert module.is_eligible() is False
+
+
+def test_daily_limit_completion_returns_daily_limit_reached_immediately(tmp_path):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    module, *_ = make_module(
+        context,
+        CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, candidate),
+        daily_remaining=1,
+        hourly_remaining=3,
+    )
+
+    outcome = module.complete_verified_follow()
+
+    assert outcome is ModuleExecutionOutcome.DAILY_LIMIT_REACHED
+    assert module.daily_remaining == 0
+    assert module.is_eligible() is False
+
+
+@pytest.mark.parametrize(
+    ("cancel_on_call", "provider_calls", "profile_calls", "qualifier_calls"),
+    (
+        (1, 0, 0, 0),
+        (2, 1, 0, 0),
+        (3, 1, 1, 0),
+        (4, 1, 1, 1),
+    ),
+)
+def test_cancellation_is_checked_before_each_follow_preparation_stage(
+    tmp_path, cancel_on_call, provider_calls, profile_calls, qualifier_calls
+):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+
+    class Cancellation:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self):
+            self.calls += 1
+            return self.calls == cancel_on_call
+
+    cancellation = Cancellation()
+    module, provider, profiles, qualifier, hooks = make_module(
+        context,
+        CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, candidate),
+        contact_scraping_enabled=True,
+        cancellation_requested=cancellation,
+    )
+
+    result = module.execute(context, make_budget())
+
+    assert result.module_result.status is FollowModuleResultStatus.CANCELLED
+    assert len(provider.calls) == provider_calls
+    assert len(profiles.calls) == profile_calls
+    assert len(qualifier.calls) == qualifier_calls
+    assert hooks.events == []
+    if cancel_on_call >= 3:
+        assert profiles.return_calls == [context]
 
 
 @pytest.mark.parametrize(
@@ -254,7 +374,7 @@ def test_follow_module_maps_candidate_provider_results(
     (
         (
             {"username": "wrong_user"},
-            {"username": TextFilterSettings(required=("target",))},
+            {"username": TextFilterSettings(required=("not-present",))},
             FollowModuleResultStatus.FILTER_REJECTED,
         ),
         (
@@ -297,6 +417,206 @@ def test_configured_qualifier_applies_follow_filters(
     assert result.status is expected
 
 
+def test_follow_qualifier_skips_business_only_when_configured(tmp_path):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    profile = CandidateProfile(
+        candidate,
+        username=candidate.username,
+        display_name="Business Name",
+        category="Financial service",
+        is_business=True,
+    )
+    qualifier = ConfiguredFollowCandidateQualifier()
+
+    allowed = qualifier.qualify(context, profile, FollowFilterSettings())
+    skipped = qualifier.qualify(
+        context, profile, FollowFilterSettings(skip_business=True)
+    )
+
+    assert allowed.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert skipped.status is FollowModuleResultStatus.FILTER_REJECTED
+    messages = [message for _level, message, _fields in context.logger.messages]
+    assert "[Filter] Business profile detected." in messages
+    assert "[Filter] Business profile skipped." in messages
+
+
+def test_keyword_filters_search_one_combined_normalized_profile(tmp_path):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    profile = CandidateProfile(
+        candidate,
+        username="target_user",
+        display_name="Renova Energy",
+        biography="Independent advice",
+        category="Financial Service",
+    )
+    qualifier = ConfiguredFollowCandidateQualifier()
+
+    accepted = qualifier.qualify(
+        context,
+        profile,
+        FollowFilterSettings(
+            keywords=TextFilterSettings(required=("FINANCIAL service",))
+        ),
+    )
+    rejected = qualifier.qualify(
+        context,
+        profile,
+        FollowFilterSettings(
+            keywords=TextFilterSettings(blocked=("energy independent",))
+        ),
+    )
+
+    assert accepted.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert rejected.status is FollowModuleResultStatus.FILTER_REJECTED
+
+
+@pytest.mark.parametrize(
+    ("text", "allowed", "expected"),
+    (
+        ("München", ("Latin",), FollowModuleResultStatus.READY_TO_FOLLOW),
+        ("Москва", ("Latin",), FollowModuleResultStatus.FILTER_REJECTED),
+        ("Москва", ("Cyrillic",), FollowModuleResultStatus.READY_TO_FOLLOW),
+        ("東京 カフェ", ("Japanese",), FollowModuleResultStatus.READY_TO_FOLLOW),
+        ("서울", ("Korean",), FollowModuleResultStatus.READY_TO_FOLLOW),
+        ("नमस्ते", ("Hindi",), FollowModuleResultStatus.READY_TO_FOLLOW),
+    ),
+)
+def test_allowed_alphabet_uses_cached_unicode_script_ranges(
+    tmp_path, text, allowed, expected
+):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    profile = CandidateProfile(candidate, username="latin_username", display_name=text)
+
+    result = ConfiguredFollowCandidateQualifier().qualify(
+        context, profile, FollowFilterSettings(allowed_alphabets=allowed)
+    )
+
+    assert result.status is expected
+
+
+def test_biography_language_detector_is_lazy_and_runs_last(tmp_path):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    profile = CandidateProfile(
+        candidate,
+        username=candidate.username,
+        display_name="Deutsches Profil",
+        biography="Fotografie und Reisen in Deutschland",
+    )
+    detected = []
+    qualifier = ConfiguredFollowCandidateQualifier(
+        lambda text: detected.append(text) or "de"
+    )
+
+    without_filter = qualifier.qualify(context, profile, FollowFilterSettings())
+    with_filter = qualifier.qualify(
+        context,
+        profile,
+        FollowFilterSettings(biography_languages=("de",)),
+    )
+    rejected_before_language = qualifier.qualify(
+        context,
+        profile,
+        FollowFilterSettings(
+            keywords=TextFilterSettings(blocked=("fotografie",)),
+            biography_languages=("de",),
+        ),
+    )
+
+    assert without_filter.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert with_filter.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert rejected_before_language.status is FollowModuleResultStatus.FILTER_REJECTED
+    assert detected == ["Deutsches Profil Fotografie und Reisen in Deutschland"]
+
+
+def test_numeric_filters_run_before_language_detection(tmp_path):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    profile = CandidateProfile(candidate, username=candidate.username, followers=5)
+    detected = []
+    qualifier = ConfiguredFollowCandidateQualifier(
+        lambda text: detected.append(text) or "en"
+    )
+
+    result = qualifier.qualify(
+        context,
+        profile,
+        FollowFilterSettings(min_followers=10, biography_languages=("en",)),
+    )
+
+    assert result.status is FollowModuleResultStatus.FILTER_REJECTED
+    assert detected == []
+
+
+def test_link_in_bio_filter_uses_scraped_profile_state(tmp_path):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    profile = CandidateProfile(
+        candidate,
+        username=candidate.username,
+        website="https://example.com",
+        has_external_links=True,
+    )
+    qualifier = ConfiguredFollowCandidateQualifier()
+
+    allowed = qualifier.qualify(context, profile, FollowFilterSettings())
+    rejected = qualifier.qualify(
+        context, profile, FollowFilterSettings(skip_link_in_bio=True)
+    )
+
+    assert allowed.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert rejected.status is FollowModuleResultStatus.FILTER_REJECTED
+    assert rejected.detail == "Profile exposes one or more external links."
+    assert any(
+        message == "[Filter] Link in Bio detected. Candidate skipped."
+        for _level, message, _fields in context.logger.messages
+    )
+
+
+@pytest.mark.parametrize(
+    ("profile_values", "settings", "expected_log"),
+    (
+        (
+            {"followers": 9},
+            {"min_followers": 10},
+            "[Filter] Minimum followers not satisfied. Candidate skipped.",
+        ),
+        (
+            {"followers": 101},
+            {"max_followers": 100},
+            "[Filter] Maximum followers exceeded. Candidate skipped.",
+        ),
+        (
+            {"posts": 2},
+            {"min_posts": 3},
+            "[Filter] Minimum posts not satisfied. Candidate skipped.",
+        ),
+    ),
+)
+def test_numeric_filter_rejections_explain_the_exact_boundary(
+    tmp_path, profile_values, settings, expected_log
+):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    profile = CandidateProfile(
+        candidate,
+        username=candidate.username,
+        **profile_values,
+    )
+
+    result = ConfiguredFollowCandidateQualifier().qualify(
+        context, profile, FollowFilterSettings(**settings)
+    )
+
+    assert result.status is FollowModuleResultStatus.FILTER_REJECTED
+    assert any(
+        message == expected_log for _level, message, _fields in context.logger.messages
+    )
+
+
 def test_profile_qualification_result_is_returned_without_hooks(tmp_path):
     context = make_context(tmp_path)
     candidate = make_candidate()
@@ -315,9 +635,68 @@ def test_profile_qualification_result_is_returned_without_hooks(tmp_path):
 
     result = module.execute(context, make_budget())
 
-    assert result.module_result.status is FollowModuleResultStatus.PRIVATE_SKIPPED
-    assert result.detail == "Private account rejected."
+    assert result.module_result.status is FollowModuleResultStatus.NO_CANDIDATES
     assert hooks.events == []
+    assert (
+        "info",
+        "Filter evaluation stopped candidate processing",
+        {
+            "username": "target_user",
+            "status": "PRIVATE_SKIPPED",
+            "detail": "Private account rejected.",
+        },
+    ) in context.logger.messages
+    assert _profiles.return_calls == [context]
+
+
+def test_filter_rejection_returns_to_followers_and_continues_candidate(tmp_path):
+    context = make_context(tmp_path)
+    rejected = make_candidate()
+    accepted = Candidate(
+        "next_target",
+        "source_account",
+        CandidateProviderType.FOLLOWERS,
+    )
+
+    class SequenceProfiles(StubProfileProvider):
+        def open_profile(self, context, candidate):
+            self.calls.append((context, candidate))
+            return CandidateProfile(candidate, candidate.username)
+
+    class SequenceQualifier:
+        def __init__(self):
+            self.calls = 0
+
+        def qualify(self, context, profile, settings):
+            self.calls += 1
+            status = (
+                FollowModuleResultStatus.PRIVATE_SKIPPED
+                if self.calls == 1
+                else FollowModuleResultStatus.READY_TO_FOLLOW
+            )
+            return FollowQualificationResult(status)
+
+    profiles = SequenceProfiles(None)
+    module, provider, _unused, qualifier, hooks = make_module(
+        context,
+        (
+            CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, rejected),
+            CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, accepted),
+        ),
+        profile_provider=profiles,
+        qualifier=SequenceQualifier(),
+    )
+
+    result = module.execute(context, make_budget())
+
+    assert result.module_result.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert result.module_result.candidate is accepted
+    assert provider.calls == [context, context]
+    assert profiles.return_calls == [context]
+    assert qualifier.calls == 2
+    assert hooks.events == []
+    messages = [message for _level, message, _fields in context.logger.messages]
+    assert "[Candidate] Continuing with next candidate" in messages
 
 
 def test_scheduler_can_execute_follow_module_through_common_contract(tmp_path):
