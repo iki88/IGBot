@@ -39,6 +39,10 @@ def test_global_settings_exposes_requested_operator_controls(tmp_path):
     page = GlobalSettingsPage(tmp_path)
 
     assert page.airplane_mode_reset.text() == "Toggle Airplane Mode Between Sessions"
+    assert page.close_recent_apps_before_session.text() == (
+        "Close Recent Apps Before Session"
+    )
+    assert page.close_recent_apps_before_session.isChecked()
     assert page.random_search_letters.text() == "Use Random Search Letters"
     assert page.enable_block_detection.text() == "Enable Block Detection"
     runtime_safety = next(
@@ -86,6 +90,7 @@ def test_only_documented_engine_controls_have_engine_bindings(tmp_path):
         page.start_all_phones_delay,
         page.wait_after_instagram_launch,
         page.login_retry_limit,
+        page.close_recent_apps_before_session,
         page.airplane_mode_reset,
         page.random_search_letters,
         page.pause_after_action_block,
@@ -153,6 +158,7 @@ def test_advanced_global_controls_have_help_tooltips(tmp_path):
     assert any("Random prefixes" in tooltip for tooltip in tooltips)
     assert any("endless user search" in tooltip for tooltip in tooltips)
     assert any("Follow Back Ratio (FBR)" in tooltip for tooltip in tooltips)
+    assert any("Locked apps remain untouched" in tooltip for tooltip in tooltips)
 
 
 def test_global_settings_uses_compact_information_tooltips(tmp_path):
@@ -175,6 +181,7 @@ def test_multiple_global_settings_persist_across_restart(tmp_path):
     page.start_all_phones_delay.setValue(12)
     page.wait_after_instagram_launch.setText("8-12")
     page.airplane_mode_reset.setChecked(True)
+    page.close_recent_apps_before_session.setChecked(False)
     page.hourly_limits["follows"].setValue(35)
     page.ai_model.setText("gpt-runtime")
 
@@ -188,6 +195,7 @@ def test_multiple_global_settings_persist_across_restart(tmp_path):
     assert restarted.start_all_phones_delay.value() == 12
     assert restarted.wait_after_instagram_launch.text() == "8-12"
     assert restarted.airplane_mode_reset.isChecked()
+    assert not restarted.close_recent_apps_before_session.isChecked()
     assert restarted.hourly_limits["follows"].value() == 35
     assert restarted.ai_model.text() == "gpt-runtime"
     assert not restarted.is_dirty
@@ -236,10 +244,12 @@ def test_runtime_settings_are_loaded_from_persisted_canonical_file(tmp_path):
     service = GlobalSettingsService(tmp_path)
     settings = service.load()
     settings["toggle_airplane_mode_between_sessions"] = True
+    settings["close_recent_apps_before_session"] = False
     service.save(settings)
 
     runtime_settings = service.runtime_settings()
 
     assert runtime_settings["toggle_airplane_mode_between_sessions"] is True
+    assert runtime_settings["close_recent_apps_before_session"] is False
     persisted = json.loads((tmp_path / "global_settings.json").read_text())
     assert persisted["toggle_airplane_mode_between_sessions"] is True

@@ -18,6 +18,7 @@ class GlobalSettingsService:
         "start_all_phones_delay": 0,
         "wait_after_launching_instagram": "",
         "login_retry_limit_per_day": 0,
+        "close_recent_apps_before_session": True,
         "enable_block_detection": False,
         "pause_after_action_block": 0,
         "maximum_crash_retries": 0,

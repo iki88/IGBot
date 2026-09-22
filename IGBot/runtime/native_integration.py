@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import logging
-import random
 import re
 import threading
 import time
 import xml.etree.ElementTree as ET
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,14 +26,16 @@ from IGBot.runtime.application import AndroidApplicationProvider
 from IGBot.runtime.candidates import (
     Candidate,
     CandidateObservation,
+    CandidateProviderType,
     DiscoveryResult,
     DiscoveryStatus,
     FollowersDiscoverySettings,
-    FollowersProvider,
+    SpecificUsersProvider,
 )
 from IGBot.runtime.context import RuntimeContext
 from IGBot.runtime.database import FollowRecord, RuntimeDatabase
 from IGBot.runtime.database.timestamps import utc_timestamp
+from IGBot.runtime.eligibility import follow_provider_is_configured
 from IGBot.runtime.follow import (
     AndroidContactScraper,
     AndroidFollowProvider,
@@ -47,6 +48,13 @@ from IGBot.runtime.follow import (
     FollowModuleSettings,
     TextFilterSettings,
 )
+from IGBot.runtime.follow.daily_limits import remaining_daily_follows
+from IGBot.runtime.follow.fast_filters import FollowFastFilters
+from IGBot.runtime.follow.source_session import (
+    FollowProviderSequence,
+    FollowSourcesProvider,
+    SourceSession,
+)
 from IGBot.runtime.follower_synchronization import (
     AndroidFollowerReader,
     FollowerSynchronization,
@@ -56,6 +64,7 @@ from IGBot.runtime.follower_synchronization import (
 from IGBot.runtime.hooks import HookEventType, HookResult
 from IGBot.runtime.network import AndroidNetworkProvider
 from IGBot.runtime.profile_database import GlobalDatabaseWriter, ProfileUpdate
+from IGBot.runtime.recent_apps import AndroidRecentAppsProvider
 from IGBot.runtime.recovery import RecoveryDecision
 from IGBot.runtime.scheduler import (
     BackoffPolicy,
@@ -75,6 +84,7 @@ from IGBot.runtime.session.controller import (
 from IGBot.runtime.startup import (
     AccountVerifier,
     AirplaneModeController,
+    CloseRecentApps,
     InstagramLauncher,
     InstagramStateRecovery,
     InternetChecker,
@@ -231,25 +241,62 @@ class AndroidFollowersDiscovery:
     _USERNAME = re.compile(r"[A-Za-z0-9._]{1,30}")
 
     def __init__(
-        self, android: AndroidFollowProvider, *, follow_back_enabled: bool = False
+        self,
+        android: AndroidFollowProvider,
+        *,
+        following: bool = False,
+        follow_back_enabled: bool = False,
+        cancellation_requested: Callable[[], bool] = lambda: False,
+        fast_filters: FollowFastFilters | None = None,
     ) -> None:
         self._android = android
+        self._following = following
         self._follow_back_enabled = follow_back_enabled
+        self._cancellation_requested = cancellation_requested
+        self._fast_filters = fast_filters or FollowFastFilters()
         self._seen: set[str] = set()
         self._source_started = 0.0
-        self._prefix_used = False
+        self.session = SourceSession()
+        self._source_followers: int | None = None
+        self._strategy_selected = False
+        self._letter: str | None = None
+        self._letter_had_rows = False
+        self._letter_results_pending = False
+        self._last_rows: tuple = ()
+        self._last_see_more_hierarchy: str | None = None
 
     def open_source(self, context: RuntimeContext, source: str) -> bool:
+        discovery = "Following" if self._following else "Followers"
+        context.logger.info(f"[Source] Discovery: {discovery}")
         located = self._android.locate_source(context, source)
         if located.status is not AndroidFollowStatus.SUCCESS:
             return False
-        opened = self._android.open_followers(context)
+        nodes = self._android._nodes(
+            self._android._device(context).dump_hierarchy(compressed=False)
+        )
+        count_ids = (
+            self._android._FOLLOWING_COUNT_IDS
+            if self._following
+            else self._android._FOLLOWER_COUNT_IDS
+        )
+        self._source_followers = self._android._profile_count(nodes, count_ids)
+        opened = (
+            self._android.open_following(context)
+            if self._following
+            else self._android.open_followers(context)
+        )
         if opened.status is not AndroidFollowStatus.SUCCESS:
             return False
         self._android.show_more_followers(context)
         self._seen.clear()
         self._source_started = time.monotonic()
-        self._prefix_used = False
+        self.session = SourceSession()
+        self._strategy_selected = False
+        self._letter = None
+        self._letter_had_rows = False
+        self._letter_results_pending = False
+        self._last_rows = ()
+        self._last_see_more_hierarchy = None
         return True
 
     def next_follower(
@@ -259,8 +306,83 @@ class AndroidFollowersDiscovery:
         settings: FollowersDiscoverySettings,
     ) -> DiscoveryResult:
         device = self._android._device(context)  # integration over one Android owner
-        hierarchy = device.dump_hierarchy(compressed=False)
-        for username, button_state in self._follower_rows(hierarchy):
+        if not self._strategy_selected:
+            count_label = "Following" if self._following else "Followers"
+            context.logger.info(
+                f"[Source] {count_label} detected: "
+                + (
+                    f"{self._source_followers:,}"
+                    if self._source_followers is not None
+                    else "unavailable"
+                )
+            )
+            if self._following:
+                self.session.letter_search = False
+            else:
+                self.session.choose_strategy(self._source_followers)
+            self._strategy_selected = True
+            context.logger.info(
+                "[Source] Strategy: Letter Search"
+                if self.session.letter_search
+                else "[Source] Strategy: Scroll"
+            )
+        while True:
+            if self._cancellation_requested():
+                return DiscoveryResult(DiscoveryStatus.SOURCE_EXHAUSTED)
+            if (
+                self.session.letter_search
+                and self._letter is None
+                and not self._next_letter(context, settings, device)
+            ):
+                return DiscoveryResult(DiscoveryStatus.SOURCE_EXHAUSTED)
+            if self.session.letter_search and self._letter_results_pending:
+                rows, hierarchy = self._wait_letter_results(device)
+                self._letter_results_pending = False
+            else:
+                hierarchy = device.dump_hierarchy(compressed=False)
+                rows = self._follower_rows(hierarchy)
+            if self.session.letter_search and rows:
+                self._letter_had_rows = True
+            result = self._visible_candidate(context, rows)
+            if result is not None:
+                return result
+            if (
+                self._has_see_more(hierarchy)
+                and hierarchy != self._last_see_more_hierarchy
+            ):
+                self._last_see_more_hierarchy = hierarchy
+                shown = self._android.show_more_followers(context)
+                if shown.status is AndroidFollowStatus.SUCCESS:
+                    continue
+            if self._has_suggested_boundary(hierarchy):
+                return DiscoveryResult(DiscoveryStatus.SOURCE_EXHAUSTED)
+            elapsed = time.monotonic() - self._source_started
+            if (
+                not self.session.letter_search
+                and elapsed >= settings.scrolling_timeout_seconds
+            ):
+                return DiscoveryResult(DiscoveryStatus.SOURCE_EXHAUSTED)
+            if self.session.letter_search and (not rows or rows == self._last_rows):
+                if not self._letter_had_rows:
+                    self.session.failed_letters.add(self._letter)
+                context.logger.info("[Search] Letter completed.")
+                self._letter = None
+                self._last_rows = ()
+                continue
+            self._last_rows = rows
+            scrolled = self._android.scroll_followers(context)
+            if scrolled.status is not AndroidFollowStatus.SUCCESS:
+                if self.session.letter_search:
+                    context.logger.info("[Search] Letter completed.")
+                    self._letter = None
+                    self._last_rows = ()
+                    continue
+                return DiscoveryResult(
+                    DiscoveryStatus.SCROLL_BLOCK, detail=scrolled.detail
+                )
+
+    def _visible_candidate(self, context, rows):
+        for username, button_state, subtitle, has_active_story in rows:
             normalized = username.casefold()
             if normalized in self._seen:
                 continue
@@ -281,35 +403,95 @@ class AndroidFollowersDiscovery:
                 continue
             if button_state not in {"follow", "follow back"}:
                 continue
+            if not self._fast_filters.accepts(
+                context,
+                subtitle,
+                username,
+                has_active_story=has_active_story,
+            ):
+                continue
             return DiscoveryResult(
                 DiscoveryStatus.ACCOUNT_FOUND,
-                CandidateObservation(username=username),
+                CandidateObservation(username=username, display_name=subtitle or None),
             )
 
-        elapsed = time.monotonic() - self._source_started
-        if elapsed >= settings.scrolling_timeout_seconds:
-            return DiscoveryResult(DiscoveryStatus.SOURCE_EXHAUSTED)
-        if settings.use_random_search_letters and not self._prefix_used:
-            pools = (settings.first_character_pool, settings.second_character_pool)
-            if all(pools):
-                prefix = "".join(random.choice(pool) for pool in pools)
-                searched = self._android.search_followers(context, prefix)
-                self._prefix_used = searched.status is AndroidFollowStatus.SUCCESS
-                if self._prefix_used:
-                    return self.next_follower(context, _source, settings)
-        scrolled = self._android.scroll_followers(context)
-        if scrolled.status is not AndroidFollowStatus.SUCCESS:
-            return DiscoveryResult(
-                DiscoveryStatus.SCROLL_BLOCK,
-                detail=scrolled.detail,
+        return None
+
+    def _next_letter(self, context, settings, device) -> bool:
+        context.logger.info("[Search] Returning to Search field.")
+        search = self._restore_followers_search(device)
+        if search is None:
+            return False
+        letter = self.session.next_letter(
+            settings.first_character_pool, settings.second_character_pool
+        )
+        if letter is None:
+            return False
+        device.click(*search.center)
+        device.send_keys("", clear=True)
+        context.logger.info("[Search] Next Letter: " + letter)
+        device.send_keys(letter, clear=True)
+        self._android._wait()
+        self._letter = letter
+        self._letter_had_rows = False
+        self._letter_results_pending = True
+        self._last_rows = ()
+        return True
+
+    def _restore_followers_search(self, device):
+        """Scroll toward the list top until its inspected search field is visible."""
+
+        for _attempt in range(30):
+            nodes = self._android._nodes(device.dump_hierarchy(compressed=False))
+            search = self._android._find_by_id(
+                nodes, self._android._FOLLOWER_SEARCH_IDS
             )
-        return self.next_follower(context, _source, settings)
+            if search is not None:
+                return search
+            container = self._android._find_scrollable(nodes)
+            if container is not None:
+                left, top, right, bottom = container.bounds
+            else:
+                try:
+                    width, height = device.window_size()
+                except (AttributeError, TypeError, ValueError):
+                    return None
+                left, top, right, bottom = 0, 0, width, height
+            device.swipe(
+                (left + right) // 2,
+                top + 1,
+                (left + right) // 2,
+                bottom - 1,
+                duration=0.1,
+            )
+            self._android._sleeper(0.1)
+        return None
+
+    def _wait_letter_results(
+        self, device
+    ) -> tuple[tuple[tuple[str, str, str, bool], ...], str]:
+        """Do not confuse the transient empty search hierarchy with zero results."""
+
+        deadline = self._android._clock() + 3.0
+        hierarchy = "<hierarchy />"
+        while not self._cancellation_requested():
+            hierarchy = device.dump_hierarchy(compressed=False)
+            rows = self._follower_rows(hierarchy)
+            if rows:
+                return rows, hierarchy
+            remaining = deadline - self._android._clock()
+            if remaining <= 0:
+                return (), hierarchy
+            self._android._sleeper(min(0.25, remaining))
+        return (), hierarchy
 
     @classmethod
-    def _follower_rows(cls, hierarchy: str) -> tuple[tuple[str, str], ...]:
+    def _follower_rows(cls, hierarchy: str) -> tuple[tuple[str, str, str, bool], ...]:
         root = ET.fromstring(hierarchy)
-        values: list[tuple[str, str]] = []
+        values: list[tuple[str, str, str, bool]] = []
         for row in root.iter("node"):
+            if cls._is_suggested_header(row):
+                break
             if cls._suffix(row) != "follow_list_container":
                 continue
             username = next(
@@ -329,8 +511,42 @@ class AndroidFollowersDiscovery:
                 "",
             )
             if cls._USERNAME.fullmatch(username):
-                values.append((username, button))
+                subtitle = next(
+                    (
+                        node.get("text", "")
+                        for node in row.iter("node")
+                        if cls._suffix(node) == "follow_list_subtitle"
+                    ),
+                    "",
+                )
+                has_active_story = any(
+                    cls._suffix(node) == "follow_list_user_imageview"
+                    and node.get("class") == "android.view.View"
+                    for node in row.iter("node")
+                )
+                values.append((username, button, subtitle, has_active_story))
         return tuple(values)
+
+    @classmethod
+    def _has_see_more(cls, hierarchy: str) -> bool:
+        return any(
+            cls._suffix(node) == "see_more_button"
+            for node in ET.fromstring(hierarchy).iter("node")
+        )
+
+    @classmethod
+    def _has_suggested_boundary(cls, hierarchy: str) -> bool:
+        return any(
+            cls._is_suggested_header(node)
+            for node in ET.fromstring(hierarchy).iter("node")
+        )
+
+    @classmethod
+    def _is_suggested_header(cls, node: ET.Element) -> bool:
+        return (
+            cls._suffix(node) == "row_header_textview"
+            and node.get("text", "").strip().casefold() == "suggested for you"
+        )
 
     @staticmethod
     def _suffix(node: ET.Element) -> str:
@@ -362,11 +578,18 @@ class _FollowModuleProvider:
         return (self._modules[key],)
 
     def _build(self, context: RuntimeContext) -> FollowModule:
-        sources = self._string_list(self._configuration.get("blogger-followers"))
+        follower_sources = self._string_list(
+            self._configuration.get("blogger-followers")
+        )
+        following_sources = self._string_list(
+            self._configuration.get("blogger-following")
+        )
+        specific_enabled = self._enabled(self._configuration.get("blogger"))
         enabled = self._enabled(self._configuration.get("follow-percentage"))
         budget = self._configuration.get("follow-limit") or 1
-        daily = self._integer_limit(
-            self._configuration.get("total-follows-limit"), default=100_000
+        daily = remaining_daily_follows(
+            context.session.account_directory,
+            self._configuration.get("total-follows-limit"),
         )
         hourly = self._integer_limit(
             self._runtime_settings.get("maximum_follows_per_hour"),
@@ -393,20 +616,59 @@ class _FollowModuleProvider:
         follow_back_enabled = not self._truthy(
             self._filters.get("skip_follower"), default=True
         )
-        candidates = FollowersProvider(
-            sources,
-            AndroidFollowersDiscovery(
-                self._android, follow_back_enabled=follow_back_enabled
-            ),
-            _AllowVisibleCandidates(),
-            _UnusedBiographyReader(),
-            discovery_settings,
-        )
+        if specific_enabled:
+            candidates = SpecificUsersProvider(
+                context.session.account_directory, self._android
+            )
+        else:
+            fast_filters = FollowFastFilters(
+                required_words=self._string_list(self._filters.get("mandatory_words")),
+                allowed_alphabets=self._string_list(
+                    self._filters.get("specific_alphabet")
+                ),
+                blocked_words=self._string_list(self._filters.get("blacklist_words")),
+                only_active_stories=bool(
+                    self._runtime_settings.get("only_active_stories")
+                ),
+            )
+            providers = tuple(
+                FollowSourcesProvider(
+                    sources,
+                    AndroidFollowersDiscovery(
+                        self._android,
+                        following=following,
+                        follow_back_enabled=follow_back_enabled,
+                        cancellation_requested=self._cancellation_requested,
+                        fast_filters=fast_filters,
+                    ),
+                    _AllowVisibleCandidates(),
+                    _UnusedBiographyReader(),
+                    discovery_settings,
+                )
+                for sources, following in (
+                    (follower_sources, False),
+                    (following_sources, True),
+                )
+                if sources
+            )
+            if not providers:
+                candidates = FollowSourcesProvider(
+                    (),
+                    AndroidFollowersDiscovery(self._android),
+                    _AllowVisibleCandidates(),
+                    _UnusedBiographyReader(),
+                    discovery_settings,
+                )
+            elif len(providers) == 1:
+                candidates = providers[0]
+            else:
+                candidates = FollowProviderSequence(providers)
+        configured = follow_provider_is_configured(self._configuration)
         return FollowModule(
             context,
             FollowModuleSettings(
                 enabled=enabled,
-                configured=bool(sources),
+                configured=configured,
                 budget=str(budget),
                 daily_remaining=daily,
                 hourly_remaining=hourly,
@@ -414,9 +676,18 @@ class _FollowModuleProvider:
                     allow_private=self._truthy(
                         self._filters.get("follow_private_or_empty")
                     ),
+                    follow_only_private=self._truthy(
+                        self._filters.get("follow_only_private")
+                    ),
                     skip_business=self._truthy(self._filters.get("skip_business")),
+                    follow_only_business=self._truthy(
+                        self._filters.get("follow_only_business")
+                    ),
                     skip_link_in_bio=self._truthy(
                         self._filters.get("skip_if_link_in_bio")
+                    ),
+                    follow_only_link_in_bio=self._truthy(
+                        self._filters.get("follow_only_link_in_bio")
                     ),
                     min_followers=self._optional_integer(
                         self._filters.get("min_followers")
@@ -556,12 +827,27 @@ class _NativeFollowExecutor:
                     else "requested"
                 ),
             )
-            self._persist_follow(context, domain.candidate, muted=android_result.muted)
+            if (
+                domain.candidate.provider_type
+                is CandidateProviderType.SPECIFIC_ACCOUNTS
+            ):
+                self._persist_specific_follow(
+                    context,
+                    domain.candidate,
+                    status=android_result.status.value,
+                    muted=android_result.muted,
+                )
+            else:
+                self._persist_follow(
+                    context, domain.candidate, muted=android_result.muted
+                )
             outcome = module.complete_verified_follow()
         elif android_result.status is AndroidFollowStatus.GHOST_BLOCK_DETECTED:
             outcome = ModuleExecutionOutcome.ACTION_BLOCK
         else:
             outcome = ModuleExecutionOutcome.SUCCESS
+        if domain.candidate.provider_type is CandidateProviderType.SPECIFIC_ACCOUNTS:
+            module.mark_candidate_processed(context, domain.candidate)
         return ModuleExecutionResult(
             execution_started=True,
             execution_finished=True,
@@ -603,6 +889,25 @@ class _NativeFollowExecutor:
                 )
             )
             database.follow.save(record)
+
+    @staticmethod
+    def _persist_specific_follow(
+        context: RuntimeContext,
+        candidate: Candidate,
+        *,
+        status: str,
+        muted: bool = False,
+    ) -> None:
+        followed_at = utc_timestamp(datetime.now(timezone.utc))
+        with RuntimeDatabase(context.session.account_directory) as database:
+            database.specific_follow.upsert_username(
+                candidate.username,
+                {
+                    "follow_date": followed_at,
+                    "muted": int(muted),
+                    "status": status,
+                },
+            )
 
 
 class _SessionActivity:
@@ -686,6 +991,10 @@ class NativeAccountRuntime:
         follow_extensions = (
             extensions.get("follow") if isinstance(extensions, dict) else {}
         )
+        if isinstance(follow_extensions, dict):
+            runtime_settings["only_active_stories"] = bool(
+                follow_extensions.get("only_active_stories")
+            )
         android = AndroidFollowProvider(
             AndroidContactScraper(),
             profile_observer=persistence.observe,
@@ -724,6 +1033,7 @@ class NativeAccountRuntime:
             AirplaneModeController(AndroidAirplaneModeProvider()),
             instagram_launcher,
             AccountVerifier(AndroidInstagramProfileProvider(), _LoggingNotifier()),
+            close_recent_apps=CloseRecentApps(AndroidRecentAppsProvider()),
             instagram_state_recovery=InstagramStateRecovery(
                 AndroidInstagramStateProvider(),
                 application_provider,

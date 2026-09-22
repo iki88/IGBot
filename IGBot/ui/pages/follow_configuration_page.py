@@ -21,6 +21,11 @@ from IGBot.ui.widgets.configuration_widgets import (
     RangePairSettings,
     RangeSettings,
 )
+from IGBot.ui.widgets.filter_selection_dialog import (
+    ALPHABETS,
+    LANGUAGES,
+    FilterSelectionDialog,
+)
 from IGBot.ui.widgets.target_editor_dialog import TargetEditorDialog
 from IGBot.ui.widgets.target_source_row import TargetSourceRow
 
@@ -29,18 +34,22 @@ class FollowConfigurationPage(QScrollArea):
     """Operator-focused editor with a strict engine compatibility boundary."""
 
     changed = Signal()
+    PROFILE_COUNT_MAX = 2_000_000_000
 
     PROFILE_SETTINGS: ClassVar[dict[str, str]] = {
         "min_followers": "Minimum Followers",
         "max_followers": "Maximum Followers",
-        "min_followings": "Minimum Followings",
-        "max_followings": "Maximum Followings",
+        "min_followings": "Minimum Following",
+        "max_followings": "Maximum Following",
         "min_posts": "Minimum Posts",
     }
     ADDITIONAL_ENGINE_SETTINGS: ClassVar[dict[str, str]] = {
         "skip_business": "Skip business profiles",
+        "follow_only_business": "Follow only business profiles",
         "skip_if_link_in_bio": "Skip profiles with link in Bio",
+        "follow_only_link_in_bio": "Follow only profiles with link in Bio",
         "follow_private_or_empty": "Follow private profiles",
+        "follow_only_private": "Follow only private profiles",
     }
     LIST_FILTERS: ClassVar[dict[str, str]] = {
         "mandatory_words": "Follow only if profile contains these words",
@@ -83,7 +92,10 @@ class FollowConfigurationPage(QScrollArea):
         layout.addWidget(enable_section)
 
         self.sources = AudienceSourcesPage(
-            container, include_advanced=False, section_title="Follow Method"
+            container,
+            include_advanced=False,
+            section_title="Follow Method",
+            switch_style=False,
         )
         self.sources.setObjectName("moduleSources")
         self.sources.setVisible(include_sources)
@@ -130,8 +142,40 @@ class FollowConfigurationPage(QScrollArea):
         layout.addWidget(actions_section)
 
         settings_section = ConfigurationSection("Follow Settings", container)
+        filter_help = QLabel(
+            "If unchecked, the filter is disabled. Any number of followers, "
+            "followings, or posts will be accepted.",
+            settings_section,
+        )
+        filter_help.setWordWrap(True)
+        filter_help.setObjectName("configurationHint")
+        self.followers_filter_enabled = QCheckBox(
+            "Enable Followers Count", settings_section
+        )
+        self.following_filter_enabled = QCheckBox(
+            "Enable Following Count", settings_section
+        )
+        self.posts_filter_enabled = QCheckBox("Enable Posts Count", settings_section)
         self.profile_settings = NumericSettings(self.PROFILE_SETTINGS, settings_section)
-        settings_section.body_layout.addWidget(self.profile_settings)
+        for control in self.profile_settings.controls.values():
+            control.setRange(0, self.PROFILE_COUNT_MAX)
+            control.setFixedWidth(action_field_width)
+        profile_grid = QGridLayout()
+        self.profile_grid = profile_grid
+        profile_grid.setContentsMargins(0, 0, 0, 0)
+        profile_grid.setHorizontalSpacing(12)
+        profile_grid.setVerticalSpacing(8)
+        profile_grid.addWidget(self.followers_filter_enabled, 0, 0, 1, 4)
+        self._place_numeric_fields(profile_grid, 1, ("min_followers", "max_followers"))
+        profile_grid.addWidget(self.following_filter_enabled, 2, 0, 1, 4)
+        self._place_numeric_fields(
+            profile_grid, 3, ("min_followings", "max_followings")
+        )
+        profile_grid.addWidget(self.posts_filter_enabled, 4, 0, 1, 4)
+        self._place_numeric_fields(profile_grid, 5, ("min_posts",))
+        profile_grid.setColumnStretch(4, 1)
+        settings_section.body_layout.addWidget(filter_help)
+        settings_section.body_layout.addLayout(profile_grid)
         layout.addWidget(settings_section)
 
         additional_section = ConfigurationSection(
@@ -139,6 +183,9 @@ class FollowConfigurationPage(QScrollArea):
         )
         self.mute_after_follow = QCheckBox(
             "Mute users after following", additional_section
+        )
+        self.only_active_stories = QCheckBox(
+            "Only follow profiles with active stories", additional_section
         )
         self.additional_settings = CheckboxGroup(
             self.ADDITIONAL_ENGINE_SETTINGS, additional_section, columns=1
@@ -158,6 +205,7 @@ class FollowConfigurationPage(QScrollArea):
         )
         additional_section.body_layout.addWidget(self.mute_after_follow)
         additional_section.body_layout.addWidget(self.additional_settings)
+        additional_section.body_layout.addWidget(self.only_active_stories)
         for row in self.list_filters.values():
             additional_section.body_layout.addWidget(row)
         additional_section.body_layout.addWidget(self.same_tagged_account)
@@ -186,11 +234,54 @@ class FollowConfigurationPage(QScrollArea):
             control.valueChanged.connect(
                 lambda _value, key=key: self._field_changed(key)
             )
+        for toggle, keys in (
+            (
+                self.followers_filter_enabled,
+                ("min_followers", "max_followers"),
+            ),
+            (
+                self.following_filter_enabled,
+                ("min_followings", "max_followings"),
+            ),
+            (self.posts_filter_enabled, ("min_posts",)),
+        ):
+            toggle.toggled.connect(
+                lambda checked, keys=keys: self._numeric_filter_toggled(checked, keys)
+            )
         for key, control in self.additional_settings.controls.items():
             control.toggled.connect(lambda _checked, key=key: self._field_changed(key))
+        skip_business = self.additional_settings.controls["skip_business"]
+        only_business = self.additional_settings.controls["follow_only_business"]
+        skip_business.toggled.connect(
+            lambda checked: self._enforce_business_filter_exclusivity(
+                checked, only_business
+            )
+        )
+        only_business.toggled.connect(
+            lambda checked: self._enforce_business_filter_exclusivity(
+                checked, skip_business
+            )
+        )
+        follow_private = self.additional_settings.controls["follow_private_or_empty"]
+        only_private = self.additional_settings.controls["follow_only_private"]
+        follow_private.toggled.connect(
+            lambda checked: self._enforce_exclusive_filter(checked, only_private)
+        )
+        only_private.toggled.connect(
+            lambda checked: self._enforce_exclusive_filter(checked, follow_private)
+        )
+        skip_link = self.additional_settings.controls["skip_if_link_in_bio"]
+        only_link = self.additional_settings.controls["follow_only_link_in_bio"]
+        skip_link.toggled.connect(
+            lambda checked: self._enforce_exclusive_filter(checked, only_link)
+        )
+        only_link.toggled.connect(
+            lambda checked: self._enforce_exclusive_filter(checked, skip_link)
+        )
         for control in (self.delay.minimum, self.delay.maximum):
             control.valueChanged.connect(self._runtime_extension_changed)
         self.mute_after_follow.toggled.connect(self._runtime_extension_changed)
+        self.only_active_stories.toggled.connect(self._runtime_extension_changed)
         self.same_tagged_account.toggled.connect(self._runtime_extension_changed)
         self.schedule_days.changed.connect(self._runtime_extension_changed)
 
@@ -208,6 +299,18 @@ class FollowConfigurationPage(QScrollArea):
         for column, widget in enumerate(widgets):
             pair_layout.removeWidget(widget)
             layout.addWidget(widget, row, column)
+
+    def _place_numeric_fields(
+        self, layout: QGridLayout, row: int, keys: tuple[str, ...]
+    ) -> None:
+        source = self.profile_settings.layout()
+        for pair, key in enumerate(keys):
+            label = self.profile_settings.labels[key]
+            control = self.profile_settings.controls[key]
+            source.removeWidget(label)
+            source.removeWidget(control)
+            layout.addWidget(label, row, pair * 2)
+            layout.addWidget(control, row, pair * 2 + 1)
 
     def _enabled_changed(self, enabled: bool) -> None:
         self.status.setText("● Enabled" if enabled else "● Disabled")
@@ -242,6 +345,21 @@ class FollowConfigurationPage(QScrollArea):
             self.follow_amount.set_value(configuration.get("follow-limit"))
             self.follow_limit.set_values(configuration)
             self.profile_settings.set_values(configuration)
+            self._set_numeric_filter_enabled(
+                self.followers_filter_enabled,
+                ("min_followers", "max_followers"),
+                configuration,
+            )
+            self._set_numeric_filter_enabled(
+                self.following_filter_enabled,
+                ("min_followings", "max_followings"),
+                configuration,
+            )
+            self._set_numeric_filter_enabled(
+                self.posts_filter_enabled,
+                ("min_posts",),
+                configuration,
+            )
             self.additional_settings.set_values(configuration)
             for key, row in self.list_filters.items():
                 value = configuration.get(key)
@@ -257,6 +375,9 @@ class FollowConfigurationPage(QScrollArea):
         self.delay.set_value(None)
         self.mute_after_follow.setChecked(
             bool(configuration.get("igbot-follow-mute-after-follow"))
+        )
+        self.only_active_stories.setChecked(
+            bool(configuration.get("igbot-follow-only-active-stories"))
         )
         self.same_tagged_account.setChecked(False)
         self.schedule_days.set_values({day.casefold(): True for day in self.WEEKDAYS})
@@ -277,7 +398,7 @@ class FollowConfigurationPage(QScrollArea):
             or "total-follows-limit" in self._edited_keys
         ):
             values["total-follows-limit"] = limit or None
-        values.update(self._selected_values(self.profile_settings.values()))
+        values.update(self._numeric_filter_values())
         values.update(self._selected_values(self.additional_settings.values()))
         values.update(self._selected_values(self._list_filter_values()))
         self._validate_profile_ranges(values)
@@ -286,13 +407,24 @@ class FollowConfigurationPage(QScrollArea):
     def runtime_extension_values(self) -> dict:
         """Return IGBot-only settings that must not enter engine YAML."""
 
-        return {"igbot-follow-mute-after-follow": self.mute_after_follow.isChecked()}
+        return {
+            "igbot-follow-mute-after-follow": self.mute_after_follow.isChecked(),
+            "igbot-follow-only-active-stories": self.only_active_stories.isChecked(),
+        }
 
     def _edit_list_filter(self, key: str) -> None:
         row = self.list_filters[key]
-        dialog = TargetEditorDialog(
-            row.name.text(), row.entries(), self._list_filter_validator(key), self
-        )
+        if key in {"specific_alphabet", "biography_language"}:
+            dialog = FilterSelectionDialog(
+                row.name.text(),
+                ALPHABETS if key == "specific_alphabet" else LANGUAGES,
+                row.entries(),
+                self,
+            )
+        else:
+            dialog = TargetEditorDialog(
+                row.name.text(), row.entries(), self._list_filter_validator(key), self
+            )
         if dialog.exec() == TargetEditorDialog.Accepted:
             entries = dialog.entries()
             row.set_entries(entries)
@@ -328,6 +460,65 @@ class FollowConfigurationPage(QScrollArea):
             for key, value in candidate.items()
             if key in self._present_keys or key in self._edited_keys
         }
+
+    def _numeric_filter_values(self) -> dict[str, int | None]:
+        current = self.profile_settings.values()
+        values: dict[str, int | None] = {}
+        for toggle, keys in (
+            (
+                self.followers_filter_enabled,
+                ("min_followers", "max_followers"),
+            ),
+            (
+                self.following_filter_enabled,
+                ("min_followings", "max_followings"),
+            ),
+            (self.posts_filter_enabled, ("min_posts",)),
+        ):
+            for key in keys:
+                if (
+                    toggle.isChecked()
+                    or key in self._present_keys
+                    or key in self._edited_keys
+                ):
+                    values[key] = current[key] if toggle.isChecked() else None
+        return values
+
+    @staticmethod
+    def _enforce_business_filter_exclusivity(
+        checked: bool, opposite: QCheckBox
+    ) -> None:
+        FollowConfigurationPage._enforce_exclusive_filter(checked, opposite)
+
+    @staticmethod
+    def _enforce_exclusive_filter(checked: bool, opposite: QCheckBox) -> None:
+        if checked:
+            opposite.setChecked(False)
+
+    def _set_numeric_filter_enabled(
+        self,
+        toggle: QCheckBox,
+        keys: tuple[str, ...],
+        configuration: dict,
+    ) -> None:
+        enabled = any(
+            key in configuration and configuration[key] is not None for key in keys
+        )
+        toggle.setChecked(enabled)
+        self._set_numeric_controls_enabled(keys, enabled)
+
+    def _numeric_filter_toggled(self, checked: bool, keys: tuple[str, ...]) -> None:
+        self._set_numeric_controls_enabled(keys, checked)
+        if not self._loading:
+            self._edited_keys.update(keys)
+            self.changed.emit()
+
+    def _set_numeric_controls_enabled(
+        self, keys: tuple[str, ...], enabled: bool
+    ) -> None:
+        for key in keys:
+            self.profile_settings.labels[key].setEnabled(enabled)
+            self.profile_settings.controls[key].setEnabled(enabled)
 
     @staticmethod
     def _validate_profile_ranges(values: dict) -> None:

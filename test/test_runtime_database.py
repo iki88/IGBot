@@ -12,10 +12,14 @@ from IGBot.runtime.database import (
     LikeRecord,
     LikeRepository,
     RuntimeDatabase,
+    SpecificInteractionRepository,
+    SpecificProgress,
+    SpecificProgressRepository,
     StoryRecord,
     StoryRepository,
     UsersRepository,
 )
+from IGBot.services.account_assignment_service import AccountAssignmentService
 
 
 def table_names(database_path):
@@ -35,7 +39,7 @@ def table_columns(database_path, table_name):
         )
 
 
-def test_runtime_database_creates_only_the_six_runtime_tables(tmp_path):
+def test_runtime_database_creates_discovery_and_specific_users_tables(tmp_path):
     with RuntimeDatabase(tmp_path) as database:
         assert database.path == tmp_path / "runtime.db"
         assert database.path.is_file()
@@ -47,6 +51,12 @@ def test_runtime_database_creates_only_the_six_runtime_tables(tmp_path):
         "comment",
         "story",
         "dm",
+        "specific_follow",
+        "specific_unfollow",
+        "specific_like",
+        "specific_dm",
+        "specific_comment",
+        "specific_progress",
     }
 
 
@@ -58,6 +68,60 @@ def test_runtime_database_constructs_named_repositories(tmp_path):
         assert isinstance(database.comment, CommentRepository)
         assert isinstance(database.story, StoryRepository)
         assert isinstance(database.dm, DMRepository)
+        assert isinstance(database.specific_follow, SpecificInteractionRepository)
+        assert isinstance(database.specific_unfollow, SpecificInteractionRepository)
+        assert isinstance(database.specific_like, SpecificInteractionRepository)
+        assert isinstance(database.specific_dm, SpecificInteractionRepository)
+        assert isinstance(database.specific_comment, SpecificInteractionRepository)
+        assert isinstance(database.specific_progress, SpecificProgressRepository)
+
+
+def test_account_discovery_eagerly_initializes_existing_runtime_database(tmp_path):
+    accounts_directory = tmp_path / "accounts"
+    account_directory = accounts_directory / "existing_account"
+    account_directory.mkdir(parents=True)
+    (account_directory / "config.yml").write_text(
+        "username: existing_account\ndevice: phone-a\n", encoding="utf-8"
+    )
+    with RuntimeDatabase(account_directory) as database:
+        database.users.create("preserved_user", "2026-09-20T10:00:00+00:00", "FOLLOW")
+    database_path = account_directory / "runtime.db"
+    with sqlite3.connect(database_path) as connection:
+        for table in (
+            "specific_follow",
+            "specific_unfollow",
+            "specific_like",
+            "specific_dm",
+            "specific_comment",
+            "specific_progress",
+        ):
+            connection.execute(f'DROP TABLE "{table}"')
+
+    AccountAssignmentService(accounts_directory).load_by_device()
+
+    assert {
+        "specific_follow",
+        "specific_unfollow",
+        "specific_like",
+        "specific_dm",
+        "specific_comment",
+        "specific_progress",
+    }.issubset(table_names(database_path))
+    with RuntimeDatabase(account_directory) as database:
+        assert database.users.get_by_username("preserved_user") is not None
+
+
+def test_account_discovery_does_not_create_unused_runtime_database(tmp_path):
+    accounts_directory = tmp_path / "accounts"
+    account_directory = accounts_directory / "unused_account"
+    account_directory.mkdir(parents=True)
+    (account_directory / "config.yml").write_text(
+        "username: unused_account\ndevice: phone-a\n", encoding="utf-8"
+    )
+
+    AccountAssignmentService(accounts_directory).load_by_device()
+
+    assert not (account_directory / "runtime.db").exists()
 
 
 def test_runtime_database_schema_matches_the_frozen_contract(tmp_path):
@@ -110,6 +174,44 @@ def test_runtime_database_schema_matches_the_frozen_contract(tmp_path):
             "last_dm_date",
             "last_message",
             "last_reply",
+        ),
+        "specific_follow": (
+            "user_id",
+            "username",
+            "follow_date",
+            "unfollow_date",
+            "contact",
+            "contact_scraped",
+            "muted",
+            "status",
+        ),
+        "specific_unfollow": ("user_id", "username", "unfollow_date", "status"),
+        "specific_like": (
+            "user_id",
+            "username",
+            "likes_count",
+            "last_like_date",
+            "status",
+        ),
+        "specific_dm": (
+            "user_id",
+            "username",
+            "dm_count",
+            "last_dm_date",
+            "status",
+        ),
+        "specific_comment": (
+            "user_id",
+            "username",
+            "comments_count",
+            "last_comment_date",
+            "status",
+        ),
+        "specific_progress": (
+            "module",
+            "current_position",
+            "completed",
+            "repeat",
         ),
     }
     for table_name, columns in expected_columns.items():
@@ -194,6 +296,24 @@ def test_runtime_database_rolls_back_context_on_error(tmp_path):
         assert database.users.get_by_username("rolled_back") is None
 
 
+def test_specific_progress_persists_independent_module_cursors(tmp_path):
+    with RuntimeDatabase(tmp_path) as database:
+        database.specific_progress.save(
+            SpecificProgress("follow", current_position=347)
+        )
+        database.specific_progress.save(
+            SpecificProgress("like", current_position=61, repeat=True)
+        )
+
+    with RuntimeDatabase(tmp_path) as database:
+        assert database.specific_progress.get("follow") == SpecificProgress(
+            "follow", current_position=347
+        )
+        assert database.specific_progress.get("like") == SpecificProgress(
+            "like", current_position=61, repeat=True
+        )
+
+
 def test_runtime_database_rejects_non_utc_timestamps(tmp_path):
     with (
         RuntimeDatabase(tmp_path) as database,
@@ -262,4 +382,17 @@ def test_legacy_runtime_database_migrates_follow_without_losing_state(tmp_path):
     with RuntimeDatabase(tmp_path) as database:
         database.users.update_username(7, "renamed_user")
         assert database.follow.get(7).username == "renamed_user"
-    assert table_names(path) == {"users", "follow", "like", "comment", "story", "dm"}
+    assert table_names(path) == {
+        "users",
+        "follow",
+        "like",
+        "comment",
+        "story",
+        "dm",
+        "specific_follow",
+        "specific_unfollow",
+        "specific_like",
+        "specific_dm",
+        "specific_comment",
+        "specific_progress",
+    }

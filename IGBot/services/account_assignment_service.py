@@ -9,12 +9,14 @@ from atomicwrites import atomic_write
 from yaml.nodes import MappingNode
 
 from IGBot.core.device import AssignedAccount
+from IGBot.runtime.database import RuntimeDatabase
 from IGBot.services.account_identity import (
     AccountDirectoryKind,
     AccountIdentityCatalog,
     OrphanedAccount,
 )
 from IGBot.services.account_metadata_service import AccountMetadataService
+from IGBot.services.specific_lists_service import SpecificListsService
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +49,11 @@ class AccountAssignmentService:
             "skip_follower",
             "skip_if_private",
             "skip_business",
+            "follow_only_business",
             "skip_if_link_in_bio",
+            "follow_only_link_in_bio",
             "follow_private_or_empty",
+            "follow_only_private",
             "min_followers",
             "max_followers",
             "min_followings",
@@ -97,6 +102,7 @@ class AccountAssignmentService:
         self._accounts_directory = accounts_directory
         self.metadata = AccountMetadataService()
         self.identities = AccountIdentityCatalog(accounts_directory)
+        self._initialized_runtime_databases: set[Path] = set()
 
     @property
     def accounts_directory(self) -> Path:
@@ -106,13 +112,36 @@ class AccountAssignmentService:
     def load_by_device(self) -> dict[str, tuple[AssignedAccount, ...]]:
         assignments: dict[str, list[AssignedAccount]] = {}
         for account in self.identities.discover():
+            self._initialize_existing_runtime_database(account.config_path.parent)
             if not account.device_id:
                 continue
+            if account.device_id != "ARCHIVED_ACCOUNTS":
+                SpecificListsService(account.config_path.parent).initialize()
             assignments.setdefault(account.device_id, []).append(account)
 
         return {
             device_id: tuple(accounts) for device_id, accounts in assignments.items()
         }
+
+    def _initialize_existing_runtime_database(self, account_directory: Path) -> None:
+        runtime_database = account_directory / "runtime.db"
+        resolved = runtime_database.resolve()
+        if resolved in self._initialized_runtime_databases:
+            return
+        if not runtime_database.is_file():
+            return
+        try:
+            with runtime_database.open("rb") as stream:
+                sqlite_header = stream.read(16)
+        except OSError as error:
+            logger.warning("Could not inspect runtime database %s: %s", resolved, error)
+            return
+        if sqlite_header != b"SQLite format 3\x00":
+            logger.warning("Skipping non-SQLite runtime database: %s", resolved)
+            return
+        with RuntimeDatabase(account_directory):
+            pass
+        self._initialized_runtime_databases.add(resolved)
 
     def orphaned_accounts(self) -> tuple[OrphanedAccount, ...]:
         """Return recoverable account data directories missing ``config.yml``."""
@@ -121,6 +150,7 @@ class AccountAssignmentService:
 
     def load_configuration(self, config_path: Path) -> dict:
         """Read an existing account configuration without changing its representation."""
+        SpecificListsService(config_path.parent).initialize()
         configuration = yaml.safe_load(config_path.read_bytes())
         if not isinstance(configuration, dict):
             raise TypeError("The account configuration must contain a YAML mapping.")
@@ -140,6 +170,9 @@ class AccountAssignmentService:
                 if isinstance(follow_extensions, dict):
                     configuration["igbot-follow-mute-after-follow"] = bool(
                         follow_extensions.get("mute_after_follow")
+                    )
+                    configuration["igbot-follow-only-active-stories"] = bool(
+                        follow_extensions.get("only_active_stories")
                     )
         filters_path = config_path.parent / "filters.yml"
         if filters_path.is_file():
@@ -207,6 +240,9 @@ class AccountAssignmentService:
             raise TypeError("The account configuration must contain a YAML mapping.")
         settings = dict(settings or {})
         mute_after_follow = bool(settings.pop("igbot-follow-mute-after-follow", False))
+        only_active_stories = bool(
+            settings.pop("igbot-follow-only-active-stories", False)
+        )
         filter_settings = {
             key: settings.pop(key) for key in self.FILTER_SETTING_KEYS & settings.keys()
         }
@@ -706,6 +742,7 @@ class AccountAssignmentService:
                 follow_extensions = {}
             follow_extensions = dict(follow_extensions)
             follow_extensions["mute_after_follow"] = mute_after_follow
+            follow_extensions["only_active_stories"] = only_active_stories
             runtime_extensions["follow"] = follow_extensions
             self.metadata.save(
                 old_directory,
@@ -723,6 +760,7 @@ class AccountAssignmentService:
                 raise RuntimeError(
                     "The renamed account configuration could not be loaded."
                 )
+            SpecificListsService(new_directory).initialize()
             return updated_account
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             if renamed:
@@ -971,6 +1009,7 @@ class AccountAssignmentService:
                     "The new account configuration could not be verified."
                 )
             self.metadata.save(account_directory, username, password, device_id)
+            SpecificListsService(account_directory).initialize()
 
             account = self._load_account(config_path)
             if account is None:

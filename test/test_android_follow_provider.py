@@ -186,6 +186,42 @@ def candidate():
     return Candidate("exact_user", "source_user", CandidateProviderType.FOLLOWERS)
 
 
+def test_letter_search_uses_inspected_followers_field_without_global_navigation(
+    tmp_path,
+):
+    device = FakeDevice(
+        (
+            hierarchy(
+                node(
+                    resource_id="com.instagram.androie:id/row_search_edit_text",
+                    text="Search",
+                    bounds="[48,458][1032,564]",
+                ),
+                node(
+                    resource_id=instagram_id("action_bar_search_edit_text"),
+                    bounds="[0,0][100,100]",
+                ),
+            ),
+        )
+    )
+    result = make_provider(device).search_followers(make_context(tmp_path), "AE")
+    assert result.status is AndroidFollowStatus.SUCCESS
+    assert device.clicks == [(540, 511)]
+    assert device.keys == [("AE", True)]
+    assert device.presses == []
+
+
+def test_letter_search_does_not_accept_generic_global_search_field(tmp_path):
+    device = FakeDevice(
+        (hierarchy(node(resource_id=instagram_id("search_edit_text"))),)
+    )
+    result = make_provider(device).search_followers(make_context(tmp_path), "AE")
+    assert result.status is AndroidFollowStatus.FOLLOW_FAILED
+    assert device.clicks == []
+    assert device.keys == []
+    assert device.presses == []
+
+
 def test_source_search_opens_immediately_visible_exact_username(tmp_path):
     device = FakeDevice(
         (
@@ -509,6 +545,28 @@ def test_followers_navigation_actions_preserve_existing_list(tmp_path):
     assert device.presses == ["back"]
 
 
+def test_following_navigation_uses_inspected_profile_control(tmp_path):
+    device = FakeDevice(
+        (
+            hierarchy(
+                node(
+                    description="1,103 following",
+                    resource_id=instagram_id(
+                        "profile_header_following_stacked_familiar"
+                    ),
+                    bounds="[700,100][1000,220]",
+                )
+            ),
+        )
+    )
+    provider = make_provider(device)
+
+    result = provider.open_following(make_context(tmp_path))
+
+    assert result.status is AndroidFollowStatus.SUCCESS
+    assert device.clicks == [(850, 160)]
+
+
 def test_open_candidate_profile_requires_exact_username_and_reads_profile(tmp_path):
     device = FakeDevice(
         (
@@ -714,6 +772,45 @@ def test_candidate_profile_timeout_skips_without_parsing(tmp_path, monkeypatch):
     )
 
 
+def test_specific_candidate_profile_timeout_returns_to_instagram_search(
+    tmp_path, monkeypatch
+):
+    incomplete = hierarchy(
+        node(text="exact_user", resource_id=instagram_id("action_bar_title")),
+    )
+    search = hierarchy(node(resource_id=instagram_id("action_bar_search_edit_text")))
+    device = FakeDevice((incomplete, incomplete, *([incomplete] * 12), search))
+    clock = FakeClock()
+    monkeypatch.setattr(
+        AndroidFollowProvider,
+        "_profile_count",
+        classmethod(
+            lambda _cls, _nodes, _identifiers: pytest.fail("parsed before ready")
+        ),
+    )
+    provider = AndroidFollowProvider(
+        RecordingContactScraper(),
+        device_factory=lambda _serial: device,
+        sleeper=clock.sleep,
+        clock=clock,
+        navigation_wait=0,
+    )
+    context = make_context(tmp_path)
+    specific = Candidate(
+        "exact_user", "specific_users", CandidateProviderType.SPECIFIC_ACCOUNTS
+    )
+
+    result = provider.open_candidate_profile(context, specific)
+
+    assert result.status is AndroidFollowStatus.FOLLOW_FAILED
+    assert result.detail == "Profile loading timeout."
+    assert device.presses == ["back"]
+    messages = [message for _level, message, _fields in context.logger.messages]
+    assert "[Specific] Returning to Instagram Search..." in messages
+    assert "[Specific] Instagram Search restored." in messages
+    assert "[Candidate] Returning to Followers list..." not in messages
+
+
 def test_candidate_profile_reads_inspected_profile_facts_and_notifies_observer(
     tmp_path,
 ):
@@ -903,7 +1000,7 @@ def test_missing_contact_does_not_open_popup(tmp_path):
     assert scraper.calls == []
     assert device.presses == []
     assert any(
-        message == "[Contact] No Contact button found."
+        message == "[Contact] No Contact button found. Profile metadata saved."
         for _level, message, _fields in context.logger.messages
     )
 
@@ -1081,6 +1178,9 @@ def test_verified_follow_dynamically_enables_mute_switches_and_returns(tmp_path)
         resource-id="com.instagram.androie:id/igds_textcell_switch"
         bounds="[876,959][1032,1055]" /></node>
       </node></hierarchy>"""
+    posts_enabled_mute_sheet = mute_sheet.replace(
+        'checked="false"', 'checked="true"', 1
+    )
     enabled_mute_sheet = mute_sheet.replace('checked="false"', 'checked="true"')
     profile = hierarchy(
         node(text="exact_user", resource_id=instagram_id("action_bar_title"))
@@ -1094,16 +1194,20 @@ def test_verified_follow_dynamically_enables_mute_switches_and_returns(tmp_path)
             following,
             following_sheet,
             mute_sheet,
+            posts_enabled_mute_sheet,
             enabled_mute_sheet,
-            profile,
             profile,
             followers,
         )
     )
     context = make_context(tmp_path)
+    sleeps = []
 
     result = make_provider(
-        device, verification_delay=0, mute_after_follow=True
+        device,
+        sleeps=sleeps,
+        verification_delay=0,
+        mute_after_follow=True,
     ).execute_follow(context)
 
     assert result.status is AndroidFollowStatus.SUCCESS
@@ -1111,11 +1215,12 @@ def test_verified_follow_dynamically_enables_mute_switches_and_returns(tmp_path)
     assert (954, 692) in device.clicks
     assert (954, 1007) in device.clicks
     assert (954, 854) not in device.clicks
-    assert device.swipes == [((540, 1775, 540, 612), {"duration": 0.4})]
+    assert device.swipes == []
+    assert all(wait <= 0.1 for wait in sleeps)
     assert device.presses == ["back"]
     messages = [message for _level, message, _fields in context.logger.messages]
-    assert "[Mute] Mute page opened." in messages
-    assert "[Mute] Switch already enabled." in messages
+    assert "[Mute] Mute settings opened." in messages
+    assert "[Mute] Mute switches ready." in messages
     assert messages[-1] == "[Mute] Mute completed."
 
 

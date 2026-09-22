@@ -106,6 +106,12 @@ class SessionController(QObject):
                 except Exception:
                     logger.exception("Could not stop Phone Scheduler for %s", serial)
 
+    def account_configuration_saved(self, account) -> bool:
+        """Notify an active phone scheduler that persisted settings changed."""
+
+        scheduler = self._schedulers.get(account.device_id)
+        return bool(scheduler and scheduler.account_configuration_changed(account))
+
     def _worker_finished(self, serial: str, worker: _SchedulerWorker) -> None:
         self._workers.discard(worker)
         scheduler = self._schedulers.get(serial)

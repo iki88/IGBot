@@ -530,6 +530,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Global Settings saved.", 3000)
 
     def _on_account_configuration_saved(self, original, account) -> None:
+        self.session_controller.account_configuration_saved(account)
         current = self.account_page.account
         if current is not None and current.config_path == original.config_path:
             self.account_page.account = account

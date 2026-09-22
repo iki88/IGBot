@@ -64,6 +64,18 @@ class RecordingFinalStage:
         )
 
 
+class RecordingRecentAppsStage:
+    def __init__(self, events):
+        self._events = events
+
+    def execute(self, context):
+        self._events.append("recent_apps")
+        return StartupStageResult(
+            StartupStageName.CLOSE_RECENT_APPS,
+            StartupStageStatus.SUCCESS,
+        )
+
+
 class SkippedAccountVerifier:
     def execute(self, context):
         return StartupStageResult(
@@ -218,14 +230,16 @@ def test_pipeline_fixes_airplane_mode_immediately_after_internet(tmp_path):
         airplane,
         RecordingFinalStage(events),
         SkippedAccountVerifier(),
+        close_recent_apps=RecordingRecentAppsStage(events),
     )
 
     result = pipeline.execute(context)
 
-    assert events == ["internet", "airplane", "final"]
+    assert events == ["internet", "airplane", "recent_apps", "final"]
     assert [stage.stage for stage in result.stage_results] == [
         StartupStageName.INTERNET,
         StartupStageName.AIRPLANE_MODE,
+        StartupStageName.CLOSE_RECENT_APPS,
         StartupStageName.INSTAGRAM_LAUNCH,
         StartupStageName.ACCOUNT_VERIFICATION,
     ]

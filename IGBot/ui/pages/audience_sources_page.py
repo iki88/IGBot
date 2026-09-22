@@ -1,9 +1,11 @@
 import re
+from pathlib import Path
 from typing import ClassVar
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from IGBot.services.specific_lists_service import SpecificListsService
 from IGBot.ui.widgets.configuration_widgets import ConfigurationSection
 from IGBot.ui.widgets.target_editor_dialog import TargetEditorDialog
 from IGBot.ui.widgets.target_source_row import TargetSourceRow
@@ -38,12 +40,14 @@ class AudienceSourcesPage(QWidget):
         parent=None,
         include_advanced: bool = True,
         section_title: str = "Method",
+        switch_style: bool = True,
     ) -> None:
         super().__init__(parent)
         self._loading = False
         self._present_keys: set[str] = set()
         self._hidden_values: dict[str, list[str] | None] = {}
         self.rows: dict[str, TargetSourceRow] = {}
+        self._specific_lists: SpecificListsService | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
@@ -53,15 +57,24 @@ class AudienceSourcesPage(QWidget):
         if include_advanced:
             sources.update(self.ADVANCED_SOURCES)
         for key, label in sources.items():
-            method.body_layout.addWidget(self._create_row(key, label, method))
+            method.body_layout.addWidget(
+                self._create_row(key, label, method, switch_style=switch_style)
+            )
         layout.addWidget(method)
 
     @classmethod
     def supported_keys(cls) -> set[str]:
         return set(cls.PRIORITY_SOURCES) | set(cls.ADVANCED_SOURCES)
 
-    def _create_row(self, key: str, label: str, parent: QWidget) -> TargetSourceRow:
-        row = TargetSourceRow(label, parent)
+    def _create_row(
+        self,
+        key: str,
+        label: str,
+        parent: QWidget,
+        *,
+        switch_style: bool,
+    ) -> TargetSourceRow:
+        row = TargetSourceRow(label, parent, switch_style=switch_style)
         row.changed.connect(self._changed)
         row.edit_requested.connect(lambda key=key: self._edit_source(key))
         self.rows[key] = row
@@ -79,6 +92,13 @@ class AudienceSourcesPage(QWidget):
             for key, row in self.rows.items():
                 value = configuration.get(key)
                 entries = value if isinstance(value, list) else []
+                if (
+                    key == "blogger"
+                    and entries
+                    and self._specific_lists is not None
+                    and not self._specific_lists.load("followspecific.txt")
+                ):
+                    self._specific_lists.save("followspecific.txt", entries)
                 row.set_entries(entries)
                 row.enabled.setChecked(bool(entries))
         finally:
@@ -113,14 +133,26 @@ class AudienceSourcesPage(QWidget):
 
     def _edit_source(self, key: str) -> None:
         row = self.rows[key]
+        if key == "blogger" and self._specific_lists is not None:
+            row.set_entries(self._specific_lists.load("followspecific.txt"))
         dialog = TargetEditorDialog(
             row.name.text(), row.entries(), self._validator_for(key), self
         )
         if dialog.exec() == TargetEditorDialog.Accepted:
             entries = dialog.entries()
             row.set_entries(entries)
+            if key == "blogger" and self._specific_lists is not None:
+                self._specific_lists.save("followspecific.txt", entries)
             row.enabled.setChecked(bool(entries))
             self._changed()
+
+    def set_account_directory(self, directory: str | Path) -> None:
+        account_directory = Path(directory)
+        if not (account_directory / "config.yml").is_file():
+            self._specific_lists = None
+            return
+        self._specific_lists = SpecificListsService(account_directory)
+        self._specific_lists.initialize()
 
     def _validator_for(self, key: str):
         if key in self.USERNAME_KEYS:

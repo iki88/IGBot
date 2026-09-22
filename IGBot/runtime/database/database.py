@@ -16,6 +16,10 @@ from IGBot.runtime.database.repositories import (
     StoryRepository,
     UsersRepository,
 )
+from IGBot.runtime.database.specific_repositories import (
+    SpecificProgressRepository,
+    specific_repositories,
+)
 
 
 class RuntimeDatabase:
@@ -34,6 +38,13 @@ class RuntimeDatabase:
         self.comment = CommentRepository(self._connection)
         self.story = StoryRepository(self._connection)
         self.dm = DMRepository(self._connection)
+        self.specific = specific_repositories(self._connection)
+        self.specific_follow = self.specific["specific_follow"]
+        self.specific_unfollow = self.specific["specific_unfollow"]
+        self.specific_like = self.specific["specific_like"]
+        self.specific_dm = self.specific["specific_dm"]
+        self.specific_comment = self.specific["specific_comment"]
+        self.specific_progress = SpecificProgressRepository(self._connection)
 
         try:
             self._initialize_schema()
@@ -50,6 +61,8 @@ class RuntimeDatabase:
             self.comment,
             self.story,
             self.dm,
+            *self.specific.values(),
+            self.specific_progress,
         )
         migrate_runtime_schema(self._connection, repositories)
         with self._connection:

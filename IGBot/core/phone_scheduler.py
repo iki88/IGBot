@@ -49,6 +49,7 @@ class PhoneScheduler:
         runtime_factory: Callable[..., object] | None = None,
         runtime_mode: RuntimeMode = RuntimeMode.NATIVE,
         device_validator: Callable[[str], bool] = PhoneManager.is_connected,
+        runtime_eligibility: Callable[[AssignedAccount, dict], bool] | None = None,
         clock: Callable[[], datetime] = datetime.now,
         decision_interval: float = 30.0,
     ) -> None:
@@ -64,13 +65,20 @@ class PhoneScheduler:
 
             self._runtime_factory = create_native_runtime
         self._device_validator = device_validator
+        if runtime_eligibility is None:
+            from IGBot.runtime.eligibility import native_account_is_runnable
+
+            runtime_eligibility = native_account_is_runnable
+        self._runtime_eligibility = runtime_eligibility
         self._clock = clock
         self._decision_interval = decision_interval
         self._stop_event = threading.Event()
+        self._wake_event = threading.Event()
         self._runtime: object | None = None
         self._state = SessionState.IDLE
         self._completed_sessions: set[tuple[str, int, int, str]] = set()
         self._schedule_date = None
+        self._runtime_runnable: dict[Path, bool] = {}
 
     @property
     def state(self) -> SessionState:
@@ -125,7 +133,7 @@ class PhoneScheduler:
                         if decision.next_session is not None
                         else self._decision_interval
                     )
-                    self._stop_event.wait(timeout)
+                    self._wait(timeout)
                     continue
 
                 account = decision.selected
@@ -158,6 +166,7 @@ class PhoneScheduler:
                     self._runtime = None
                 if decision.session_key is not None:
                     self._completed_sessions.add(decision.session_key)
+                self._remember_runtime_eligibility(account)
                 if not self._stop_event.is_set():
                     logger.info(
                         "Scheduling cycle %d completed; waiting %.1f seconds",
@@ -165,7 +174,7 @@ class PhoneScheduler:
                         self._decision_interval,
                     )
                     self._set_state(SessionState.WAITING, state_changed)
-                    self._stop_event.wait(self._decision_interval)
+                    self._wait(self._decision_interval)
             self._set_state(SessionState.STOPPED, state_changed)
             logger.info("Phone Scheduler stopped for %s", self.device.serial)
         except Exception:
@@ -182,6 +191,7 @@ class PhoneScheduler:
             raise RuntimeError("This phone scheduler is not running.")
         self._set_state(SessionState.STOPPING, state_changed)
         self._stop_event.set()
+        self._wake_event.set()
         runtime = self._runtime
         if runtime is not None and runtime.state in {
             SessionState.STARTING,
@@ -208,6 +218,10 @@ class PhoneScheduler:
                     readiness_failure,
                 )
                 continue
+            self._runtime_runnable.setdefault(
+                account.config_path.resolve(),
+                self._runtime_eligibility(account, configuration),
+            )
             windows = self._load_windows(account, configuration)
             if not windows or all(start == end == 0 for start, end in windows):
                 logger.info("Skipping account %s (disabled)", account.username)
@@ -239,6 +253,53 @@ class PhoneScheduler:
             if next_session is None or upcoming < next_session:
                 next_session = upcoming
         return ScheduleDecision(selected, next_session, selected_key)
+
+    def account_configuration_changed(self, account: AssignedAccount) -> bool:
+        """Wake one completed active window after it becomes runnable again."""
+
+        if self._state is not SessionState.WAITING or self._stop_event.is_set():
+            return False
+        if account.device_id != self.device.serial or self._runtime is not None:
+            return False
+        configuration, readiness_failure = self._runtime_configuration(account)
+        if readiness_failure is not None:
+            return False
+        path = account.config_path.resolve()
+        was_runnable = self._runtime_runnable.get(path)
+        is_runnable = self._runtime_eligibility(account, configuration)
+        self._runtime_runnable[path] = is_runnable
+        if was_runnable is not False or not is_runnable:
+            return False
+        now = self._clock()
+        active_keys = {
+            (str(path), start, end, now.date().isoformat())
+            for start, end in self._load_windows(account, configuration)
+            if self._contains(start, end, now)
+        }
+        completed_active_keys = active_keys & self._completed_sessions
+        if not completed_active_keys:
+            return False
+        self._completed_sessions.difference_update(completed_active_keys)
+        logger.info(
+            "Account %s became runnable after settings changed; waking Phone Scheduler",
+            account.username,
+        )
+        self._wake_event.set()
+        return True
+
+    def _wait(self, timeout: float) -> None:
+        """Wait for the next decision time or an explicit configuration wake-up."""
+
+        self._wake_event.wait(timeout)
+        self._wake_event.clear()
+
+    def _remember_runtime_eligibility(self, account: AssignedAccount) -> None:
+        configuration, failure = self._runtime_configuration(account)
+        self._runtime_runnable[account.config_path.resolve()] = bool(
+            failure is None
+            and configuration is not None
+            and self._runtime_eligibility(account, configuration)
+        )
 
     @classmethod
     def _valid_application_id(cls, value: object) -> bool:
@@ -291,21 +352,9 @@ class PhoneScheduler:
 
     @staticmethod
     def _native_configuration_ready(configuration: dict) -> bool:
-        enabled = configuration.get("follow-percentage") not in (
-            None,
-            False,
-            0,
-            "",
-            "0",
-        )
-        sources = configuration.get("blogger-followers")
-        if isinstance(sources, str):
-            configured = bool(sources.strip())
-        elif isinstance(sources, list):
-            configured = any(str(source).strip() for source in sources)
-        else:
-            configured = False
-        return enabled and configured
+        from IGBot.runtime.eligibility import native_follow_configuration_ready
+
+        return native_follow_configuration_ready(configuration)
 
     @staticmethod
     def _load_windows(

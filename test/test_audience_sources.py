@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QApplication, QDialog
 
 from IGBot.core.device import AssignedAccount
 from IGBot.services.account_assignment_service import AccountAssignmentService
+from IGBot.services.specific_lists_service import SpecificListsService
 from IGBot.ui.pages.account_page import AccountPage
 from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
 from IGBot.ui.widgets.configuration_widgets import (
@@ -59,6 +60,90 @@ def test_audience_sources_load_and_dirty_state(tmp_path):
 
     sources.rows["blogger-followers"].enabled.setChecked(False)
     assert page.is_dirty
+
+
+def test_specific_users_files_are_account_local_and_initialized(tmp_path):
+    account_directory = tmp_path / "Accounts" / "account"
+    lists = SpecificListsService(account_directory)
+
+    lists.initialize()
+
+    assert {path.name for path in lists.directory.iterdir()} == set(lists.FILENAMES)
+    assert all(
+        not path.read_text(encoding="utf-8") for path in lists.directory.iterdir()
+    )
+
+
+def test_inventory_initializes_specific_users_files_for_existing_account(tmp_path):
+    service, account = configuration(tmp_path)
+
+    service.load_by_device()
+
+    lists = SpecificListsService(account.config_path.parent)
+    assert lists.directory.is_dir()
+    assert {path.name for path in lists.directory.iterdir()} == set(lists.FILENAMES)
+
+
+def test_follow_specific_users_popup_loads_and_saves_account_file(tmp_path, mocker):
+    account_directory = tmp_path / "Accounts" / "account"
+    account_directory.mkdir(parents=True)
+    (account_directory / "config.yml").write_text(
+        "username: account\n", encoding="utf-8"
+    )
+    lists = SpecificListsService(account_directory)
+    lists.save("followspecific.txt", ["stored.one", "stored.two"])
+    page = AudienceSourcesPage()
+    page.set_account_directory(account_directory)
+    page.set_configuration({"blogger": ["legacy.config"]})
+    mocker.patch.object(
+        TargetEditorDialog, "exec", return_value=TargetEditorDialog.Accepted
+    )
+    entries = mocker.patch.object(
+        TargetEditorDialog, "entries", return_value=["saved.one", "saved.two"]
+    )
+
+    page._edit_source("blogger")
+
+    assert entries.call_count == 1
+    assert lists.load("followspecific.txt") == ["saved.one", "saved.two"]
+    assert page.rows["blogger"].entries() == ["saved.one", "saved.two"]
+
+
+def test_existing_specific_users_configuration_seeds_empty_account_file(tmp_path):
+    account_directory = tmp_path / "Accounts" / "account"
+    account_directory.mkdir(parents=True)
+    (account_directory / "config.yml").write_text(
+        "username: account\n", encoding="utf-8"
+    )
+    page = AudienceSourcesPage()
+    page.set_account_directory(account_directory)
+
+    page.set_configuration({"blogger": ["legacy.one", "legacy.two"]})
+
+    assert SpecificListsService(account_directory).load("followspecific.txt") == [
+        "legacy.one",
+        "legacy.two",
+    ]
+
+
+def test_account_editor_does_not_create_lists_for_placeholder_path(tmp_path):
+    placeholder = tmp_path / "accounts" / "placeholder"
+    page = AudienceSourcesPage()
+
+    page.set_account_directory(placeholder)
+
+    assert not placeholder.exists()
+
+
+def test_account_page_binding_does_not_create_placeholder_account_folder(tmp_path):
+    config_path = tmp_path / "accounts" / "placeholder" / "config.yml"
+    page = AccountPage()
+
+    page.set_account(
+        AssignedAccount("placeholder", "phone-a", "com.instagram.android", config_path)
+    )
+
+    assert not config_path.parent.exists()
 
 
 def test_audience_sources_save_only_documented_engine_keys(tmp_path):

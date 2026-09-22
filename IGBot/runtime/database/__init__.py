@@ -17,6 +17,11 @@ from IGBot.runtime.database.repositories import (
     StoryRepository,
     UsersRepository,
 )
+from IGBot.runtime.database.specific_repositories import (
+    SpecificInteractionRepository,
+    SpecificProgress,
+    SpecificProgressRepository,
+)
 
 __all__ = [
     "CommentRecord",
@@ -28,6 +33,9 @@ __all__ = [
     "LikeRecord",
     "LikeRepository",
     "RuntimeDatabase",
+    "SpecificInteractionRepository",
+    "SpecificProgress",
+    "SpecificProgressRepository",
     "StoryRecord",
     "StoryRepository",
     "UserRecord",

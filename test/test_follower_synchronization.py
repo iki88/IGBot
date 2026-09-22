@@ -288,6 +288,73 @@ def test_android_reader_treats_zero_followers_as_successful_empty_scan(tmp_path)
     )
 
 
+def test_android_reader_clicks_see_more_and_stops_before_suggested_users(tmp_path):
+    device = FakeDevice(
+        (
+            hierarchy(
+                node(
+                    resource_id="com.instagram.clone:id/tab_avatar",
+                    bounds="[900,1800][1080,1920]",
+                )
+            ),
+            hierarchy(
+                node(
+                    resource_id=(
+                        "com.instagram.clone:id/"
+                        "row_profile_header_followers_container"
+                    ),
+                    bounds="[200,200][400,300]",
+                )
+            ),
+            hierarchy(
+                node(
+                    text="first_real",
+                    resource_id="com.instagram.clone:id/follow_list_username",
+                ),
+                node(
+                    text="See more",
+                    resource_id="com.instagram.clone:id/see_more_button",
+                    bounds="[48,972][235,1026]",
+                ),
+                node(
+                    text="Suggested for you",
+                    resource_id="com.instagram.clone:id/row_header_textview",
+                ),
+                node(
+                    text="suggested_account",
+                    resource_id="com.instagram.clone:id/follow_list_username",
+                ),
+            ),
+            hierarchy(
+                node(
+                    text="second_real",
+                    resource_id="com.instagram.clone:id/follow_list_username",
+                ),
+                node(
+                    text="Suggested for you",
+                    resource_id="com.instagram.clone:id/row_header_textview",
+                ),
+                node(
+                    text="suggested_account",
+                    resource_id="com.instagram.clone:id/follow_list_username",
+                ),
+            ),
+        )
+    )
+    reader = AndroidFollowerReader(
+        device_factory=lambda _: device,
+        sleeper=lambda _: None,
+    )
+
+    result = reader.read(make_context(tmp_path), limit=100)
+
+    assert result == FollowerReadResult(
+        True, ("first_real", "second_real"), limit_reached=False
+    )
+    assert len(device.clicks) == 3
+    assert device.swipes == []
+
+
 def test_empty_follower_synchronization_logs_zero_and_succeeds(tmp_path):
     context = make_context(tmp_path)
     stage = FollowerSynchronization(

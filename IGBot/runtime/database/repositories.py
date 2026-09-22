@@ -160,6 +160,19 @@ class FollowRepository:
             muted=bool(row[9]),
         )
 
+    def count_followed_between(self, start: str, end: str) -> int:
+        """Count persisted Follow successes in the half-open UTC interval."""
+
+        row = self._connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM follow
+            WHERE follow_date >= ? AND follow_date < ?
+            """,
+            (utc_timestamp(start), utc_timestamp(end)),
+        ).fetchone()
+        return int(row[0])
+
 
 class LikeRepository:
     """Persist Like-owned aggregate interaction state."""

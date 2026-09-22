@@ -6,7 +6,9 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from IGBot.runtime.candidates import (
+    Candidate,
     CandidateProvider,
+    CandidateProviderType,
     CandidateResultStatus,
 )
 from IGBot.runtime.context import RuntimeContext
@@ -52,6 +54,8 @@ class FollowModule:
         self._hook_manager = hook_manager
         self._clock = clock
         self._cancellation_requested = cancellation_requested
+        self.consecutive_profile_timeouts = 0
+        self.session_aborted = False
         now = self._now()
         self._daily_limit = settings.daily_remaining
         self._daily_remaining = settings.daily_remaining
@@ -105,7 +109,10 @@ class FollowModule:
         state_eligible = self._state.is_eligible()
         self._refresh_limits()
         return (
-            self._daily_remaining > 0 and self._hourly_remaining > 0 and state_eligible
+            not self.session_aborted
+            and self._daily_remaining > 0
+            and self._hourly_remaining > 0
+            and state_eligible
         )
 
     def record_verified_follow(self) -> tuple[bool, bool]:
@@ -175,6 +182,11 @@ class FollowModule:
         """Run one bounded preparation cycle and stop before Follow interaction."""
 
         self._validate_execution(context, budget)
+        if self.session_aborted:
+            return self._result(
+                FollowModuleResultStatus.FILTER_REJECTED,
+                detail="Follow session aborted after consecutive profile loading timeouts.",
+            )
         context.logger.debug("Follow candidate preparation started")
         while True:
             if self._cancelled(context, "locating candidate"):
@@ -207,12 +219,29 @@ class FollowModule:
             if self._cancelled(context, "opening candidate"):
                 return self._cancelled_result()
             profile = self._profile_provider.open_profile(context, candidate)
+            if profile is None and getattr(
+                self._profile_provider, "profile_loading_timed_out", False
+            ):
+                self.consecutive_profile_timeouts += 1
+                self._mark_specific_processed(context, candidate)
+                if self.consecutive_profile_timeouts >= 3:
+                    self.session_aborted = True
+                    context.logger.warning(
+                        "[Profile] Consecutive profile loading timeouts detected."
+                    )
+                    context.logger.warning("[Follow] Aborting current Follow session.")
+                    return self._result(
+                        FollowModuleResultStatus.FILTER_REJECTED,
+                        detail="Follow session aborted after consecutive profile loading timeouts.",
+                    )
+                continue
             if profile is None:
                 context.logger.warning(
                     "Candidate processing stopped",
                     username=candidate.username,
                     reason="profile unavailable",
                 )
+                self._mark_specific_processed(context, candidate)
                 return self._result(
                     FollowModuleResultStatus.FILTER_REJECTED,
                     detail=(
@@ -222,16 +251,36 @@ class FollowModule:
             context.logger.info(
                 "Candidate processing started", username=candidate.username
             )
+            self.consecutive_profile_timeouts = 0
             if self._cancelled(context, "filter evaluation"):
                 self._profile_provider.return_to_followers(context)
                 return self._cancelled_result()
             context.logger.info(
                 "Filter evaluation started", username=candidate.username
             )
-            qualification = self._qualifier.qualify(
-                context, profile, self._settings.filters
+            record_evaluated = getattr(
+                self._candidate_provider, "record_evaluated", None
             )
-            if qualification.status is FollowModuleResultStatus.READY_TO_FOLLOW:
+            if record_evaluated is not None:
+                record_evaluated(context)
+            if (
+                candidate.provider_type is CandidateProviderType.SPECIFIC_ACCOUNTS
+                and not self._profile_filters_enabled()
+            ):
+                context.logger.info(
+                    "Profile filter evaluation skipped",
+                    username=candidate.username,
+                    reason="no profile filters configured",
+                )
+                qualification = None
+            else:
+                qualification = self._qualifier.qualify(
+                    context, profile, self._settings.filters
+                )
+            if (
+                qualification is None
+                or qualification.status is FollowModuleResultStatus.READY_TO_FOLLOW
+            ):
                 context.logger.info(
                     "Filter evaluation completed", username=candidate.username
                 )
@@ -243,6 +292,12 @@ class FollowModule:
                 status=qualification.status.value,
                 detail=qualification.detail or "",
             )
+            if candidate.provider_type is CandidateProviderType.SPECIFIC_ACCOUNTS:
+                self._mark_specific_processed(context, candidate)
+                context.logger.info(
+                    "[Specific] Candidate skipped.", username=candidate.username
+                )
+                continue
             restored = self._profile_provider.return_to_followers(context)
             if not restored.succeeded:
                 context.logger.error(
@@ -264,7 +319,6 @@ class FollowModule:
             if self._cancelled(context, "contact scraping"):
                 self._profile_provider.return_to_followers(context)
                 return self._cancelled_result()
-            context.logger.info("Contact scraping started", username=candidate.username)
             hook_results = tuple(
                 self._hook_manager.dispatch(
                     HookEvent(
@@ -273,11 +327,6 @@ class FollowModule:
                         {"candidate": candidate, "profile": profile},
                     )
                 )
-            )
-            context.logger.info(
-                "Contact scraping completed",
-                username=candidate.username,
-                results=len(hook_results),
             )
         context.logger.info("Follow candidate ready", username=candidate.username)
         domain_result = FollowModuleResult(
@@ -291,6 +340,44 @@ class FollowModule:
             next_module_state=self.state,
             outcome=ModuleExecutionOutcome.SUCCESS,
             module_result=domain_result,
+        )
+
+    def mark_candidate_processed(
+        self, context: RuntimeContext, candidate: Candidate
+    ) -> None:
+        """Advance provider-owned progress after an interaction outcome."""
+
+        self._mark_specific_processed(context, candidate)
+
+    def _mark_specific_processed(
+        self, context: RuntimeContext, candidate: Candidate
+    ) -> None:
+        if candidate.provider_type is not CandidateProviderType.SPECIFIC_ACCOUNTS:
+            return
+        mark_processed = getattr(self._candidate_provider, "mark_processed", None)
+        if mark_processed is not None:
+            mark_processed(context)
+
+    def _profile_filters_enabled(self) -> bool:
+        filters = self._settings.filters
+        return any(
+            (
+                not filters.allow_private,
+                filters.follow_only_private,
+                filters.skip_business,
+                filters.follow_only_business,
+                filters.skip_link_in_bio,
+                filters.follow_only_link_in_bio,
+                filters.min_followers is not None,
+                filters.max_followers is not None,
+                filters.min_following is not None,
+                filters.max_following is not None,
+                filters.min_posts is not None,
+                bool(filters.keywords.required),
+                bool(filters.keywords.blocked),
+                bool(filters.allowed_alphabets),
+                bool(filters.biography_languages),
+            )
         )
 
     def _cancelled(self, context: RuntimeContext, next_stage: str) -> bool:

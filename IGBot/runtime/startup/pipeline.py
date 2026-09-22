@@ -30,6 +30,7 @@ class StartupPipeline:
         account_verifier: StartupStage,
         stages: Iterable[StartupStage] = (),
         *,
+        close_recent_apps: StartupStage | None = None,
         instagram_state_recovery: StartupStage | None = None,
         follower_synchronization: StartupStage | None = None,
     ) -> StartupPipeline:
@@ -37,8 +38,10 @@ class StartupPipeline:
         ordered = [
             internet_checker,
             airplane_mode_controller,
-            instagram_launcher,
         ]
+        if close_recent_apps is not None:
+            ordered.append(close_recent_apps)
+        ordered.append(instagram_launcher)
         if instagram_state_recovery is not None:
             ordered.append(instagram_state_recovery)
         ordered.append(account_verifier)

@@ -14,7 +14,7 @@ from IGBot.core.device import AssignedAccount
 from IGBot.core.session_engine import SessionState
 from IGBot.runtime.candidates import Candidate, CandidateProviderType
 from IGBot.runtime.context import RuntimeContext
-from IGBot.runtime.database import RuntimeDatabase
+from IGBot.runtime.database import FollowRecord, RuntimeDatabase
 from IGBot.runtime.follow import (
     AndroidFollowResult,
     AndroidFollowStatus,
@@ -22,10 +22,12 @@ from IGBot.runtime.follow import (
     FollowModuleResult,
     FollowModuleResultStatus,
 )
+from IGBot.runtime.follow.daily_limits import successful_follows_today
 from IGBot.runtime.follower_synchronization import RuntimeFollowerComparer
 from IGBot.runtime.native_integration import (
     NativeAccountRuntime,
     PythonRuntimeLogger,
+    _FollowModuleProvider,
     _NativeFollowExecutor,
     _ProfilePersistence,
 )
@@ -211,3 +213,152 @@ def test_verified_follow_persists_global_and_account_history_without_duplicates(
         assert len(comparison.follow_back_updates) == 1
     with sqlite3.connect(account_directory / "runtime.db") as connection:
         assert connection.execute("SELECT COUNT(*) FROM follow").fetchone()[0] == 1
+
+
+def test_specific_follow_persists_only_specific_history(tmp_path):
+    account_directory = tmp_path / "account"
+    candidate = Candidate(
+        "specific_user",
+        "specific_users",
+        CandidateProviderType.SPECIFIC_ACCOUNTS,
+    )
+    context = RuntimeContext(
+        SessionContext(
+            uuid4(),
+            "alice",
+            "PHONE",
+            "com.instagram.android",
+            account_directory,
+            datetime.now(timezone.utc),
+        ),
+        PythonRuntimeLogger(),
+    )
+    prepared = ModuleExecutionResult(
+        True,
+        True,
+        ModuleState.READY,
+        module_result=FollowModuleResult(
+            FollowModuleResultStatus.READY_TO_FOLLOW, candidate
+        ),
+    )
+
+    class Module:
+        state = ModuleState.READY
+
+        def __init__(self):
+            self.processed = []
+
+        def execute(self, _context, _budget):
+            return prepared
+
+        def cancellation_requested(self):
+            return False
+
+        def complete_verified_follow(self):
+            return None
+
+        def mark_candidate_processed(self, _context, processed_candidate):
+            self.processed.append(processed_candidate)
+
+    class Android:
+        def execute_follow(self, _context):
+            return AndroidFollowResult(AndroidFollowStatus.SUCCESS, muted=True)
+
+    writer = GlobalDatabaseWriter(tmp_path)
+    persistence = _ProfilePersistence(writer)
+    persistence.submit(CandidateProfile(candidate, candidate.username))
+    module = Module()
+    try:
+        _NativeFollowExecutor(None, Android(), persistence).execute(
+            context, module, None
+        )
+    finally:
+        writer.close()
+
+    assert module.processed == [candidate]
+    with sqlite3.connect(account_directory / "runtime.db") as connection:
+        connection.row_factory = sqlite3.Row
+        assert connection.execute("SELECT COUNT(*) FROM follow").fetchone()[0] == 0
+        row = connection.execute("SELECT * FROM specific_follow").fetchone()
+        assert row["username"] == "specific_user"
+        assert row["status"] == "SUCCESS"
+        assert row["muted"] == 1
+        assert row["follow_date"]
+
+
+def test_follow_daily_remaining_uses_persisted_successes_after_limit_change(tmp_path):
+    account_directory = tmp_path / "account"
+    now = datetime.now(timezone.utc)
+    context = RuntimeContext(
+        SessionContext(
+            uuid4(),
+            "alice",
+            "PHONE",
+            "com.instagram.android",
+            account_directory,
+            now,
+        ),
+        PythonRuntimeLogger(),
+    )
+    with RuntimeDatabase(account_directory) as database:
+        first = database.users.create("first_target", now, "FOLLOW")
+        second = database.users.create("second_target", now, "FOLLOW")
+        database.follow.save(
+            FollowRecord(
+                first.id,
+                first.username,
+                source="source",
+                follow_date=now.isoformat(),
+            )
+        )
+        database.follow.save(
+            FollowRecord(
+                second.id,
+                second.username,
+                source="source",
+                follow_date=now.isoformat(),
+            )
+        )
+
+    def module_for(daily_limit):
+        provider = _FollowModuleProvider(
+            {
+                "follow-percentage": 100,
+                "follow-limit": 1,
+                "total-follows-limit": daily_limit,
+                "blogger-followers": ["source"],
+            },
+            {},
+            {},
+            SimpleNamespace(),
+            SimpleNamespace(),
+        )
+        return next(iter(provider.modules_for(context)))
+
+    assert module_for(3).daily_remaining == 1
+    assert module_for(5).daily_remaining == 3
+
+
+def test_daily_follow_count_includes_successful_specific_follows_only(tmp_path):
+    account_directory = tmp_path / "account"
+    now = datetime.now(timezone.utc)
+    context = RuntimeContext(
+        SessionContext(
+            uuid4(),
+            "alice",
+            "PHONE",
+            "com.instagram.android",
+            account_directory,
+            now,
+        ),
+        PythonRuntimeLogger(),
+    )
+    with RuntimeDatabase(account_directory) as database:
+        database.specific_follow.upsert_username(
+            "successful", {"follow_date": now.isoformat(), "status": "SUCCESS"}
+        )
+        database.specific_follow.upsert_username(
+            "failed", {"follow_date": now.isoformat(), "status": "FOLLOW_FAILED"}
+        )
+
+    assert successful_follows_today(context.session.account_directory) == 1

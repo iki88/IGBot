@@ -87,6 +87,9 @@ class GlobalSettingsPage(QScrollArea):
                 self.wait_after_instagram_launch.text().strip()
             ),
             "login_retry_limit_per_day": self.login_retry_limit.value(),
+            "close_recent_apps_before_session": (
+                self.close_recent_apps_before_session.isChecked()
+            ),
             "enable_block_detection": self.enable_block_detection.isChecked(),
             "pause_after_action_block": self.pause_after_action_block.value(),
             "maximum_crash_retries": self.maximum_crash_retries.value(),
@@ -124,6 +127,9 @@ class GlobalSettingsPage(QScrollArea):
             str(settings["wait_after_launching_instagram"])
         )
         self.login_retry_limit.setValue(int(settings["login_retry_limit_per_day"]))
+        self.close_recent_apps_before_session.setChecked(
+            bool(settings["close_recent_apps_before_session"])
+        )
         self.enable_block_detection.setChecked(bool(settings["enable_block_detection"]))
         self.pause_after_action_block.setValue(
             int(settings["pause_after_action_block"])
@@ -201,6 +207,9 @@ class GlobalSettingsPage(QScrollArea):
         self.wait_after_instagram_launch.setProperty("runtimeExtension", True)
         self.login_retry_limit = self._numeric_control(section, maximum=100)
         self.login_retry_limit.setProperty("runtimeExtension", True)
+        self.close_recent_apps_before_session = self._switch(
+            "Close Recent Apps Before Session", section, runtime_extension=True
+        )
         self._add_field(
             grid,
             0,
@@ -221,6 +230,21 @@ class GlobalSettingsPage(QScrollArea):
             "Login Retry Limit Per Day",
             self.login_retry_limit,
             info="Maximum automatic attempts before operator intervention.",
+        )
+        grid.addWidget(
+            self._switch_row(
+                self.close_recent_apps_before_session,
+                (
+                    "Closes all removable recent apps before starting a new session. "
+                    "Locked apps remain untouched. Helps ensure Instagram starts "
+                    "from a clean state and prevents multiple Instagram clones from "
+                    "remaining open."
+                ),
+            ),
+            3,
+            0,
+            1,
+            3,
         )
         return section
 

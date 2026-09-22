@@ -61,6 +61,11 @@ class SchedulerLoop:
         context.logger.info("Smart Scheduler Loop started", modules=len(modules))
 
         while self._session_activity.is_active(context):
+            enabled_modules = tuple(module for module in modules if module.enabled)
+            if enabled_modules and all(
+                getattr(module, "session_aborted", False) for module in enabled_modules
+            ):
+                break
             selected_dm = None
             if initial_dm_pending:
                 initial_dm_pending = False

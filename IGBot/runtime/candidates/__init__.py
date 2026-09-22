@@ -20,6 +20,7 @@ from IGBot.runtime.candidates.models import (
 from IGBot.runtime.candidates.providers import (
     FollowersProvider,
     SpecificAccountsProvider,
+    SpecificUsersProvider,
 )
 from IGBot.runtime.candidates.qualifier import CandidateQualifier
 
@@ -40,4 +41,5 @@ __all__ = [
     "FollowersProvider",
     "SpecificAccountDiscovery",
     "SpecificAccountsProvider",
+    "SpecificUsersProvider",
 ]

@@ -45,6 +45,8 @@ class AndroidFollowerReader:
         "username_textview",
     )
     _SCROLL_IDS = ("recycler_view", "follow_list_container")
+    _SEE_MORE_IDS = ("see_more_button",)
+    _SUGGESTED_HEADER_IDS = ("row_header_textview",)
 
     def __init__(
         self,
@@ -95,10 +97,17 @@ class AndroidFollowerReader:
     def _read_list(self, device: object, limit: int) -> FollowerReadResult:
         usernames: list[str] = []
         seen: set[str] = set()
+        last_see_more_hierarchy: str | None = None
         while len(usernames) < limit:
-            nodes = self._nodes(device.dump_hierarchy(compressed=False))
+            hierarchy = device.dump_hierarchy(compressed=False)
+            nodes = self._nodes(hierarchy)
+            see_more = self._find(nodes, self._SEE_MORE_IDS)
+            suggested_reached = False
             added = False
             for node in nodes:
+                if self._is_suggested_header(node):
+                    suggested_reached = True
+                    break
                 if not self._id_has_suffix(node.resource_id, self._USERNAME_IDS):
                     continue
                 username = node.text.strip()
@@ -117,6 +126,14 @@ class AndroidFollowerReader:
                     return FollowerReadResult(
                         True, tuple(usernames), limit_reached=True
                     )
+
+            if see_more is not None and hierarchy != last_see_more_hierarchy:
+                last_see_more_hierarchy = hierarchy
+                device.click(*see_more.center)
+                self._sleeper(self._scroll_wait)
+                continue
+            if suggested_reached:
+                break
 
             scrollable = self._scrollable(nodes)
             if scrollable is None or not added:
@@ -179,6 +196,13 @@ class AndroidFollowerReader:
                 or cls._id_has_suffix(node.resource_id, cls._SCROLL_IDS)
             ),
             None,
+        )
+
+    @classmethod
+    def _is_suggested_header(cls, node: _Node) -> bool:
+        return (
+            cls._id_has_suffix(node.resource_id, cls._SUGGESTED_HEADER_IDS)
+            and node.text.strip().casefold() == "suggested for you"
         )
 
     @staticmethod

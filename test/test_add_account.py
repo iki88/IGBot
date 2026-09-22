@@ -53,6 +53,13 @@ def test_add_account_copies_templates_and_assigns_current_phone(tmp_path):
     assert config["app-id"] == ""
     assert config["screen-sleep"] is True
     assert (directory / "filters.yml").is_file()
+    assert {path.name for path in (directory / "Lists").iterdir()} == {
+        "followspecific.txt",
+        "likespecific.txt",
+        "dmspecific.txt",
+        "commentspecific.txt",
+        "unfollowspecific.txt",
+    }
     metadata = json.loads((directory / "account.json").read_text(encoding="utf-8"))
     assert metadata["username"] == "real_account"
     assert metadata["password"] == "password:value#1"

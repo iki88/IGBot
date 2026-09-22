@@ -45,11 +45,19 @@ class ConfiguredFollowCandidateQualifier:
     ) -> FollowQualificationResult:
         """Qualify one already-scraped profile without modifying runtime state."""
 
-        if profile.is_private and not settings.allow_private:
+        if profile.is_private and not (
+            settings.allow_private or settings.follow_only_private
+        ):
             context.logger.info("[Filter] Private profile skipped.")
             return FollowQualificationResult(
                 FollowModuleResultStatus.PRIVATE_SKIPPED,
                 "Private profile is disabled by Follow settings.",
+            )
+        if not profile.is_private and settings.follow_only_private:
+            context.logger.info("[Filter] Public profile skipped.")
+            return FollowQualificationResult(
+                FollowModuleResultStatus.FILTER_REJECTED,
+                "Public profile is disabled by Follow settings.",
             )
         context.logger.debug(
             "[Filter] Verified profile state evaluated.",
@@ -66,12 +74,24 @@ class ConfiguredFollowCandidateQualifier:
                     FollowModuleResultStatus.FILTER_REJECTED,
                     "Business profile is disabled by Follow settings.",
                 )
+        elif settings.follow_only_business:
+            context.logger.info("[Filter] Personal profile skipped.")
+            return FollowQualificationResult(
+                FollowModuleResultStatus.FILTER_REJECTED,
+                "Personal profile is disabled by Follow settings.",
+            )
 
         if settings.skip_link_in_bio and profile.has_external_links:
             context.logger.info("[Filter] Link in Bio detected. Candidate skipped.")
             return FollowQualificationResult(
                 FollowModuleResultStatus.FILTER_REJECTED,
                 "Profile exposes one or more external links.",
+            )
+        if settings.follow_only_link_in_bio and not profile.has_external_links:
+            context.logger.info("[Filter] Link in Bio required. Candidate skipped.")
+            return FollowQualificationResult(
+                FollowModuleResultStatus.FILTER_REJECTED,
+                "Profile does not expose an external link.",
             )
 
         numeric_filters = (

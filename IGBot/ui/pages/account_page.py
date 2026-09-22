@@ -284,6 +284,7 @@ class AccountPage(QWidget):
 
     def set_account(self, account: AssignedAccount, phone_name: str = "") -> None:
         self.account = account
+        self.follow_page.sources.set_account_directory(account.config_path.parent)
         self._loading = True
         self.page_header.title.setText(account.username)
         self.page_header.subtitle.setText("Instagram account settings and activity.")

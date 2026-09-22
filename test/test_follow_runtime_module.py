@@ -204,15 +204,132 @@ def test_follow_module_prepares_candidate_and_runs_enabled_profile_hooks(tmp_pat
         "Candidate processing started",
         "Filter evaluation started",
         "Filter evaluation completed",
-        "Contact scraping started",
-        "Contact scraping completed",
         "Follow candidate ready",
     ]
+
+
+def test_specific_user_without_profile_filters_skips_qualifier(tmp_path):
+    context = make_context(tmp_path)
+    candidate = Candidate(
+        "specific_user",
+        "specific_users",
+        CandidateProviderType.SPECIFIC_ACCOUNTS,
+    )
+    qualifier = RecordingQualifier()
+    module, _provider, _profiles, _qualifier, _hooks = make_module(
+        context,
+        CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, candidate),
+        profile=CandidateProfile(candidate, username=candidate.username),
+        qualifier=qualifier,
+        filters=FollowFilterSettings(allow_private=True),
+    )
+
+    result = module.execute(context, make_budget())
+
+    assert result.module_result.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert qualifier.calls == []
     assert context.logger.messages[-1] == (
         "info",
         "Follow candidate ready",
-        {"username": "target_user"},
+        {"username": "specific_user"},
     )
+
+
+@pytest.mark.parametrize("timed_out", (False, True))
+def test_source_session_counts_opened_profiles_and_loading_timeouts(
+    tmp_path, timed_out
+):
+    context = make_context(tmp_path)
+    module, provider, profiles, *_ = make_module(
+        context,
+        CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, make_candidate()),
+    )
+    evaluated = []
+    provider.record_evaluated = lambda context: evaluated.append(context)
+    if timed_out:
+        profiles.profile = None
+        profiles.profile_loading_timed_out = True
+    module.execute(context, make_budget())
+    assert evaluated == ([] if timed_out else [context])
+
+
+def test_three_loading_timeouts_abort_follow_without_source_evaluations(tmp_path):
+    context = make_context(tmp_path)
+    found = CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, make_candidate())
+    module, provider, profiles, qualifier, *_ = make_module(context, (found,) * 4)
+    profiles.profile = None
+    profiles.profile_loading_timed_out = True
+    provider.record_evaluated = lambda _: pytest.fail("timeout counted as evaluation")
+    module.execute(context, make_budget())
+    assert module.consecutive_profile_timeouts == 3
+    assert module.session_aborted
+    assert not module.is_eligible()
+    assert len(profiles.calls) == 3
+    assert qualifier.calls == []
+    assert any(
+        message == "[Follow] Aborting current Follow session."
+        for _, message, _ in context.logger.messages
+    )
+
+
+def test_ready_profile_resets_consecutive_loading_timeouts(tmp_path):
+    context = make_context(tmp_path)
+    found = CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, make_candidate())
+    module, *_ = make_module(context, found)
+    module.consecutive_profile_timeouts = 2
+    module.execute(context, make_budget())
+    assert module.consecutive_profile_timeouts == 0
+    assert not module.session_aborted
+
+
+def test_specific_profile_timeout_continues_with_next_username(tmp_path):
+    context = make_context(tmp_path)
+    first = Candidate(
+        "first_user", "specific_users", CandidateProviderType.SPECIFIC_ACCOUNTS
+    )
+    second = Candidate(
+        "second_user", "specific_users", CandidateProviderType.SPECIFIC_ACCOUNTS
+    )
+
+    class SpecificProvider(StubCandidateProvider):
+        def __init__(self):
+            super().__init__(
+                (
+                    CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, first),
+                    CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, second),
+                )
+            )
+            self.processed = []
+
+        def mark_processed(self, context):
+            self.processed.append(context)
+
+    class TimeoutThenReadyProfiles(StubProfileProvider):
+        profile_loading_timed_out = False
+
+        def open_profile(self, context, candidate):
+            self.calls.append((context, candidate))
+            self.profile_loading_timed_out = candidate is first
+            if self.profile_loading_timed_out:
+                return None
+            return CandidateProfile(candidate, candidate.username)
+
+    provider = SpecificProvider()
+    profiles = TimeoutThenReadyProfiles(None)
+    module, *_unused = make_module(
+        context,
+        CandidateResult(CandidateResultStatus.ALL_SOURCES_EXHAUSTED),
+        profile_provider=profiles,
+    )
+    module._candidate_provider = provider
+
+    result = module.execute(context, make_budget())
+
+    assert result.module_result.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert result.module_result.candidate is second
+    assert [candidate for _context, candidate in profiles.calls] == [first, second]
+    assert provider.processed == [context]
+    assert profiles.return_calls == []
 
 
 def test_follow_module_does_not_dispatch_hooks_when_contact_scraping_is_disabled(
@@ -439,6 +556,99 @@ def test_follow_qualifier_skips_business_only_when_configured(tmp_path):
     messages = [message for _level, message, _fields in context.logger.messages]
     assert "[Filter] Business profile detected." in messages
     assert "[Filter] Business profile skipped." in messages
+
+
+def test_follow_qualifier_follows_only_business_profiles_when_configured(tmp_path):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    business = CandidateProfile(
+        candidate,
+        username=candidate.username,
+        category="Financial service",
+        is_business=True,
+    )
+    personal = CandidateProfile(candidate, username=candidate.username)
+    qualifier = ConfiguredFollowCandidateQualifier()
+
+    default_business = qualifier.qualify(context, business, FollowFilterSettings())
+    default_personal = qualifier.qualify(context, personal, FollowFilterSettings())
+    only_business = FollowFilterSettings(follow_only_business=True)
+    accepted = qualifier.qualify(context, business, only_business)
+    rejected = qualifier.qualify(context, personal, only_business)
+
+    assert default_business.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert default_personal.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert accepted.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert rejected.status is FollowModuleResultStatus.FILTER_REJECTED
+    assert any(
+        message == "[Filter] Personal profile skipped."
+        for _level, message, _fields in context.logger.messages
+    )
+
+
+def test_follow_qualifier_private_profile_modes(tmp_path):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    public = CandidateProfile(candidate, username=candidate.username)
+    private = CandidateProfile(candidate, username=candidate.username, is_private=True)
+    qualifier = ConfiguredFollowCandidateQualifier()
+
+    default_public = qualifier.qualify(context, public, FollowFilterSettings())
+    default_private = qualifier.qualify(context, private, FollowFilterSettings())
+    allow_private = FollowFilterSettings(allow_private=True)
+    allowed_public = qualifier.qualify(context, public, allow_private)
+    allowed_private = qualifier.qualify(context, private, allow_private)
+    only_private = FollowFilterSettings(follow_only_private=True)
+    rejected_public = qualifier.qualify(context, public, only_private)
+    accepted_private = qualifier.qualify(context, private, only_private)
+
+    assert default_public.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert default_private.status is FollowModuleResultStatus.PRIVATE_SKIPPED
+    assert allowed_public.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert allowed_private.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert rejected_public.status is FollowModuleResultStatus.FILTER_REJECTED
+    assert accepted_private.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert any(
+        message == "[Filter] Public profile skipped."
+        for _level, message, _fields in context.logger.messages
+    )
+
+
+def test_follow_qualifier_link_in_bio_modes(tmp_path):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    without_link = CandidateProfile(candidate, username=candidate.username)
+    with_link = CandidateProfile(
+        candidate,
+        username=candidate.username,
+        website="https://example.com",
+        has_external_links=True,
+    )
+    qualifier = ConfiguredFollowCandidateQualifier()
+
+    assert (
+        qualifier.qualify(context, without_link, FollowFilterSettings()).status
+        is FollowModuleResultStatus.READY_TO_FOLLOW
+    )
+    assert (
+        qualifier.qualify(context, with_link, FollowFilterSettings()).status
+        is FollowModuleResultStatus.READY_TO_FOLLOW
+    )
+    assert (
+        qualifier.qualify(
+            context, with_link, FollowFilterSettings(skip_link_in_bio=True)
+        ).status
+        is FollowModuleResultStatus.FILTER_REJECTED
+    )
+    only_link = FollowFilterSettings(follow_only_link_in_bio=True)
+    assert (
+        qualifier.qualify(context, without_link, only_link).status
+        is FollowModuleResultStatus.FILTER_REJECTED
+    )
+    assert (
+        qualifier.qualify(context, with_link, only_link).status
+        is FollowModuleResultStatus.READY_TO_FOLLOW
+    )
 
 
 def test_keyword_filters_search_one_combined_normalized_profile(tmp_path):

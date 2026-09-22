@@ -36,8 +36,11 @@ class FollowFilterSettings:
     display_name: TextFilterSettings = TextFilterSettings()
     biography: TextFilterSettings = TextFilterSettings()
     allow_private: bool = False
+    follow_only_private: bool = False
     skip_business: bool = False
+    follow_only_business: bool = False
     skip_link_in_bio: bool = False
+    follow_only_link_in_bio: bool = False
     min_followers: int | None = None
     max_followers: int | None = None
     min_following: int | None = None

@@ -50,7 +50,11 @@ class StubModule:
         self.daily_remaining = daily_remaining
 
     def is_eligible(self):
-        return self.state is ModuleState.READY and self.enabled
+        return (
+            self.state is ModuleState.READY
+            and self.enabled
+            and not getattr(self, "session_aborted", False)
+        )
 
     def start(self):
         self.state = ModuleState.RUNNING
@@ -155,6 +159,31 @@ def make_loop(modules, executor, activity, *, chooser=None, now=None, sleeps=Non
             else lambda _seconds: None
         ),
     )
+
+
+def test_aborted_follow_only_ends_runtime_cycle_without_idle_wait(tmp_path):
+    context = make_context(tmp_path)
+    follow = StubModule(context, InteractionModule.FOLLOW)
+    follow.session_aborted = True
+    executor = SequenceExecutor(())
+    sleeps = []
+    result = make_loop((follow,), executor, CountedActivity(100), sleeps=sleeps).start(
+        context
+    )
+    assert result.cycles == ()
+    assert executor.calls == []
+    assert sleeps == []
+
+
+def test_aborted_follow_does_not_stop_other_modules(tmp_path):
+    context = make_context(tmp_path)
+    follow = StubModule(context, InteractionModule.FOLLOW)
+    follow.session_aborted = True
+    like = StubModule(context, InteractionModule.LIKE)
+    executor = SequenceExecutor((ModuleExecutionOutcome.SUCCESS,))
+    make_loop((follow, like), executor, CountedActivity(1)).start(context)
+    assert len(executor.calls) == 1
+    assert executor.calls[0][1] is like
 
 
 def test_loop_repeats_cycles_and_stops_at_session_boundary(tmp_path):

@@ -16,7 +16,9 @@ from IGBot.runtime.candidates import (
     FollowersDiscoverySettings,
     FollowersProvider,
     SpecificAccountsProvider,
+    SpecificUsersProvider,
 )
+from IGBot.runtime.database import RuntimeDatabase
 
 
 class StubLogger:
@@ -355,6 +357,59 @@ def test_specific_account_failure_is_structured_and_advances(tmp_path):
 
     assert rejected.status is CandidateResultStatus.FILTER_REJECTED
     assert exhausted.status is CandidateResultStatus.ALL_SOURCES_EXHAUSTED
+
+
+def test_specific_users_provider_resumes_persistent_follow_cursor(tmp_path):
+    context = make_context(tmp_path)
+    lists = tmp_path / "Lists"
+    lists.mkdir()
+    (lists / "followspecific.txt").write_text(
+        "first_user\nsecond_user\n", encoding="utf-8"
+    )
+    provider = SpecificUsersProvider(
+        tmp_path,
+        RecordingSpecificDiscovery((CandidateObservation("first_user"),)),
+    )
+
+    first = provider.next_candidate(context)
+    provider.mark_processed(context)
+
+    assert first.candidate.username == "first_user"
+    with RuntimeDatabase(tmp_path) as database:
+        assert database.specific_progress.get("follow").current_position == 1
+
+    restarted = SpecificUsersProvider(
+        tmp_path,
+        RecordingSpecificDiscovery((CandidateObservation("second_user"),)),
+    )
+    second = restarted.next_candidate(context)
+    restarted.mark_processed(context)
+
+    assert second.candidate.username == "second_user"
+    with RuntimeDatabase(tmp_path) as database:
+        progress = database.specific_progress.get("follow")
+        assert progress.current_position == 2
+        assert progress.completed is True
+        assert progress.repeat is False
+
+
+def test_specific_users_provider_advances_past_unavailable_username(tmp_path):
+    context = make_context(tmp_path)
+    lists = tmp_path / "Lists"
+    lists.mkdir()
+    (lists / "followspecific.txt").write_text(
+        "missing_user\nworking_user\n", encoding="utf-8"
+    )
+    provider = SpecificUsersProvider(
+        tmp_path,
+        RecordingSpecificDiscovery((None, CandidateObservation("working_user"))),
+    )
+
+    result = provider.next_candidate(context)
+
+    assert result.candidate.username == "working_user"
+    with RuntimeDatabase(tmp_path) as database:
+        assert database.specific_progress.get("follow").current_position == 1
 
 
 def test_followers_settings_reject_non_positive_timeout():

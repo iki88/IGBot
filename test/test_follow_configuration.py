@@ -76,12 +76,13 @@ def test_follow_configuration_saves_without_changing_unrelated_yaml(tmp_path):
     assert not any(str(key).startswith("igbot-") for key in parsed)
 
 
-def test_mute_after_follow_persists_as_account_runtime_metadata(tmp_path):
+def test_follow_runtime_extensions_persist_as_account_metadata(tmp_path):
     service, account = _configuration(tmp_path)
     page = AccountPage()
     page.set_account(account)
     page.set_configuration(service.load_configuration(account.config_path))
     page.follow_page.mute_after_follow.setChecked(True)
+    page.follow_page.only_active_stories.setChecked(True)
 
     updated = service.update_configuration(
         account,
@@ -95,6 +96,7 @@ def test_mute_after_follow_persists_as_account_runtime_metadata(tmp_path):
         (updated.config_path.parent / "account.json").read_text(encoding="utf-8")
     )
     assert metadata["runtime_extensions"]["follow"]["mute_after_follow"] is True
+    assert metadata["runtime_extensions"]["follow"]["only_active_stories"] is True
     assert (
         service.load_configuration(updated.config_path)[
             "igbot-follow-mute-after-follow"
@@ -103,6 +105,12 @@ def test_mute_after_follow_persists_as_account_runtime_metadata(tmp_path):
     )
     assert "igbot-follow-mute-after-follow" not in yaml.safe_load(
         updated.config_path.read_text(encoding="utf-8")
+    )
+    assert (
+        service.load_configuration(updated.config_path)[
+            "igbot-follow-only-active-stories"
+        ]
+        is True
     )
 
 
@@ -172,6 +180,9 @@ def test_follow_filters_load_and_save_through_engine_filters_file(tmp_path):
     page.set_configuration(service.load_configuration(account.config_path))
 
     assert page.profile_settings.controls["min_followers"].value() == 100
+    assert page.followers_filter_enabled.isChecked()
+    assert not page.following_filter_enabled.isChecked()
+    assert not page.posts_filter_enabled.isChecked()
     assert page.additional_settings.controls["skip_business"].isChecked()
     page.profile_settings.controls["max_followers"].setValue(7500)
     service.update_configuration(
@@ -184,13 +195,208 @@ def test_follow_filters_load_and_save_through_engine_filters_file(tmp_path):
     assert filters["skip_business"] is True
 
 
+def test_follow_business_filters_are_default_off_and_mutually_exclusive():
+    page = FollowConfigurationPage()
+    page.set_configuration({})
+    skip_business = page.additional_settings.controls["skip_business"]
+    only_business = page.additional_settings.controls["follow_only_business"]
+
+    assert not skip_business.isChecked()
+    assert not only_business.isChecked()
+    keys = tuple(page.additional_settings.controls)
+    assert keys.index("follow_only_business") == keys.index("skip_business") + 1
+
+    skip_business.setChecked(True)
+    assert skip_business.isChecked()
+    assert not only_business.isChecked()
+
+    only_business.setChecked(True)
+    assert only_business.isChecked()
+    assert not skip_business.isChecked()
+
+
+def test_follow_only_business_filter_loads_and_saves(tmp_path):
+    service, account = _configuration(tmp_path)
+    filters_path = account.config_path.parent / "filters.yml"
+    filters_path.write_text("follow_only_business: true\n", encoding="utf-8")
+    page = FollowConfigurationPage()
+    page.set_configuration(service.load_configuration(account.config_path))
+
+    assert page.additional_settings.controls["follow_only_business"].isChecked()
+    service.update_configuration(
+        account, "account", "secret", "com.example.app", page.values()
+    )
+
+    saved = yaml.safe_load(filters_path.read_text(encoding="utf-8"))
+    assert saved["follow_only_business"] is True
+
+
+def test_follow_private_filters_are_default_off_and_mutually_exclusive():
+    page = FollowConfigurationPage()
+    page.set_configuration({})
+    follow_private = page.additional_settings.controls["follow_private_or_empty"]
+    only_private = page.additional_settings.controls["follow_only_private"]
+
+    assert not follow_private.isChecked()
+    assert not only_private.isChecked()
+    keys = tuple(page.additional_settings.controls)
+    assert (
+        keys.index("follow_only_private") == keys.index("follow_private_or_empty") + 1
+    )
+
+    follow_private.setChecked(True)
+    assert follow_private.isChecked()
+    assert not only_private.isChecked()
+
+    only_private.setChecked(True)
+    assert only_private.isChecked()
+    assert not follow_private.isChecked()
+
+
+def test_follow_only_private_filter_loads_and_saves(tmp_path):
+    service, account = _configuration(tmp_path)
+    filters_path = account.config_path.parent / "filters.yml"
+    filters_path.write_text("follow_only_private: true\n", encoding="utf-8")
+    page = FollowConfigurationPage()
+    page.set_configuration(service.load_configuration(account.config_path))
+
+    assert page.additional_settings.controls["follow_only_private"].isChecked()
+    service.update_configuration(
+        account, "account", "secret", "com.example.app", page.values()
+    )
+
+    saved = yaml.safe_load(filters_path.read_text(encoding="utf-8"))
+    assert saved["follow_only_private"] is True
+
+
+def test_follow_link_filters_are_default_off_and_mutually_exclusive():
+    page = FollowConfigurationPage()
+    page.set_configuration({})
+    skip_link = page.additional_settings.controls["skip_if_link_in_bio"]
+    only_link = page.additional_settings.controls["follow_only_link_in_bio"]
+
+    assert not skip_link.isChecked()
+    assert not only_link.isChecked()
+    keys = tuple(page.additional_settings.controls)
+    assert (
+        keys.index("follow_only_link_in_bio") == keys.index("skip_if_link_in_bio") + 1
+    )
+
+    skip_link.setChecked(True)
+    assert skip_link.isChecked()
+    assert not only_link.isChecked()
+
+    only_link.setChecked(True)
+    assert only_link.isChecked()
+    assert not skip_link.isChecked()
+
+
+def test_follow_only_link_filter_loads_and_saves(tmp_path):
+    service, account = _configuration(tmp_path)
+    filters_path = account.config_path.parent / "filters.yml"
+    filters_path.write_text("follow_only_link_in_bio: true\n", encoding="utf-8")
+    page = FollowConfigurationPage()
+    page.set_configuration(service.load_configuration(account.config_path))
+
+    assert page.additional_settings.controls["follow_only_link_in_bio"].isChecked()
+    service.update_configuration(
+        account, "account", "secret", "com.example.app", page.values()
+    )
+
+    saved = yaml.safe_load(filters_path.read_text(encoding="utf-8"))
+    assert saved["follow_only_link_in_bio"] is True
+
+
+def test_follow_numeric_filter_toggles_save_values_or_none():
+    page = FollowConfigurationPage()
+    page.set_configuration({})
+
+    assert not page.followers_filter_enabled.isChecked()
+    assert not page.following_filter_enabled.isChecked()
+    assert not page.posts_filter_enabled.isChecked()
+    assert not page.profile_settings.controls["min_followers"].isEnabled()
+    assert not (set(page.values()) & set(page.PROFILE_SETTINGS))
+
+    page.followers_filter_enabled.setChecked(True)
+    page.following_filter_enabled.setChecked(True)
+    page.posts_filter_enabled.setChecked(True)
+    page.profile_settings.controls["min_followers"].setValue(100)
+    page.profile_settings.controls["max_followers"].setValue(5000)
+    page.profile_settings.controls["min_followings"].setValue(25)
+    page.profile_settings.controls["max_followings"].setValue(750)
+    page.profile_settings.controls["min_posts"].setValue(3)
+
+    values = page.values()
+    assert values["min_followers"] == 100
+    assert values["max_followers"] == 5000
+    assert values["min_followings"] == 25
+    assert values["max_followings"] == 750
+    assert values["min_posts"] == 3
+
+
+def test_follow_numeric_filter_toggles_load_zero_as_enabled_and_null_as_disabled():
+    page = FollowConfigurationPage()
+    page.set_configuration(
+        {
+            "min_followers": 0,
+            "max_followers": 0,
+            "min_followings": None,
+            "max_followings": None,
+            "min_posts": 0,
+        }
+    )
+
+    assert page.followers_filter_enabled.isChecked()
+    assert not page.following_filter_enabled.isChecked()
+    assert page.posts_filter_enabled.isChecked()
+    assert page.profile_settings.controls["max_followers"].isEnabled()
+    assert not page.profile_settings.controls["max_followings"].isEnabled()
+
+
+def test_follow_numeric_filters_accept_and_persist_values_in_the_millions(tmp_path):
+    service, account = _configuration(tmp_path)
+    page = FollowConfigurationPage()
+    page.set_configuration(service.load_configuration(account.config_path))
+    page.followers_filter_enabled.setChecked(True)
+    maximum = page.profile_settings.controls["max_followers"]
+
+    maximum.setValue(12_345_678)
+    service.update_configuration(
+        account, "account", "secret", "com.example.app", page.values()
+    )
+
+    assert maximum.value() == 12_345_678
+    assert maximum.width() == page.follow_amount.maximum.width()
+    saved = service.load_configuration(account.config_path)
+    assert saved["max_followers"] == 12_345_678
+
+
+def test_disabling_follow_numeric_filter_removes_saved_bounds(tmp_path):
+    service, account = _configuration(tmp_path)
+    filters_path = account.config_path.parent / "filters.yml"
+    filters_path.write_text(
+        "min_followers: 100\nmax_followers: 5000\nmin_posts: 3\n",
+        encoding="utf-8",
+    )
+    page = FollowConfigurationPage()
+    page.set_configuration(service.load_configuration(account.config_path))
+
+    page.followers_filter_enabled.setChecked(False)
+    service.update_configuration(
+        account, "account", "secret", "com.example.app", page.values()
+    )
+
+    filters = yaml.safe_load(filters_path.read_text(encoding="utf-8")) or {}
+    assert "min_followers" not in filters
+    assert "max_followers" not in filters
+    assert filters["min_posts"] == 3
+
+
 @pytest.mark.parametrize(
     ("key", "entries"),
     (
         ("mandatory_words", ["cat lover", "animal rescue"]),
         ("blacklist_words", ["giveaway", "follow me"]),
-        ("specific_alphabet", ["LATIN", "CYRILLIC"]),
-        ("biography_language", ["en", "de"]),
     ),
 )
 def test_follow_word_filters_use_shared_popup_and_serialize_as_lists(
@@ -245,6 +451,29 @@ def test_follow_product_layout_and_runtime_extensions_are_not_persisted():
         page.additional_settings.controls["follow_private_or_empty"].text()
         == "Follow private profiles"
     )
+    assert page.only_active_stories.text() == "Only follow profiles with active stories"
+    assert not page.only_active_stories.isChecked()
+    assert all(
+        row.enabled.objectName() != "configurationSwitch"
+        for row in page.sources.rows.values()
+    )
+    followers_label = page.profile_settings.labels["min_followers"]
+    followers_maximum = page.profile_settings.labels["max_followers"]
+    following_label = page.profile_settings.labels["min_followings"]
+    posts_label = page.profile_settings.labels["min_posts"]
+    for widget, expected_row in (
+        (page.followers_filter_enabled, 0),
+        (followers_label, 1),
+        (followers_maximum, 1),
+        (page.following_filter_enabled, 2),
+        (following_label, 3),
+        (page.posts_filter_enabled, 4),
+        (posts_label, 5),
+    ):
+        assert (
+            page.profile_grid.getItemPosition(page.profile_grid.indexOf(widget))[0]
+            == expected_row
+        )
     assert required.enabled.objectName() != "configurationSwitch"
     assert blocked.enabled.objectName() != "configurationSwitch"
     assert all(control.isChecked() for control in page.schedule_days.controls.values())
