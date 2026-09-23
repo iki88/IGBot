@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -146,6 +147,7 @@ class AndroidFollowProvider:
         verification_delay: float = 2.0,
         search_timeout: float = 15.0,
         search_poll_interval: float = 0.5,
+        search_settle_delay: Callable[[], float] = lambda: random.uniform(2.0, 3.0),
         profile_observer: (
             Callable[[RuntimeContext, CandidateProfile], None] | None
         ) = None,
@@ -167,6 +169,7 @@ class AndroidFollowProvider:
         self._verification_delay = verification_delay
         self._search_timeout = search_timeout
         self._search_poll_interval = search_poll_interval
+        self._search_settle_delay = search_settle_delay
         self._profile_observer = profile_observer
         self._mute_after_follow = mute_after_follow
         self.profile_loading_timed_out = False
@@ -230,6 +233,7 @@ class AndroidFollowProvider:
             context.logger.info("[Search] Searching source", source=username)
             device.send_keys(username, clear=True)
             context.logger.info("[Search] Source username entered", source=username)
+            self._sleeper(self._search_settle_delay())
             return self._poll_source_search(context, device, username)
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             context.logger.error("[Search] Action failed", reason=str(error))
@@ -507,6 +511,37 @@ class AndroidFollowProvider:
             return AndroidFollowResult(
                 AndroidFollowStatus.FOLLOW_FAILED,
                 f"Followers scrolling failed: {error}",
+            )
+
+    def scroll_following_list(self, context: RuntimeContext) -> AndroidFollowResult:
+        """Scroll a Following list with intentional viewport overlap."""
+
+        try:
+            device = self._device(context)
+            nodes = self._fresh_nodes(device)
+            container = self._find_by_id(nodes, ("list",))
+            if container is None:
+                container = self._find_by_id(nodes, ("unified_follow_list_view_pager",))
+            if container is None:
+                container = self._find_scrollable(nodes)
+            if container is None:
+                return AndroidFollowResult(
+                    AndroidFollowStatus.FOLLOW_FAILED,
+                    "Following list is not scrollable.",
+                )
+            left, top, right, bottom = container.bounds
+            x = (left + right) // 2
+            visible_height = bottom - top
+            distance = max(1, round(visible_height * 0.65))
+            start_y = bottom - 1
+            end_y = max(top + 1, start_y - distance)
+            device.swipe(x, start_y, x, end_y, duration=0.4)
+            self._wait()
+            return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
+        except Exception as error:  # noqa: BLE001 - Android isolation boundary
+            return AndroidFollowResult(
+                AndroidFollowStatus.FOLLOW_FAILED,
+                f"Following-list scrolling failed: {error}",
             )
 
     def open_candidate_profile(

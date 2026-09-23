@@ -198,10 +198,9 @@ class FollowModule:
                     ModuleExecutionOutcome.SCROLL_BLOCK,
                     discovered.detail,
                 )
-            if discovered.status in (
-                CandidateResultStatus.CURRENT_SOURCE_EXHAUSTED,
-                CandidateResultStatus.ALL_SOURCES_EXHAUSTED,
-            ):
+            if discovered.status is CandidateResultStatus.CURRENT_SOURCE_EXHAUSTED:
+                continue
+            if discovered.status is CandidateResultStatus.ALL_SOURCES_EXHAUSTED:
                 return self._result(
                     FollowModuleResultStatus.NO_CANDIDATES,
                     ModuleExecutionOutcome.NO_CANDIDATES,

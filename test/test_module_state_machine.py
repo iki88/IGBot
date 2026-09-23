@@ -59,6 +59,7 @@ def test_module_state_vocabulary_is_the_frozen_shared_contract():
     }
     assert {module.value for module in InteractionModule} == {
         "Follow",
+        "Unfollow",
         "Like",
         "Comment",
         "Story",

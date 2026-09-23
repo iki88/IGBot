@@ -35,6 +35,12 @@ from IGBot.runtime.profile_database import GlobalDatabaseWriter
 from IGBot.runtime.scheduler import ModuleExecutionResult
 from IGBot.runtime.session import SessionContext
 from IGBot.runtime.state import ModuleState
+from IGBot.runtime.unfollow import (
+    AllFollowingsUnfollowModule,
+    AndroidFollowingListSearchUnfollowProvider,
+    SpecificUnfollowModule,
+    UnfollowModule,
+)
 from IGBot.ui.widgets.live_log_panel import LiveLogPanel
 
 
@@ -337,6 +343,123 @@ def test_follow_daily_remaining_uses_persisted_successes_after_limit_change(tmp_
 
     assert module_for(3).daily_remaining == 1
     assert module_for(5).daily_remaining == 3
+
+
+def test_native_factory_builds_all_followings_unfollow_from_ui_metadata(tmp_path):
+    account_directory = tmp_path / "account"
+    context = RuntimeContext(
+        SessionContext(
+            uuid4(),
+            "alice",
+            "PHONE",
+            "com.instagram.android",
+            account_directory,
+            datetime.now(timezone.utc),
+        ),
+        PythonRuntimeLogger(),
+    )
+    provider = _FollowModuleProvider(
+        {"total-unfollows-limit": "10"},
+        {},
+        {},
+        SimpleNamespace(),
+        SimpleNamespace(),
+        unfollow_extensions={
+            "enabled": True,
+            "method": "all-followings",
+            "sort": "latest",
+            "budget": "2-5",
+        },
+    )
+
+    modules = tuple(provider.modules_for(context))
+
+    unfollow = next(
+        module for module in modules if isinstance(module, AllFollowingsUnfollowModule)
+    )
+    assert unfollow.budget_configuration == "2-5"
+    assert unfollow.daily_remaining == 10
+
+
+def test_native_factory_builds_following_list_search_unfollow(tmp_path):
+    context = RuntimeContext(
+        SessionContext(
+            uuid4(),
+            "alice",
+            "PHONE",
+            "com.instagram.android",
+            tmp_path / "account",
+            datetime.now(timezone.utc),
+        ),
+        PythonRuntimeLogger(),
+    )
+    provider = _FollowModuleProvider(
+        {
+            "unfollow-non-followers": "2",
+            "total-unfollows-limit": "10",
+            "unfollow-delay": "5",
+        },
+        {},
+        {},
+        SimpleNamespace(),
+        SimpleNamespace(),
+        unfollow_extensions={
+            "enabled": True,
+            "method": "following-list-search",
+            "budget": "2",
+        },
+    )
+
+    modules = tuple(provider.modules_for(context))
+
+    unfollow = next(module for module in modules if isinstance(module, UnfollowModule))
+    assert isinstance(unfollow._android, AndroidFollowingListSearchUnfollowProvider)
+    assert unfollow._settings.require_no_follow_back
+    assert unfollow._continue_after_search_failure
+
+
+def test_native_factory_synchronizes_and_builds_specific_unfollow(tmp_path):
+    account_directory = tmp_path / "account"
+    lists = account_directory / "Lists"
+    lists.mkdir(parents=True)
+    (lists / "unfollowspecific.txt").write_text(
+        "first_user\nsecond_user\n", encoding="utf-8"
+    )
+    context = RuntimeContext(
+        SessionContext(
+            uuid4(),
+            "alice",
+            "PHONE",
+            "com.instagram.android",
+            account_directory,
+            datetime.now(timezone.utc),
+        ),
+        PythonRuntimeLogger(),
+    )
+    provider = _FollowModuleProvider(
+        {"total-unfollows-limit": "10"},
+        {},
+        {},
+        SimpleNamespace(),
+        SimpleNamespace(),
+        unfollow_extensions={
+            "enabled": True,
+            "method": "specific-users",
+            "budget": "2",
+        },
+    )
+
+    modules = tuple(provider.modules_for(context))
+
+    unfollow = next(
+        module for module in modules if isinstance(module, SpecificUnfollowModule)
+    )
+    assert unfollow.budget_configuration == "2"
+    with RuntimeDatabase(account_directory) as database:
+        assert database.specific_unfollow.pending_unfollow_usernames() == (
+            "first_user",
+            "second_user",
+        )
 
 
 def test_daily_follow_count_includes_successful_specific_follows_only(tmp_path):

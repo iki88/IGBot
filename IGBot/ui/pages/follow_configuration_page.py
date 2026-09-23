@@ -137,6 +137,14 @@ class FollowConfigurationPage(QScrollArea):
         limit_layout.removeWidget(self.follow_limit.controls[limit_key])
         action_grid.addWidget(self.follow_limit.labels[limit_key], 2, 0)
         action_grid.addWidget(self.follow_limit.controls[limit_key], 2, 1)
+        self.follow_limit_help = QLabel(
+            "Daily hard limit.\n"
+            "The bot will never exceed this number of follows per day.",
+            actions_section,
+        )
+        self.follow_limit_help.setWordWrap(True)
+        self.follow_limit_help.setObjectName("configurationHint")
+        action_grid.addWidget(self.follow_limit_help, 3, 0, 1, 4)
         action_grid.setColumnStretch(4, 1)
         actions_section.body_layout.addWidget(action_fields)
         layout.addWidget(actions_section)

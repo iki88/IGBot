@@ -173,6 +173,67 @@ class FollowRepository:
         ).fetchone()
         return int(row[0])
 
+    def eligible_for_unfollow(
+        self,
+        cutoff: str,
+        *,
+        limit: int = 1,
+        require_no_follow_back: bool = False,
+    ) -> tuple[FollowRecord, ...]:
+        """Return IGBot-followed relationships old enough to unfollow."""
+
+        statement = (
+            """
+                SELECT user_id, username, source, follow_date, follow_back,
+                       follow_back_date, unfollowed, unfollow_date,
+                       last_session_id, muted
+                FROM follow
+                WHERE unfollowed = 0
+                  AND follow_date IS NOT NULL
+                  AND follow_date <= ?
+                  AND follow_back = 0
+                ORDER BY follow_date, user_id
+                LIMIT ?
+            """
+            if require_no_follow_back
+            else """
+                SELECT user_id, username, source, follow_date, follow_back,
+                       follow_back_date, unfollowed, unfollow_date,
+                       last_session_id, muted
+                FROM follow
+                WHERE unfollowed = 0
+                  AND follow_date IS NOT NULL
+                  AND follow_date <= ?
+                ORDER BY follow_date, user_id
+                LIMIT ?
+            """
+        )
+        rows = self._connection.execute(
+            statement, (utc_timestamp(cutoff), limit)
+        ).fetchall()
+        return tuple(
+            FollowRecord(
+                user_id=row[0],
+                username=row[1],
+                source=row[2],
+                follow_date=row[3],
+                follow_back=bool(row[4]),
+                follow_back_date=row[5],
+                unfollowed=bool(row[6]),
+                unfollow_date=row[7],
+                last_session_id=row[8],
+                muted=bool(row[9]),
+            )
+            for row in rows
+        )
+
+    def count_unfollowed_between(self, start: str, end: str) -> int:
+        row = self._connection.execute(
+            "SELECT COUNT(*) FROM follow WHERE unfollowed = 1 AND unfollow_date >= ? AND unfollow_date < ?",
+            (utc_timestamp(start), utc_timestamp(end)),
+        ).fetchone()
+        return int(row[0])
+
 
 class LikeRepository:
     """Persist Like-owned aggregate interaction state."""

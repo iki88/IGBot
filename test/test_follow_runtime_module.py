@@ -453,11 +453,6 @@ def test_cancellation_is_checked_before_each_follow_preparation_stage(
             ModuleExecutionOutcome.SUCCESS,
         ),
         (
-            CandidateResultStatus.CURRENT_SOURCE_EXHAUSTED,
-            FollowModuleResultStatus.NO_CANDIDATES,
-            ModuleExecutionOutcome.NO_CANDIDATES,
-        ),
-        (
             CandidateResultStatus.ALL_SOURCES_EXHAUSTED,
             FollowModuleResultStatus.NO_CANDIDATES,
             ModuleExecutionOutcome.NO_CANDIDATES,
@@ -483,6 +478,33 @@ def test_follow_module_maps_candidate_provider_results(
     assert result.outcome is scheduler_outcome
     assert profiles.calls == []
     assert qualifier.calls == []
+    assert hooks.events == []
+
+
+@pytest.mark.parametrize("discovery", ("Followers", "Following"))
+def test_follow_module_immediately_continues_after_current_source_exhaustion(
+    tmp_path, discovery
+):
+    context = make_context(tmp_path)
+    candidate = make_candidate()
+    module, provider, profiles, qualifier, hooks = make_module(
+        context,
+        (
+            CandidateResult(
+                CandidateResultStatus.CURRENT_SOURCE_EXHAUSTED,
+                detail=f"{discovery} source exhausted",
+            ),
+            CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, candidate),
+        ),
+    )
+
+    result = module.execute(context, make_budget())
+
+    assert result.module_result.status is FollowModuleResultStatus.READY_TO_FOLLOW
+    assert result.module_result.candidate is candidate
+    assert provider.calls == [context, context]
+    assert len(profiles.calls) == 1
+    assert len(qualifier.calls) == 1
     assert hooks.events == []
 
 

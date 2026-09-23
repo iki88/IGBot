@@ -28,6 +28,14 @@ from IGBot.runtime.state import ModuleState
 class SchedulerLoop:
     """Repeat bounded scheduler cycles while SessionController reports active."""
 
+    _TERMINAL_STATE_VALUES = frozenset(
+        {
+            ModuleState.DAILY_LIMIT_REACHED.value,
+            "OPERATION_LIMIT_REACHED",
+            "SESSION_COMPLETE",
+        }
+    )
+
     def __init__(
         self,
         scheduler: Scheduler,
@@ -63,7 +71,7 @@ class SchedulerLoop:
         while self._session_activity.is_active(context):
             enabled_modules = tuple(module for module in modules if module.enabled)
             if enabled_modules and all(
-                getattr(module, "session_aborted", False) for module in enabled_modules
+                self._session_work_complete(module) for module in enabled_modules
             ):
                 break
             selected_dm = None
@@ -166,3 +174,14 @@ class SchedulerLoop:
         if current.tzinfo is None or current.utcoffset() is None:
             raise ValueError("Scheduler timestamps must be timezone-aware")
         return current.astimezone(timezone.utc)
+
+    @classmethod
+    def _session_work_complete(cls, module: BudgetedRuntimeModule) -> bool:
+        """Return whether one enabled module has no more work this session."""
+
+        if getattr(module, "session_aborted", False) or getattr(
+            module, "session_complete", False
+        ):
+            return True
+        state = module.state
+        return getattr(state, "value", state) in cls._TERMINAL_STATE_VALUES

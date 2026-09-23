@@ -64,6 +64,7 @@ class SessionController:
         except Exception:
             runtime_context.session_state = SessionState.FAILED
             raise
+        runtime_context.session_state = SessionState.COMPLETED
         return SessionStartResult(handle, runtime_context, startup_result, True)
 
     def state_for(self, session_id: UUID) -> SessionState:

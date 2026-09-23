@@ -9,7 +9,7 @@ import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -62,6 +62,7 @@ from IGBot.runtime.follower_synchronization import (
     RuntimeFollowerWriter,
 )
 from IGBot.runtime.hooks import HookEventType, HookResult
+from IGBot.runtime.modules import InteractionModule
 from IGBot.runtime.network import AndroidNetworkProvider
 from IGBot.runtime.profile_database import GlobalDatabaseWriter, ProfileUpdate
 from IGBot.runtime.recent_apps import AndroidRecentAppsProvider
@@ -89,6 +90,17 @@ from IGBot.runtime.startup import (
     InstagramStateRecovery,
     InternetChecker,
     StartupPipeline,
+)
+from IGBot.runtime.unfollow import (
+    AllFollowingsUnfollowModule,
+    AndroidFollowingListSearchUnfollowProvider,
+    AndroidFollowingListUnfollowProvider,
+    AndroidUnfollowProvider,
+    FollowingListDatabase,
+    SpecificUnfollowModule,
+    SpecificUnfollowSynchronizer,
+    UnfollowModule,
+    UnfollowSettings,
 )
 from IGBot.services.global_settings_service import GlobalSettingsService
 
@@ -562,6 +574,7 @@ class _FollowModuleProvider:
         android: AndroidFollowProvider,
         profile_persistence: _ProfilePersistence,
         cancellation_requested=lambda: False,
+        unfollow_extensions: Mapping[str, object] | None = None,
     ) -> None:
         self._configuration = configuration
         self._filters = filters
@@ -569,13 +582,150 @@ class _FollowModuleProvider:
         self._android = android
         self._profile_persistence = profile_persistence
         self._cancellation_requested = cancellation_requested
-        self._modules: dict[str, FollowModule] = {}
+        self._unfollow_extensions = dict(unfollow_extensions or {})
+        self._modules: dict[str, tuple[object, ...]] = {}
 
-    def modules_for(self, context: RuntimeContext) -> Iterable[FollowModule]:
+    def modules_for(self, context: RuntimeContext) -> Iterable[object]:
         key = str(context.session.session_id)
         if key not in self._modules:
-            self._modules[key] = self._build(context)
-        return (self._modules[key],)
+            modules: list[object] = [self._build(context)]
+            unfollow = self._build_unfollow(context)
+            if unfollow is not None:
+                modules.append(unfollow)
+            self._modules[key] = tuple(modules)
+        return self._modules[key]
+
+    def _build_unfollow(self, context: RuntimeContext) -> object | None:
+        method = str(self._unfollow_extensions.get("method") or "search")
+        if method == "all-followings":
+            return self._build_all_followings_unfollow(context)
+        if method == "specific-users":
+            return self._build_specific_unfollow(context)
+        if method not in {"search", "following-list-search"}:
+            return None
+        configured = self._configuration.get("unfollow") or self._configuration.get(
+            "unfollow-non-followers"
+        )
+        if not self._enabled(configured):
+            return None
+        daily_limit = self._integer_limit(
+            self._configuration.get("total-unfollows-limit"), default=100_000
+        )
+        start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        with RuntimeDatabase(context.session.account_directory) as database:
+            completed = database.follow.count_unfollowed_between(
+                start.isoformat(), (start + timedelta(days=1)).isoformat()
+            )
+        hourly = (
+            self._integer_limit(
+                self._runtime_settings.get("maximum_unfollows_per_hour"),
+                default=100_000,
+            )
+            or 100_000
+        )
+        android = (
+            AndroidFollowingListSearchUnfollowProvider(self._android)
+            if method == "following-list-search"
+            else AndroidUnfollowProvider(self._android)
+        )
+        return UnfollowModule(
+            context,
+            UnfollowSettings(
+                enabled=True,
+                configured=True,
+                budget=str(configured),
+                daily_remaining=max(0, daily_limit - completed),
+                hourly_remaining=hourly,
+                delay_days=self._integer_limit(
+                    self._configuration.get("unfollow-delay"), default=0
+                ),
+                require_no_follow_back=self._enabled(
+                    self._configuration.get("unfollow-non-followers")
+                ),
+            ),
+            android,
+            continue_after_search_failure=method == "following-list-search",
+        )
+
+    def _build_specific_unfollow(
+        self, context: RuntimeContext
+    ) -> SpecificUnfollowModule | None:
+        if not self._truthy(self._unfollow_extensions.get("enabled")):
+            return None
+        context.logger.info("[Specific Unfollow] Loading specific users...")
+        SpecificUnfollowSynchronizer().synchronize(context.session.account_directory)
+        daily_limit = self._integer_limit(
+            self._configuration.get("total-unfollows-limit"), default=100_000
+        )
+        start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        end = start + timedelta(days=1)
+        with RuntimeDatabase(context.session.account_directory) as database:
+            completed = database.specific_unfollow.count_successful_unfollows_between(
+                utc_timestamp(start), utc_timestamp(end)
+            )
+        hourly = (
+            self._integer_limit(
+                self._runtime_settings.get("maximum_unfollows_per_hour"),
+                default=100_000,
+            )
+            or 100_000
+        )
+        return SpecificUnfollowModule(
+            context,
+            UnfollowSettings(
+                enabled=True,
+                configured=True,
+                budget=str(self._unfollow_extensions.get("budget") or "1"),
+                daily_remaining=max(0, daily_limit - completed),
+                hourly_remaining=hourly,
+                delay_days=0,
+            ),
+            AndroidUnfollowProvider(self._android),
+        )
+
+    def _build_all_followings_unfollow(
+        self, context: RuntimeContext
+    ) -> AllFollowingsUnfollowModule | None:
+        if not self._truthy(self._unfollow_extensions.get("enabled")):
+            return None
+        daily_limit = self._integer_limit(
+            self._configuration.get("total-unfollows-limit"), default=100_000
+        )
+        start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        end = start + timedelta(days=1)
+        with FollowingListDatabase(context.session.account_directory) as database:
+            completed = database.count_unfollowed_between(
+                utc_timestamp(start), utc_timestamp(end)
+            )
+        hourly = (
+            self._integer_limit(
+                self._runtime_settings.get("maximum_unfollows_per_hour"),
+                default=100_000,
+            )
+            or 100_000
+        )
+        configured = self._unfollow_extensions.get("budget") or "1"
+        return AllFollowingsUnfollowModule(
+            context,
+            UnfollowSettings(
+                enabled=True,
+                configured=True,
+                budget=str(configured),
+                daily_remaining=max(0, daily_limit - completed),
+                hourly_remaining=hourly,
+                delay_days=0,
+            ),
+            AndroidFollowingListUnfollowProvider(
+                self._android,
+                sorting=str(self._unfollow_extensions.get("sort") or "default"),
+            ),
+        )
 
     def _build(self, context: RuntimeContext) -> FollowModule:
         follower_sources = self._string_list(
@@ -783,6 +933,12 @@ class _NativeFollowExecutor:
         self._profile_persistence = profile_persistence
 
     def execute(self, context, module, budget) -> ModuleExecutionResult:
+        if (
+            getattr(module, "module", InteractionModule.FOLLOW)
+            is InteractionModule.UNFOLLOW
+        ):
+            context.logger.info("Executing UnfollowModule")
+            return module.execute(context, budget)
         context.logger.info("Executing FollowModule")
         prepared = module.execute(context, budget)
         domain = prepared.module_result
@@ -991,6 +1147,9 @@ class NativeAccountRuntime:
         follow_extensions = (
             extensions.get("follow") if isinstance(extensions, dict) else {}
         )
+        unfollow_extensions = (
+            extensions.get("unfollow") if isinstance(extensions, dict) else {}
+        )
         if isinstance(follow_extensions, dict):
             runtime_settings["only_active_stories"] = bool(
                 follow_extensions.get("only_active_stories")
@@ -1011,6 +1170,7 @@ class NativeAccountRuntime:
             android,
             persistence,
             self._stop_event.is_set,
+            (unfollow_extensions if isinstance(unfollow_extensions, dict) else None),
         )
         executor = _NativeFollowExecutor(modules, android, persistence)
         scheduler = Scheduler(

@@ -477,6 +477,13 @@ def test_follow_product_layout_and_runtime_extensions_are_not_persisted():
     assert required.enabled.objectName() != "configurationSwitch"
     assert blocked.enabled.objectName() != "configurationSwitch"
     assert all(control.isChecked() for control in page.schedule_days.controls.values())
+    assert (
+        page.action_grid.getItemPosition(
+            page.action_grid.indexOf(page.follow_limit_help)
+        )[0]
+        == 3
+    )
+    assert "Daily hard limit" in page.follow_limit_help.text()
 
     page.delay.minimum.setValue(4)
     page.delay.maximum.setValue(9)

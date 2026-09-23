@@ -185,7 +185,14 @@ def test_runtime_database_schema_matches_the_frozen_contract(tmp_path):
             "muted",
             "status",
         ),
-        "specific_unfollow": ("user_id", "username", "unfollow_date", "status"),
+        "specific_unfollow": (
+            "user_id",
+            "username",
+            "unfollow_date",
+            "status",
+            "unfollowed",
+            "last_session_id",
+        ),
         "specific_like": (
             "user_id",
             "username",

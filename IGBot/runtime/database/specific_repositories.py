@@ -21,6 +21,22 @@ class SpecificInteractionRepository:
         self._connection.execute(
             f'CREATE TABLE IF NOT EXISTS "{self._table}" ({self._columns})'
         )
+        if self._table == "specific_unfollow":
+            columns = {
+                row[1]
+                for row in self._connection.execute(
+                    'PRAGMA table_info("specific_unfollow")'
+                )
+            }
+            if "unfollowed" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE specific_unfollow ADD COLUMN unfollowed "
+                    "INTEGER NOT NULL DEFAULT 0 CHECK (unfollowed IN (0, 1))"
+                )
+            if "last_session_id" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE specific_unfollow ADD COLUMN last_session_id TEXT"
+                )
 
     def upsert_username(self, username: str, values: Mapping[str, object]) -> int:
         """Insert or update one module-local username without discovery-table joins."""
@@ -77,6 +93,79 @@ class SpecificInteractionRepository:
             WHERE follow_date >= ? AND follow_date < ?
               AND status IN ('SUCCESS', 'REQUESTED')
             """,
+            (utc_timestamp(start), utc_timestamp(end)),
+        ).fetchone()
+        return int(row[0])
+
+    def synchronize_unfollow_usernames(self, usernames: tuple[str, ...]) -> None:
+        """Mirror the Unfollow TXT source while retaining matching row state."""
+
+        if self._table != "specific_unfollow":
+            raise ValueError("Unfollow synchronization requires specific_unfollow")
+        normalized: dict[str, str] = {}
+        for username in usernames:
+            cleaned = username.strip()
+            if cleaned:
+                normalized.setdefault(cleaned.casefold(), cleaned)
+        existing = self._connection.execute(
+            "SELECT user_id, username FROM specific_unfollow"
+        ).fetchall()
+        existing_by_name = {
+            str(row[1]).casefold(): (int(row[0]), row[1]) for row in existing
+        }
+        for key, username in normalized.items():
+            current = existing_by_name.get(key)
+            if current is None:
+                self.upsert_username(
+                    username,
+                    {
+                        "unfollowed": 0,
+                        "unfollow_date": None,
+                        "last_session_id": None,
+                        "status": None,
+                    },
+                )
+            elif current[1] != username:
+                self.upsert_username(username, {})
+        removed_ids = [
+            user_id
+            for key, (user_id, _username) in existing_by_name.items()
+            if key not in normalized
+        ]
+        if removed_ids:
+            placeholders = ", ".join("?" for _ in removed_ids)
+            self._connection.execute(
+                f"DELETE FROM specific_unfollow WHERE user_id IN ({placeholders})",
+                removed_ids,
+            )
+
+    def pending_unfollow_usernames(self) -> tuple[str, ...]:
+        if self._table != "specific_unfollow":
+            raise ValueError("Pending Unfollow users require specific_unfollow")
+        rows = self._connection.execute(
+            "SELECT username FROM specific_unfollow WHERE unfollowed = 0 "
+            "ORDER BY user_id"
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
+    def mark_specific_unfollowed(
+        self, username: str, unfollow_date: str, last_session_id: str
+    ) -> None:
+        if self._table != "specific_unfollow":
+            raise ValueError("Unfollow updates require specific_unfollow")
+        self._connection.execute(
+            "UPDATE specific_unfollow SET unfollowed = 1, unfollow_date = ?, "
+            "last_session_id = ?, status = 'SUCCESS' "
+            "WHERE username = ? COLLATE NOCASE",
+            (utc_timestamp(unfollow_date), last_session_id, username),
+        )
+
+    def count_successful_unfollows_between(self, start: str, end: str) -> int:
+        if self._table != "specific_unfollow":
+            raise ValueError("Unfollow counts require specific_unfollow")
+        row = self._connection.execute(
+            "SELECT COUNT(*) FROM specific_unfollow "
+            "WHERE unfollowed = 1 AND unfollow_date >= ? AND unfollow_date < ?",
             (utc_timestamp(start), utc_timestamp(end)),
         ).fetchone()
         return int(row[0])
@@ -148,7 +237,9 @@ def specific_repositories(
         "specific_unfollow": SpecificInteractionRepository(
             connection,
             "specific_unfollow",
-            common + ", unfollow_date TEXT, status TEXT",
+            common + ", unfollow_date TEXT, status TEXT, "
+            "unfollowed INTEGER NOT NULL DEFAULT 0 "
+            "CHECK (unfollowed IN (0, 1)), last_session_id TEXT",
         ),
         "specific_like": SpecificInteractionRepository(
             connection,

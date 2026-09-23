@@ -164,6 +164,7 @@ def make_provider(
     sleeps=None,
     verification_delay=2,
     search_timeout=0.01,
+    search_settle_delay=lambda: 0.5,
     mute_after_follow=False,
 ):
     return AndroidFollowProvider(
@@ -178,6 +179,7 @@ def make_provider(
         verification_delay=verification_delay,
         search_timeout=search_timeout,
         search_poll_interval=0.001,
+        search_settle_delay=search_settle_delay,
         mute_after_follow=mute_after_follow,
     )
 
@@ -250,6 +252,53 @@ def test_source_search_opens_immediately_visible_exact_username(tmp_path):
     assert result.status is AndroidFollowStatus.SUCCESS
     assert device.keys == [("exact_user", True)]
     assert device.clicks[-1] == (25, 5)
+
+
+@pytest.mark.parametrize("delay", (2.0, 2.5, 3.0))
+def test_source_search_waits_once_after_typing_before_first_inspection(tmp_path, delay):
+    events = []
+
+    class OrderedDevice(FakeDevice):
+        def send_keys(self, value, clear=False):
+            events.append("typed")
+            super().send_keys(value, clear=clear)
+
+        def dump_hierarchy(self, compressed=False):
+            events.append("inspected")
+            return super().dump_hierarchy(compressed=compressed)
+
+    device = OrderedDevice(
+        (
+            hierarchy(node(resource_id=instagram_id("search_tab"))),
+            hierarchy(node(resource_id=instagram_id("action_bar_search_edit_text"))),
+            hierarchy(search_user_row("exact_user")),
+            hierarchy(
+                node(text="exact_user", resource_id=instagram_id("action_bar_title"))
+            ),
+        )
+    )
+
+    def settle(seconds):
+        events.append(("settled", seconds))
+
+    provider = AndroidFollowProvider(
+        RecordingContactScraper(),
+        device_factory=lambda _serial: device,
+        sleeper=settle,
+        navigation_wait=0,
+        search_timeout=1,
+        search_poll_interval=0.001,
+        search_settle_delay=lambda: delay,
+    )
+
+    result = provider.locate_source(make_context(tmp_path), "exact_user")
+
+    assert result.status is AndroidFollowStatus.SUCCESS
+    typed = events.index("typed")
+    settled = events.index(("settled", delay))
+    assert typed < settled
+    assert events[settled + 1] == "inspected"
+    assert events.count(("settled", delay)) == 1
 
 
 def test_source_search_uses_search_and_accounts_before_exact_match(tmp_path):
@@ -543,6 +592,27 @@ def test_followers_navigation_actions_preserve_existing_list(tmp_path):
     assert device.keys == [("az", True)]
     assert device.swipes == [((150, 699, 150, 101), {"duration": 0.4})]
     assert device.presses == ["back"]
+
+
+def test_following_list_scrolls_with_overlapping_viewports(tmp_path):
+    scrollable = hierarchy(
+        node(
+            resource_id="android:id/list",
+            bounds="[0,100][300,700]",
+            scrollable=True,
+        )
+    )
+    device = FakeDevice((scrollable, scrollable))
+    provider = make_provider(device)
+    context = make_context(tmp_path)
+
+    assert provider.scroll_following_list(context).status is AndroidFollowStatus.SUCCESS
+    assert provider.scroll_following_list(context).status is AndroidFollowStatus.SUCCESS
+
+    assert device.swipes == [
+        ((150, 699, 150, 309), {"duration": 0.4}),
+        ((150, 699, 150, 309), {"duration": 0.4}),
+    ]
 
 
 def test_following_navigation_uses_inspected_profile_control(tmp_path):

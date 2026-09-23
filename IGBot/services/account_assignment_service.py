@@ -73,6 +73,19 @@ class AccountAssignmentService:
     OBSOLETE_FOLLOW_FILTER_KEYS = frozenset(
         {"skip_non_business", "biography_banned_language"}
     )
+    UNIMPLEMENTED_UNFOLLOW_KEYS = frozenset(
+        {
+            "unfollow-non-followers",
+            "unfollow-any-non-followers",
+            "unfollow-any-followers",
+            "unfollow-any",
+            "min-following",
+            "sort-followers-newest-to-oldest",
+            "delete-removed-followers",
+            "unfollow-from-file",
+            "remove-followers-from-file",
+        }
+    )
     TEXT_RESOURCE_NAMES = frozenset(
         {
             "pm_list.txt",
@@ -174,6 +187,23 @@ class AccountAssignmentService:
                     configuration["igbot-follow-only-active-stories"] = bool(
                         follow_extensions.get("only_active_stories")
                     )
+                unfollow_extensions = runtime_extensions.get("unfollow")
+                if isinstance(unfollow_extensions, dict):
+                    configuration["igbot-unfollow-enabled"] = bool(
+                        unfollow_extensions.get("enabled")
+                    )
+                    configuration["igbot-unfollow-method"] = str(
+                        unfollow_extensions.get("method") or ""
+                    )
+                    configuration["igbot-unfollow-sort"] = str(
+                        unfollow_extensions.get("sort") or "default"
+                    )
+                    configuration["igbot-unfollow-budget"] = str(
+                        unfollow_extensions.get("budget") or "1"
+                    )
+                    configuration["igbot-unfollow-action-delay"] = str(
+                        unfollow_extensions.get("action_delay") or "0"
+                    )
         filters_path = config_path.parent / "filters.yml"
         if filters_path.is_file():
             filters = yaml.safe_load(filters_path.read_bytes())
@@ -243,6 +273,27 @@ class AccountAssignmentService:
         only_active_stories = bool(
             settings.pop("igbot-follow-only-active-stories", False)
         )
+        unfollow_enabled = bool(settings.pop("igbot-unfollow-enabled", False))
+        unfollow_method = str(settings.pop("igbot-unfollow-method", "") or "")
+        unfollow_sort = str(settings.pop("igbot-unfollow-sort", "default") or "default")
+        unfollow_budget = str(settings.pop("igbot-unfollow-budget", "1") or "1")
+        unfollow_action_delay = str(
+            settings.pop("igbot-unfollow-action-delay", "0") or "0"
+        )
+        if unfollow_method not in {
+            "",
+            "search",
+            "following-list-search",
+            "specific-users",
+            "all-followings",
+        }:
+            raise ValueError("The Unfollow method is not supported.")
+        if unfollow_sort not in {"default", "latest", "earliest"}:
+            raise ValueError("The Following list sort option is not supported.")
+        if not re.fullmatch(r"\d+(?:-\d+)?", unfollow_budget):
+            raise ValueError("The Unfollow budget must be a number or range.")
+        if not re.fullmatch(r"\d+(?:-\d+)?", unfollow_action_delay):
+            raise ValueError("The Unfollow action delay must be a number or range.")
         filter_settings = {
             key: settings.pop(key) for key in self.FILTER_SETTING_KEYS & settings.keys()
         }
@@ -299,18 +350,7 @@ class AccountAssignmentService:
             "follow": self._is_enabled_value(
                 effective_settings.get("follow-percentage")
             ),
-            "unfollow": any(
-                self._is_enabled_value(effective_settings.get(key))
-                for key in (
-                    "unfollow",
-                    "unfollow-non-followers",
-                    "unfollow-any-non-followers",
-                    "unfollow-any-followers",
-                    "unfollow-any",
-                    "unfollow-from-file",
-                    "remove-followers-from-file",
-                )
-            ),
+            "unfollow": self._is_enabled_value(effective_settings.get("unfollow")),
             "like": self._is_enabled_value(effective_settings.get("likes-percentage")),
             "story": self._is_enabled_value(effective_settings.get("stories-count")),
             "dm": self._is_enabled_value(effective_settings.get("pm-percentage")),
@@ -399,6 +439,8 @@ class AccountAssignmentService:
                 ):
                     raise ValueError(f"{key} must be a list of audience targets.")
                 continue
+            if key in self.UNIMPLEMENTED_UNFOLLOW_KEYS:
+                continue
             module = setting_modules.get(key)
             if module is not None and not module_enabled[module]:
                 continue
@@ -435,10 +477,6 @@ class AccountAssignmentService:
                 raise ValueError("Shuffle jobs must be a switch value.")
             unfollow_ranges = {
                 "unfollow",
-                "unfollow-non-followers",
-                "unfollow-any-non-followers",
-                "unfollow-any-followers",
-                "unfollow-any",
                 "total-unfollows-limit",
             }
             if key in unfollow_ranges and not re.fullmatch(r"\d+(?:-\d+)?", str(value)):
@@ -744,6 +782,16 @@ class AccountAssignmentService:
             follow_extensions["mute_after_follow"] = mute_after_follow
             follow_extensions["only_active_stories"] = only_active_stories
             runtime_extensions["follow"] = follow_extensions
+            unfollow_extensions = runtime_extensions.get("unfollow")
+            if not isinstance(unfollow_extensions, dict):
+                unfollow_extensions = {}
+            unfollow_extensions = dict(unfollow_extensions)
+            unfollow_extensions["enabled"] = unfollow_enabled
+            unfollow_extensions["method"] = unfollow_method
+            unfollow_extensions["sort"] = unfollow_sort
+            unfollow_extensions["budget"] = unfollow_budget
+            unfollow_extensions["action_delay"] = unfollow_action_delay
+            runtime_extensions["unfollow"] = unfollow_extensions
             self.metadata.save(
                 old_directory,
                 username,

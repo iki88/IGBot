@@ -14,6 +14,7 @@ class InteractionModule(StrEnum):
     """Interaction modules governed by the shared state machine."""
 
     FOLLOW = "Follow"
+    UNFOLLOW = "Unfollow"
     LIKE = "Like"
     COMMENT = "Comment"
     STORY = "Story"

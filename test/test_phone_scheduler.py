@@ -124,6 +124,156 @@ def test_native_readiness_rejects_follow_without_a_configured_provider(tmp_path)
     assert decision.selected is None
 
 
+def test_native_readiness_accepts_search_based_unfollow_without_follow(tmp_path):
+    current = account(tmp_path, "unfollow_only", "09.00-11.00")
+    configuration = current.config_path.read_text(encoding="utf-8")
+    configuration = configuration.replace('follow-percentage: "100"\n', "")
+    configuration = configuration.replace('blogger-followers: ["source"]\n', "")
+    current.config_path.write_text(
+        configuration
+        + 'unfollow: "1"\ntotal-unfollows-limit: "10"\nunfollow-delay: "3"\n',
+        encoding="utf-8",
+    )
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        device_validator=lambda _: True,
+    )
+
+    decision = scheduler.evaluate(
+        (current,), datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+    )
+
+    assert decision.selected == current
+
+
+def test_native_readiness_accepts_all_followings_unfollow_without_follow(tmp_path):
+    current = account(tmp_path, "unfollow_all", "09.00-11.00")
+    configuration = current.config_path.read_text(encoding="utf-8")
+    configuration = configuration.replace('follow-percentage: "100"\n', "")
+    configuration = configuration.replace('blogger-followers: ["source"]\n', "")
+    current.config_path.write_text(
+        configuration + 'total-unfollows-limit: "10"\n', encoding="utf-8"
+    )
+    metadata = json.loads(
+        (current.config_path.parent / "account.json").read_text(encoding="utf-8")
+    )
+    metadata["runtime_extensions"] = {
+        "unfollow": {
+            "enabled": True,
+            "method": "all-followings",
+            "sort": "default",
+            "budget": "1",
+        }
+    }
+    (current.config_path.parent / "account.json").write_text(
+        json.dumps(metadata), encoding="utf-8"
+    )
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        device_validator=lambda _: True,
+    )
+
+    decision = scheduler.evaluate(
+        (current,), datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+    )
+
+    assert decision.selected == current
+
+
+def test_native_readiness_accepts_following_list_search_unfollow(tmp_path):
+    current = account(tmp_path, "unfollow_list_search", "09.00-11.00")
+    configuration = current.config_path.read_text(encoding="utf-8")
+    configuration = configuration.replace('follow-percentage: "100"\n', "")
+    configuration = configuration.replace('blogger-followers: ["source"]\n', "")
+    current.config_path.write_text(
+        configuration
+        + 'unfollow-non-followers: "1"\n'
+        + 'total-unfollows-limit: "10"\n'
+        + 'unfollow-delay: "3"\n',
+        encoding="utf-8",
+    )
+    metadata = json.loads(
+        (current.config_path.parent / "account.json").read_text(encoding="utf-8")
+    )
+    metadata["runtime_extensions"] = {
+        "unfollow": {
+            "enabled": True,
+            "method": "following-list-search",
+            "sort": "default",
+            "budget": "1",
+        }
+    }
+    (current.config_path.parent / "account.json").write_text(
+        json.dumps(metadata), encoding="utf-8"
+    )
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        device_validator=lambda _: True,
+    )
+
+    decision = scheduler.evaluate(
+        (current,), datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+    )
+
+    assert decision.selected == current
+
+
+def test_native_readiness_accepts_specific_unfollow(tmp_path):
+    current = account(tmp_path, "specific_unfollow", "09.00-11.00")
+    configuration = current.config_path.read_text(encoding="utf-8")
+    configuration = configuration.replace('follow-percentage: "100"\n', "")
+    configuration = configuration.replace('blogger-followers: ["source"]\n', "")
+    current.config_path.write_text(
+        configuration + 'total-unfollows-limit: "10"\n', encoding="utf-8"
+    )
+    metadata = json.loads(
+        (current.config_path.parent / "account.json").read_text(encoding="utf-8")
+    )
+    metadata["runtime_extensions"] = {
+        "unfollow": {
+            "enabled": True,
+            "method": "specific-users",
+            "sort": "default",
+            "budget": "1",
+        }
+    }
+    (current.config_path.parent / "account.json").write_text(
+        json.dumps(metadata), encoding="utf-8"
+    )
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        device_validator=lambda _: True,
+    )
+
+    decision = scheduler.evaluate(
+        (current,), datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+    )
+
+    assert decision.selected == current
+
+
+def test_schedule_decision_excludes_account_without_current_runtime_capacity(
+    tmp_path,
+):
+    current = account(tmp_path, "current", "09.00-11.00")
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        device_validator=lambda _: True,
+        runtime_eligibility=lambda _account, _configuration: False,
+    )
+
+    decision = scheduler.evaluate(
+        (current,), datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+    )
+
+    assert decision.selected is None
+
+
 def test_schedule_decision_excludes_account_without_onboarding_evidence(
     tmp_path, caplog
 ):
@@ -259,16 +409,76 @@ def test_daily_limit_increase_wakes_completed_active_account(tmp_path):
         device_validator=lambda _: True,
         clock=lambda: now,
     )
-    decision = scheduler.evaluate((current,), now)
-    scheduler._completed_sessions.add(decision.session_key)
+    scheduler.evaluate((current,), now)
+    completed_key = (
+        str(current.config_path.resolve()),
+        540,
+        660,
+        now.date().isoformat(),
+    )
+    scheduler._completed_sessions.add(completed_key)
     scheduler._state = SessionState.WAITING
     current.config_path.write_text(
         configuration + 'total-follows-limit: "5"\n', encoding="utf-8"
     )
 
     assert scheduler.account_configuration_changed(current)
-    assert decision.session_key not in scheduler._completed_sessions
+    assert completed_key not in scheduler._completed_sessions
     assert scheduler._wake_event.is_set()
+
+
+def test_non_capacity_configuration_change_does_not_wake_completed_account(tmp_path):
+    current = account(tmp_path, "current", "09.00-11.00")
+    now = datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        device_validator=lambda _: True,
+        runtime_eligibility=lambda _account, _config: True,
+        runtime_capacity=lambda _account, _config: {"follow": 2},
+        clock=lambda: now,
+    )
+    decision = scheduler.evaluate((current,), now)
+    completed_key = (
+        str(current.config_path.resolve()),
+        540,
+        660,
+        now.date().isoformat(),
+    )
+    scheduler._completed_sessions.add(completed_key)
+    scheduler._completed_capacity[current.config_path.resolve()] = {"follow": 2}
+    scheduler._state = SessionState.WAITING
+    configuration = current.config_path.read_text(encoding="utf-8")
+    current.config_path.write_text(
+        configuration.replace('["source"]', '["different.source"]'),
+        encoding="utf-8",
+    )
+
+    assert not scheduler.account_configuration_changed(current)
+    assert decision.session_key in scheduler._completed_sessions
+    assert not scheduler._wake_event.is_set()
+
+
+def test_decreased_capacity_does_not_wake_completed_account(tmp_path):
+    current = account(tmp_path, "current", "09.00-11.00")
+    current_capacity = [{"follow": 5}]
+    now = datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        device_validator=lambda _: True,
+        runtime_eligibility=lambda _account, _config: True,
+        runtime_capacity=lambda _account, _config: current_capacity[0],
+        clock=lambda: now,
+    )
+    decision = scheduler.evaluate((current,), now)
+    scheduler._completed_sessions.add(decision.session_key)
+    scheduler._completed_capacity[current.config_path.resolve()] = {"follow": 5}
+    scheduler._state = SessionState.WAITING
+    current_capacity[0] = {"follow": 3}
+
+    assert not scheduler.account_configuration_changed(current)
+    assert not scheduler._wake_event.is_set()
 
 
 def test_generic_runtime_eligibility_transition_wakes_account(tmp_path):
@@ -287,15 +497,21 @@ def test_generic_runtime_eligibility_transition_wakes_account(tmp_path):
         ),
         clock=lambda: now,
     )
-    decision = scheduler.evaluate((current,), now)
-    scheduler._completed_sessions.add(decision.session_key)
+    scheduler.evaluate((current,), now)
+    completed_key = (
+        str(current.config_path.resolve()),
+        540,
+        660,
+        now.date().isoformat(),
+    )
+    scheduler._completed_sessions.add(completed_key)
     scheduler._state = SessionState.WAITING
     current.config_path.write_text(
         configuration + "custom-module-ready: true\n", encoding="utf-8"
     )
 
     assert scheduler.account_configuration_changed(current)
-    assert decision.session_key not in scheduler._completed_sessions
+    assert completed_key not in scheduler._completed_sessions
 
 
 def test_daily_limit_increase_does_not_wake_outside_run_hours(tmp_path):

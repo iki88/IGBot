@@ -267,6 +267,48 @@ def test_loop_applies_scheduler_owned_outcome_policy(
     assert result.cycles[0].next_module_state is expected_state
 
 
+def test_daily_limit_terminal_state_ends_loop_without_idle_wait(tmp_path):
+    context = make_context(tmp_path)
+    module = StubModule(context, InteractionModule.FOLLOW)
+    executor = SequenceExecutor((ModuleExecutionOutcome.DAILY_LIMIT_REACHED,))
+    sleeps = []
+    loop = make_loop((module,), executor, CountedActivity(100), sleeps=sleeps)
+
+    result = loop.start(context)
+
+    assert module.state is ModuleState.DAILY_LIMIT_REACHED
+    assert len(result.cycles) == 1
+    assert sleeps == []
+
+
+def test_loop_waits_for_backoff_but_exits_when_all_modules_are_terminal(tmp_path):
+    context = make_context(tmp_path)
+    follow = StubModule(context, InteractionModule.FOLLOW)
+    like = StubModule(context, InteractionModule.LIKE)
+    selected = iter((follow, like))
+    executor = SequenceExecutor(
+        (
+            ModuleExecutionOutcome.DAILY_LIMIT_REACHED,
+            ModuleExecutionOutcome.DAILY_LIMIT_REACHED,
+        )
+    )
+    sleeps = []
+    loop = make_loop(
+        (follow, like),
+        executor,
+        CountedActivity(100),
+        chooser=lambda pool: next(selected),
+        sleeps=sleeps,
+    )
+
+    result = loop.start(context)
+
+    assert len(result.cycles) == 2
+    assert follow.state is ModuleState.DAILY_LIMIT_REACHED
+    assert like.state is ModuleState.DAILY_LIMIT_REACHED
+    assert sleeps == []
+
+
 def test_action_block_is_delegated_to_recovery(tmp_path):
     context = make_context(tmp_path)
     module = StubModule(context, InteractionModule.DM)

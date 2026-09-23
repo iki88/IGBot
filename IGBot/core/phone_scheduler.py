@@ -50,6 +50,9 @@ class PhoneScheduler:
         runtime_mode: RuntimeMode = RuntimeMode.NATIVE,
         device_validator: Callable[[str], bool] = PhoneManager.is_connected,
         runtime_eligibility: Callable[[AssignedAccount, dict], bool] | None = None,
+        runtime_capacity: (
+            Callable[[AssignedAccount, dict], dict[str, int]] | None
+        ) = None,
         clock: Callable[[], datetime] = datetime.now,
         decision_interval: float = 30.0,
     ) -> None:
@@ -66,10 +69,20 @@ class PhoneScheduler:
             self._runtime_factory = create_native_runtime
         self._device_validator = device_validator
         if runtime_eligibility is None:
-            from IGBot.runtime.eligibility import native_account_is_runnable
+            from IGBot.runtime.eligibility import (
+                native_account_execution_capacity,
+                native_account_is_runnable,
+            )
 
             runtime_eligibility = native_account_is_runnable
+            if runtime_capacity is None:
+                runtime_capacity = native_account_execution_capacity
         self._runtime_eligibility = runtime_eligibility
+        self._runtime_capacity = runtime_capacity or (
+            lambda account, configuration: {
+                "runtime": int(runtime_eligibility(account, configuration))
+            }
+        )
         self._clock = clock
         self._decision_interval = decision_interval
         self._stop_event = threading.Event()
@@ -78,7 +91,7 @@ class PhoneScheduler:
         self._state = SessionState.IDLE
         self._completed_sessions: set[tuple[str, int, int, str]] = set()
         self._schedule_date = None
-        self._runtime_runnable: dict[Path, bool] = {}
+        self._completed_capacity: dict[Path, dict[str, int]] = {}
 
     @property
     def state(self) -> SessionState:
@@ -115,17 +128,16 @@ class PhoneScheduler:
                 )
                 if self._schedule_date != now.date():
                     self._completed_sessions.clear()
+                    self._completed_capacity.clear()
                     self._schedule_date = now.date()
                 decision = self.evaluate(accounts, now, self._completed_sessions)
                 if decision.selected is None:
                     self._set_state(SessionState.WAITING, state_changed)
                     if decision.next_session is None:
-                        logger.info(
-                            "Scheduler waiting; no enabled sessions are configured"
-                        )
+                        logger.info("Waiting (no runnable accounts)")
                     else:
                         logger.info(
-                            "Scheduler sleeping until next session at %s",
+                            "Waiting (next scheduled session: %s)",
                             decision.next_session.strftime("%Y-%m-%d %H:%M"),
                         )
                     timeout = (
@@ -166,7 +178,7 @@ class PhoneScheduler:
                     self._runtime = None
                 if decision.session_key is not None:
                     self._completed_sessions.add(decision.session_key)
-                self._remember_runtime_eligibility(account)
+                self._remember_runtime_capacity(account)
                 if not self._stop_event.is_set():
                     logger.info(
                         "Scheduling cycle %d completed; waiting %.1f seconds",
@@ -218,13 +230,18 @@ class PhoneScheduler:
                     readiness_failure,
                 )
                 continue
-            self._runtime_runnable.setdefault(
-                account.config_path.resolve(),
-                self._runtime_eligibility(account, configuration),
-            )
             windows = self._load_windows(account, configuration)
             if not windows or all(start == end == 0 for start, end in windows):
                 logger.info("Skipping account %s (disabled)", account.username)
+                continue
+            if not self._runtime_eligibility(account, configuration):
+                logger.info(
+                    "Skipping account %s (no runnable module capacity)",
+                    account.username,
+                )
+                upcoming = min(self._next_start(start, now) for start, _ in windows)
+                if next_session is None or upcoming < next_session:
+                    next_session = upcoming
                 continue
             eligible_keys = [
                 (str(account.config_path.resolve()), start, end, now.date().isoformat())
@@ -255,20 +272,30 @@ class PhoneScheduler:
         return ScheduleDecision(selected, next_session, selected_key)
 
     def account_configuration_changed(self, account: AssignedAccount) -> bool:
-        """Wake one completed active window after it becomes runnable again."""
+        """Wake a completed active window when persisted capacity increases."""
 
-        if self._state is not SessionState.WAITING or self._stop_event.is_set():
+        logger.info("Configuration changed. Re-evaluating account eligibility...")
+        if self._stop_event.is_set() or self._state not in {
+            SessionState.STARTING,
+            SessionState.RUNNING,
+            SessionState.WAITING,
+        }:
+            logger.info("Wake skipped (scheduler stopped)")
             return False
-        if account.device_id != self.device.serial or self._runtime is not None:
+        if self._runtime is not None or self._state is not SessionState.WAITING:
+            logger.info("Wake skipped (runtime active)")
+            return False
+        if account.device_id != self.device.serial:
+            logger.info("Wake skipped (account belongs to another phone)")
             return False
         configuration, readiness_failure = self._runtime_configuration(account)
         if readiness_failure is not None:
+            logger.info("Wake skipped (%s)", readiness_failure)
             return False
         path = account.config_path.resolve()
-        was_runnable = self._runtime_runnable.get(path)
         is_runnable = self._runtime_eligibility(account, configuration)
-        self._runtime_runnable[path] = is_runnable
-        if was_runnable is not False or not is_runnable:
+        if not is_runnable:
+            logger.info("Wake skipped (account is not currently runnable)")
             return False
         now = self._clock()
         active_keys = {
@@ -278,12 +305,25 @@ class PhoneScheduler:
         }
         completed_active_keys = active_keys & self._completed_sessions
         if not completed_active_keys:
+            if not active_keys:
+                logger.info("Wake skipped (outside working hours)")
+            else:
+                logger.info("Wake skipped (current session is not completed)")
+            return False
+        previous_capacity = self._completed_capacity.get(path, {})
+        current_capacity = self._runtime_capacity(account, configuration)
+        gained_capacity = any(
+            remaining > previous_capacity.get(module, 0)
+            for module, remaining in current_capacity.items()
+        )
+        if not gained_capacity:
+            logger.info(
+                "Wake skipped (configuration change did not create additional execution capacity)"
+            )
             return False
         self._completed_sessions.difference_update(completed_active_keys)
-        logger.info(
-            "Account %s became runnable after settings changed; waking Phone Scheduler",
-            account.username,
-        )
+        self._completed_capacity[path] = current_capacity
+        logger.info("Account became runnable. Waking account.")
         self._wake_event.set()
         return True
 
@@ -293,12 +333,12 @@ class PhoneScheduler:
         self._wake_event.wait(timeout)
         self._wake_event.clear()
 
-    def _remember_runtime_eligibility(self, account: AssignedAccount) -> None:
+    def _remember_runtime_capacity(self, account: AssignedAccount) -> None:
         configuration, failure = self._runtime_configuration(account)
-        self._runtime_runnable[account.config_path.resolve()] = bool(
-            failure is None
-            and configuration is not None
-            and self._runtime_eligibility(account, configuration)
+        self._completed_capacity[account.config_path.resolve()] = (
+            self._runtime_capacity(account, configuration)
+            if failure is None and configuration is not None
+            else {}
         )
 
     @classmethod
@@ -325,6 +365,20 @@ class PhoneScheduler:
             return None, f"account configuration is unavailable: {error}"
         if not isinstance(configuration, dict) or not isinstance(metadata, dict):
             return None, "account configuration is incomplete"
+        runtime_extensions = metadata.get("runtime_extensions")
+        if isinstance(runtime_extensions, dict):
+            unfollow = runtime_extensions.get("unfollow")
+            if isinstance(unfollow, dict):
+                configuration["igbot-unfollow-enabled"] = bool(unfollow.get("enabled"))
+                configuration["igbot-unfollow-method"] = str(
+                    unfollow.get("method") or ""
+                )
+                configuration["igbot-unfollow-sort"] = str(
+                    unfollow.get("sort") or "default"
+                )
+                configuration["igbot-unfollow-budget"] = str(
+                    unfollow.get("budget") or "1"
+                )
         if str(configuration.get("username") or "").strip() != account.username:
             return None, "configured username does not match account identity"
         configured_device = str(configuration.get("device") or "").strip()
@@ -352,9 +406,9 @@ class PhoneScheduler:
 
     @staticmethod
     def _native_configuration_ready(configuration: dict) -> bool:
-        from IGBot.runtime.eligibility import native_follow_configuration_ready
+        from IGBot.runtime.eligibility import native_account_configuration_ready
 
-        return native_follow_configuration_ready(configuration)
+        return native_account_configuration_ready(configuration)
 
     @staticmethod
     def _load_windows(

@@ -215,6 +215,7 @@ class AccountPage(QWidget):
         values.update(self.dm_page.values())
         values.update(self.follow_page.sources.values())
         values.update(self.follow_page.runtime_extension_values())
+        values.update(self.unfollow_page.runtime_extension_values())
         return values
 
     def _source_pages(self):
@@ -285,6 +286,7 @@ class AccountPage(QWidget):
     def set_account(self, account: AssignedAccount, phone_name: str = "") -> None:
         self.account = account
         self.follow_page.sources.set_account_directory(account.config_path.parent)
+        self.unfollow_page.set_account_directory(account.config_path.parent)
         self._loading = True
         self.page_header.title.setText(account.username)
         self.page_header.subtitle.setText("Instagram account settings and activity.")

@@ -1,17 +1,21 @@
 import re
+from pathlib import Path
 from typing import ClassVar
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QRadioButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from IGBot.services.specific_lists_service import SpecificListsService
 from IGBot.ui.widgets.configuration_widgets import (
     CheckboxGroup,
     CollapsibleSection,
@@ -35,13 +39,16 @@ class UnfollowConfigurationPage(QScrollArea):
         "unfollow-any-followers": "Any Follower",
         "unfollow-any": "Using Own Following List",
     }
-    SEARCH_KEYS = tuple(key for key in RANGE_KEYS if key != "unfollow-any")
+    SEARCH_KEYS = ("unfollow", "unfollow-non-followers")
     BEHAVIOUR_LABELS: ClassVar[dict[str, str]] = {
         "unfollow": "Only Users Followed by IGBot",
         "unfollow-non-followers": "Only Users Followed by IGBot Who Didn't Follow Back",
-        "unfollow-any-non-followers": "Any Non-Follower",
-        "unfollow-any-followers": "Any Follower",
     }
+    METHOD_KEY = "igbot-unfollow-method"
+    SORT_KEY = "igbot-unfollow-sort"
+    ENABLED_KEY = "igbot-unfollow-enabled"
+    BUDGET_KEY = "igbot-unfollow-budget"
+    ACTION_DELAY_KEY = "igbot-unfollow-action-delay"
     WEEKDAYS = (
         "Monday",
         "Tuesday",
@@ -62,6 +69,7 @@ class UnfollowConfigurationPage(QScrollArea):
         self._present_keys: set[str] = set()
         self._edited_keys: set[str] = set()
         self._external_file_values: dict[str, object] = {}
+        self._specific_lists: SpecificListsService | None = None
         self.setWidgetResizable(True)
         container = QWidget(self)
         layout = QVBoxLayout(container)
@@ -82,29 +90,82 @@ class UnfollowConfigurationPage(QScrollArea):
         method = ConfigurationSection("Unfollow Method", container)
         self.search_method = QCheckBox("Unfollow Using Search", method)
         self.search_method.setToolTip("Use usernames previously followed by IGBot.")
-        self.own_following_method = QCheckBox(
-            "Unfollow Using Own Following List", method
+        self.following_list_search_method = QCheckBox(
+            "Unfollow Using Following List Search", method
         )
         self.specific_users = TargetSourceRow(
             "Unfollow Specific Users", method, item_noun="username", switch_style=False
         )
         self.specific_users.setVisible(include_file_targets)
+        self.all_followings_method = QCheckBox("Unfollow All Followings", method)
+        self.method_group = QButtonGroup(self)
+        self.method_group.setExclusive(True)
+        for control in (
+            self.search_method,
+            self.following_list_search_method,
+            self.specific_users.enabled,
+            self.all_followings_method,
+        ):
+            self.method_group.addButton(control)
+
+        self.all_followings_warning = QLabel(
+            "⚠️ This method unfollows accounts directly from your Instagram Following "
+            "list.\n\nIt does not use IGBot follow history and may unfollow accounts "
+            "you followed manually.\n\nUse with caution.",
+            method,
+        )
+        self.all_followings_warning.setWordWrap(True)
+        self.all_followings_warning.setObjectName("warningText")
+
+        self.sort_following_list = QWidget(method)
+        sort_layout = QVBoxLayout(self.sort_following_list)
+        sort_layout.setContentsMargins(24, 4, 0, 0)
+        sort_layout.setSpacing(6)
+        sort_layout.addWidget(QLabel("Sort Following List", self.sort_following_list))
+        self.sort_default = QRadioButton(
+            "Default (Recommended)", self.sort_following_list
+        )
+        self.sort_latest = QRadioButton(
+            "Date Followed: Latest", self.sort_following_list
+        )
+        self.sort_earliest = QRadioButton(
+            "Date Followed: Earliest", self.sort_following_list
+        )
+        self.sort_group = QButtonGroup(self)
+        for control in (self.sort_default, self.sort_latest, self.sort_earliest):
+            self.sort_group.addButton(control)
+            sort_layout.addWidget(control)
+        self.sort_default.setChecked(True)
+        sort_note = QLabel(
+            "Instagram may not always honor sorting correctly on accounts with large "
+            "Following lists.\n\nDefault is recommended.",
+            self.sort_following_list,
+        )
+        sort_note.setWordWrap(True)
+        sort_layout.addWidget(sort_note)
+
         method.body_layout.addWidget(self.search_method)
-        method.body_layout.addWidget(self.own_following_method)
+        method.body_layout.addWidget(self.following_list_search_method)
         method.body_layout.addWidget(self.specific_users)
+        method.body_layout.addWidget(self.all_followings_method)
+        method.body_layout.addWidget(self.all_followings_warning)
+        method.body_layout.addWidget(self.sort_following_list)
         layout.addWidget(method)
 
         actions = ConfigurationSection("Unfollow Actions", container)
+        self.actions_section = actions
         action_fields = QWidget(actions)
         self.action_grid = QGridLayout(action_fields)
         self.action_grid.setContentsMargins(0, 0, 0, 0)
         self.action_grid.setHorizontalSpacing(12)
         self.action_grid.setVerticalSpacing(8)
-        self.numeric = NumericSettings(
-            {"unfollow-delay": "Unfollow Delay (days)"}, action_fields, columns=1
-        )
         self.unfollow_amount = RangePairSettings(
             "Minimum users to unfollow", "Maximum users to unfollow", action_fields
+        )
+        self.unfollow_action_delay = RangePairSettings(
+            "Minimum delay after unfollow (seconds)",
+            "Maximum delay after unfollow (seconds)",
+            action_fields,
         )
         self.limits = RangeSettings(
             {"total-unfollows-limit": "Unfollow Limit"}, action_fields
@@ -113,22 +174,51 @@ class UnfollowConfigurationPage(QScrollArea):
         for control in (
             self.unfollow_amount.minimum,
             self.unfollow_amount.maximum,
+            self.unfollow_action_delay.minimum,
+            self.unfollow_action_delay.maximum,
             self.limits.controls["total-unfollows-limit"],
-            self.numeric.controls["unfollow-delay"],
         ):
             control.setFixedWidth(action_field_width)
         self._place_range_pair(self.action_grid, 0, self.unfollow_amount)
+        self._place_range_pair(self.action_grid, 1, self.unfollow_action_delay)
         self._place_single_field(
-            self.action_grid, 1, self.limits, "total-unfollows-limit"
+            self.action_grid, 2, self.limits, "total-unfollows-limit"
         )
-        self._place_single_field(self.action_grid, 2, self.numeric, "unfollow-delay")
+        self.unfollow_limit_help = QLabel(
+            "Daily hard limit.\n"
+            "The bot will never exceed this number of unfollows per day.",
+            actions,
+        )
+        self.unfollow_limit_help.setWordWrap(True)
+        self.unfollow_limit_help.setObjectName("configurationHint")
+        self.action_grid.addWidget(self.unfollow_limit_help, 3, 0, 1, 4)
         self.action_grid.setColumnStretch(4, 1)
         actions.body_layout.addWidget(action_fields)
         layout.addWidget(actions)
 
-        additional = ConfigurationSection("Additional Settings", container)
+        timing = ConfigurationSection("Unfollow Timing", container)
+        self.timing_section = timing
+        timing_fields = QWidget(timing)
+        self.timing_grid = QGridLayout(timing_fields)
+        self.timing_grid.setContentsMargins(0, 0, 0, 0)
+        self.timing_grid.setHorizontalSpacing(12)
+        self.timing_grid.setVerticalSpacing(8)
+        self.numeric = NumericSettings(
+            {"unfollow-delay": "Unfollow Delay (days)"}, timing_fields, columns=1
+        )
+        self.numeric.controls["unfollow-delay"].setFixedWidth(action_field_width)
+        self._place_single_field(self.timing_grid, 0, self.numeric, "unfollow-delay")
+        self.timing_grid.setColumnStretch(2, 1)
+        timing.body_layout.addWidget(timing_fields)
+        self.unfollow_timing_message = QLabel(timing)
+        self.unfollow_timing_message.setWordWrap(True)
+        self.unfollow_timing_message.setObjectName("mutedText")
+        timing.body_layout.addWidget(self.unfollow_timing_message)
+        layout.addWidget(timing)
+
+        additional = ConfigurationSection("Additional Unfollow Settings", container)
+        self.additional_section = additional
         self.mode_options = CheckboxGroup(self.BEHAVIOUR_LABELS, additional, columns=1)
-        self.dont_unfollow_followers = QCheckBox("Don't Unfollow Followers", additional)
         self.behaviour = CheckboxGroup(
             {
                 "sort-followers-newest-to-oldest": "Process newest followed users first",
@@ -138,7 +228,6 @@ class UnfollowConfigurationPage(QScrollArea):
             columns=1,
         )
         additional.body_layout.addWidget(self.mode_options)
-        additional.body_layout.addWidget(self.dont_unfollow_followers)
         self.remove_followers = TargetSourceRow(
             "Remove Followers From File",
             additional,
@@ -176,8 +265,11 @@ class UnfollowConfigurationPage(QScrollArea):
 
         self.enabled.toggled.connect(self._enabled_changed)
         self.search_method.toggled.connect(self._method_changed)
-        self.own_following_method.toggled.connect(self._method_changed)
+        self.following_list_search_method.toggled.connect(self._method_changed)
+        self.specific_users.enabled.toggled.connect(self._method_changed)
+        self.all_followings_method.toggled.connect(self._method_changed)
         self.unfollow_amount.changed.connect(self._amount_changed)
+        self.unfollow_action_delay.changed.connect(self._runtime_extension_changed)
         for key, control in self.limits.controls.items():
             control.textChanged.connect(lambda _text, key=key: self._field_changed(key))
         for key, control in self.numeric.controls.items():
@@ -188,9 +280,18 @@ class UnfollowConfigurationPage(QScrollArea):
             control.toggled.connect(
                 lambda checked, key=key: self._mode_option_changed(key, checked)
             )
+        followed_by_igbot = self.mode_options.controls["unfollow"]
+        did_not_follow_back = self.mode_options.controls["unfollow-non-followers"]
+        followed_by_igbot.toggled.connect(
+            lambda checked: self._enforce_exclusive_option(checked, did_not_follow_back)
+        )
+        did_not_follow_back.toggled.connect(
+            lambda checked: self._enforce_exclusive_option(checked, followed_by_igbot)
+        )
         for key, control in self.behaviour.controls.items():
             control.toggled.connect(lambda _checked, key=key: self._field_changed(key))
-        self.dont_unfollow_followers.toggled.connect(self._runtime_extension_changed)
+        for control in (self.sort_default, self.sort_latest, self.sort_earliest):
+            control.toggled.connect(self._runtime_extension_changed)
         self.specific_users.changed.connect(
             lambda: self._field_changed("unfollow-from-file")
         )
@@ -206,6 +307,7 @@ class UnfollowConfigurationPage(QScrollArea):
             )
         )
         self.schedule_days.changed.connect(self._runtime_extension_changed)
+        self._update_method_availability()
 
     @staticmethod
     def _place_range_pair(
@@ -256,11 +358,13 @@ class UnfollowConfigurationPage(QScrollArea):
             self.mode_options.set_values(
                 {key: self._mode_enabled(key) for key in self.BEHAVIOUR_LABELS}
             )
-            self.search_method.setChecked(
-                any(self._mode_enabled(key) for key in self.SEARCH_KEYS)
+            self._set_sort_from_configuration(configuration)
+            self.unfollow_amount.set_value(
+                configuration.get(self.BUDGET_KEY) or self._first_mode_value()
             )
-            self.own_following_method.setChecked(self._mode_enabled("unfollow-any"))
-            self.unfollow_amount.set_value(self._first_mode_value())
+            self.unfollow_action_delay.set_value(
+                configuration.get(self.ACTION_DELAY_KEY)
+            )
             self._external_file_values = {
                 key: configuration.get(key)
                 for key, resource in (
@@ -272,26 +376,48 @@ class UnfollowConfigurationPage(QScrollArea):
             self._set_resource_row(
                 self.specific_users,
                 configuration.get("unfollow-from-file"),
-                configuration.get(self.SPECIFIC_RESOURCE),
+                (
+                    "\n".join(self._specific_lists.load("unfollowspecific.txt"))
+                    if self._specific_lists is not None
+                    else configuration.get(self.SPECIFIC_RESOURCE)
+                ),
             )
             self._set_resource_row(
                 self.remove_followers,
                 configuration.get("remove-followers-from-file"),
                 configuration.get(self.REMOVE_RESOURCE),
             )
-            if not self._has_enabled_method():
-                self.search_method.setChecked(True)
-            self.enabled.setChecked(self._has_enabled_method())
-            self.dont_unfollow_followers.setChecked(False)
+            self._set_method_from_configuration(configuration)
+            self.enabled.setChecked(
+                bool(configuration.get(self.ENABLED_KEY))
+                if self.ENABLED_KEY in configuration
+                else self._has_enabled_method()
+            )
             self.schedule_days.set_values(
                 {day.casefold(): True for day in self.WEEKDAYS}
             )
             self._update_status()
+            self._update_method_availability()
         finally:
             self._loading = False
 
     def values(self) -> dict:
-        values = self.modes.values()
+        values = {
+            key: control.text().strip() for key, control in self.modes.controls.items()
+        }
+        implemented_value = values["unfollow"]
+        if implemented_value:
+            valid = bool(re.fullmatch(r"\d+(?:-\d+)?", implemented_value))
+            if valid and "-" in implemented_value:
+                minimum, maximum = (
+                    int(part) for part in implemented_value.split("-", 1)
+                )
+                valid = minimum <= maximum
+            if not valid:
+                control = self.modes.controls["unfollow"]
+                control.setStyleSheet("border: 1px solid #EF4444;")
+                control.setFocus()
+                raise ValueError("unfollow must be a number or ascending range.")
         if self._amount_edited:
             amount = self.unfollow_amount.value()
             for key in self.RANGE_KEYS:
@@ -359,15 +485,22 @@ class UnfollowConfigurationPage(QScrollArea):
         if dialog.exec() == TargetEditorDialog.Accepted:
             entries = dialog.entries()
             row.set_entries(entries)
+            if row is self.specific_users and self._specific_lists is not None:
+                self._specific_lists.save("unfollowspecific.txt", entries)
             row.enabled.setChecked(bool(entries))
             self._field_changed(key)
+
+    def set_account_directory(self, directory: str | Path) -> None:
+        account_directory = Path(directory)
+        if not (account_directory / "config.yml").is_file():
+            self._specific_lists = None
+            return
+        self._specific_lists = SpecificListsService(account_directory)
+        self._specific_lists.initialize()
 
     def _enabled_changed(self, enabled: bool) -> None:
         if self._loading:
             return
-        if enabled and not self._has_enabled_method():
-            self.search_method.setChecked(True)
-            self.mode_options.controls["unfollow"].setChecked(True)
         self._edited_keys.update(self.RANGE_KEYS)
         self._update_status()
         self.changed.emit()
@@ -375,22 +508,23 @@ class UnfollowConfigurationPage(QScrollArea):
     def _method_changed(self) -> None:
         if self._loading:
             return
-        if not self.search_method.isChecked():
+        if not self._history_settings_available():
             for key, control in self.mode_options.controls.items():
                 control.setChecked(False)
                 self._set_mode_value(key, False)
-        elif not any(self.mode_options.values().values()):
-            self.mode_options.controls["unfollow"].setChecked(True)
-        self._set_mode_value("unfollow-any", self.own_following_method.isChecked())
-        self._sync_enabled()
+        self._update_method_availability()
+        self._notify_changed()
 
     def _mode_option_changed(self, key: str, checked: bool) -> None:
         if self._loading:
             return
         self._set_mode_value(key, checked)
+        self._notify_changed()
+
+    @staticmethod
+    def _enforce_exclusive_option(checked: bool, opposite: QCheckBox) -> None:
         if checked:
-            self.search_method.setChecked(True)
-        self._sync_enabled()
+            opposite.setChecked(False)
 
     def _set_mode_value(self, key: str, enabled: bool) -> None:
         control = self.modes.controls[key]
@@ -408,10 +542,9 @@ class UnfollowConfigurationPage(QScrollArea):
     def _field_changed(self, key: str) -> None:
         if not self._loading:
             self._edited_keys.add(key)
-            self._sync_enabled()
+            self._notify_changed()
 
-    def _sync_enabled(self) -> None:
-        self.enabled.setChecked(self._has_enabled_method())
+    def _notify_changed(self) -> None:
         self._update_status()
         self.changed.emit()
 
@@ -423,9 +556,8 @@ class UnfollowConfigurationPage(QScrollArea):
         return self.modes.controls[key].text().strip() not in {"", "0"}
 
     def _mode_selected(self, key: str) -> bool:
-        if key == "unfollow-any":
-            return self.own_following_method.isChecked()
-        return self.mode_options.controls[key].isChecked()
+        control = self.mode_options.controls.get(key)
+        return bool(control and control.isChecked())
 
     def _first_mode_value(self) -> str:
         for control in self.modes.controls.values():
@@ -434,10 +566,96 @@ class UnfollowConfigurationPage(QScrollArea):
         return "1"
 
     def _has_enabled_method(self) -> bool:
+        return any(button.isChecked() for button in self.method_group.buttons())
+
+    def runtime_extension_values(self) -> dict[str, object]:
+        return {
+            self.ENABLED_KEY: self.enabled.isChecked(),
+            self.METHOD_KEY: self._selected_method(),
+            self.SORT_KEY: self._selected_sort(),
+            self.BUDGET_KEY: self.unfollow_amount.value(),
+            self.ACTION_DELAY_KEY: self.unfollow_action_delay.value(),
+        }
+
+    def _selected_method(self) -> str:
+        for value, control in (
+            ("search", self.search_method),
+            ("following-list-search", self.following_list_search_method),
+            ("specific-users", self.specific_users.enabled),
+            ("all-followings", self.all_followings_method),
+        ):
+            if control.isChecked():
+                return value
+        return ""
+
+    def _set_method_from_configuration(self, configuration: dict) -> None:
+        method = str(configuration.get(self.METHOD_KEY) or "")
+        if not method:
+            if self.specific_users.enabled.isChecked():
+                method = "specific-users"
+            elif self._mode_enabled("unfollow-any"):
+                method = "all-followings"
+            elif any(self._mode_enabled(key) for key in self.SEARCH_KEYS):
+                method = "search"
+        controls = {
+            "search": self.search_method,
+            "following-list-search": self.following_list_search_method,
+            "specific-users": self.specific_users.enabled,
+            "all-followings": self.all_followings_method,
+        }
+        self.method_group.setExclusive(False)
+        for control in controls.values():
+            control.setChecked(False)
+        self.method_group.setExclusive(True)
+        if method in controls:
+            controls[method].setChecked(True)
+
+    def _selected_sort(self) -> str:
+        if self.sort_latest.isChecked():
+            return "latest"
+        if self.sort_earliest.isChecked():
+            return "earliest"
+        return "default"
+
+    def _set_sort_from_configuration(self, configuration: dict) -> None:
+        {
+            "latest": self.sort_latest,
+            "earliest": self.sort_earliest,
+        }.get(
+            str(configuration.get(self.SORT_KEY) or ""), self.sort_default
+        ).setChecked(True)
+
+    def _history_settings_available(self) -> bool:
         return (
-            any(self._mode_enabled(key) for key in self.RANGE_KEYS)
-            or self.specific_users.enabled.isChecked()
+            self.search_method.isChecked()
+            or self.following_list_search_method.isChecked()
         )
+
+    def _update_method_availability(self) -> None:
+        available = self._history_settings_available()
+        for control in self.mode_options.controls.values():
+            control.setEnabled(available)
+        show_all_followings = self.all_followings_method.isChecked()
+        self.all_followings_warning.setVisible(show_all_followings)
+        self.sort_following_list.setVisible(show_all_followings)
+        delay_available = available
+        self.numeric.labels["unfollow-delay"].setEnabled(delay_available)
+        self.numeric.controls["unfollow-delay"].setEnabled(delay_available)
+        if self.specific_users.enabled.isChecked():
+            self.unfollow_timing_message.setText(
+                "Unfollow Delay does not apply to this method.\n"
+                "Specific Users are processed immediately."
+            )
+            self.unfollow_timing_message.show()
+        elif show_all_followings:
+            self.unfollow_timing_message.setText(
+                "Unfollow Delay does not apply to this method.\n"
+                "This provider walks your Instagram Following list directly."
+            )
+            self.unfollow_timing_message.show()
+        else:
+            self.unfollow_timing_message.clear()
+            self.unfollow_timing_message.hide()
 
     def _update_status(self) -> None:
         enabled = self.enabled.isChecked()

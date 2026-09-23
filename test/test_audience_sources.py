@@ -247,7 +247,8 @@ def test_interaction_modules_share_static_continuous_section_order():
             "Enable Unfollow",
             "Unfollow Method",
             "Unfollow Actions",
-            "Additional Settings",
+            "Unfollow Timing",
+            "Additional Unfollow Settings",
             "Schedule",
         ],
         page.like_page: [
