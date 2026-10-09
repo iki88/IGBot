@@ -37,6 +37,102 @@ class SpecificInteractionRepository:
                 self._connection.execute(
                     "ALTER TABLE specific_unfollow ADD COLUMN last_session_id TEXT"
                 )
+        if self._table == "specific_like":
+            columns = {
+                row[1]
+                for row in self._connection.execute(
+                    'PRAGMA table_info("specific_like")'
+                )
+            }
+            if "liked" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE specific_like ADD COLUMN liked "
+                    "INTEGER NOT NULL DEFAULT 0 CHECK (liked IN (0, 1))"
+                )
+            if "like_date" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE specific_like ADD COLUMN like_date TEXT"
+                )
+            if "last_session_id" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE specific_like ADD COLUMN last_session_id TEXT"
+                )
+            # Preserve completed state from the original infrastructure schema.
+            self._connection.execute(
+                "UPDATE specific_like SET liked = 1, "
+                "like_date = COALESCE(like_date, last_like_date) "
+                "WHERE likes_count > 0"
+            )
+
+    def synchronize_dm_usernames(self, usernames: tuple[str, ...]) -> None:
+        """Mirror dmspecific.txt while preserving matching execution state."""
+
+        if self._table != "specific_dm":
+            raise ValueError("DM synchronization requires specific_dm")
+        normalized: dict[str, str] = {}
+        for username in usernames:
+            cleaned = username.strip().casefold()
+            if cleaned:
+                normalized.setdefault(cleaned, cleaned)
+        existing = self._connection.execute(
+            "SELECT user_id, username FROM specific_dm"
+        ).fetchall()
+        existing_by_name = {
+            str(row[1]).casefold(): (int(row[0]), str(row[1])) for row in existing
+        }
+        for key, username in normalized.items():
+            current = existing_by_name.get(key)
+            if current is None:
+                self.upsert_username(
+                    username,
+                    {"dm_count": 0, "last_dm_date": None, "status": None},
+                )
+            elif current[1] != username:
+                self.upsert_username(username, {})
+        removed_ids = [
+            user_id
+            for key, (user_id, _username) in existing_by_name.items()
+            if key not in normalized
+        ]
+        if removed_ids:
+            placeholders = ", ".join("?" for _ in removed_ids)
+            self._connection.execute(
+                f"DELETE FROM specific_dm WHERE user_id IN ({placeholders})",
+                removed_ids,
+            )
+
+    def pending_dm_users(self) -> tuple[tuple[int, str], ...]:
+        if self._table != "specific_dm":
+            raise ValueError("Pending DM users require specific_dm")
+        rows = self._connection.execute(
+            "SELECT user_id, username FROM specific_dm "
+            "WHERE status IS NULL OR status != 'SUCCESS' ORDER BY user_id"
+        ).fetchall()
+        return tuple((int(row[0]), str(row[1])) for row in rows)
+
+    def mark_specific_dm_result(
+        self, username: str, *, status: str, sent_at: str | None
+    ) -> None:
+        if self._table != "specific_dm":
+            raise ValueError("Specific DM updates require specific_dm")
+        successful = int(status == "SUCCESS")
+        timestamp = utc_timestamp(sent_at) if sent_at is not None else None
+        self._connection.execute(
+            "UPDATE specific_dm SET dm_count = dm_count + ?, "
+            "last_dm_date = CASE WHEN ? = 1 THEN ? ELSE last_dm_date END, "
+            "status = ? WHERE username = ? COLLATE NOCASE",
+            (successful, successful, timestamp, status, username),
+        )
+
+    def count_successful_dms_between(self, start: str, end: str) -> int:
+        if self._table != "specific_dm":
+            raise ValueError("DM counts require specific_dm")
+        row = self._connection.execute(
+            "SELECT COALESCE(SUM(dm_count), 0) FROM specific_dm "
+            "WHERE status = 'SUCCESS' AND last_dm_date >= ? AND last_dm_date < ?",
+            (utc_timestamp(start), utc_timestamp(end)),
+        ).fetchone()
+        return int(row[0])
 
     def upsert_username(self, username: str, values: Mapping[str, object]) -> int:
         """Insert or update one module-local username without discovery-table joins."""
@@ -166,6 +262,107 @@ class SpecificInteractionRepository:
         row = self._connection.execute(
             "SELECT COUNT(*) FROM specific_unfollow "
             "WHERE unfollowed = 1 AND unfollow_date >= ? AND unfollow_date < ?",
+            (utc_timestamp(start), utc_timestamp(end)),
+        ).fetchone()
+        return int(row[0])
+
+    def synchronize_like_usernames(self, usernames: tuple[str, ...]) -> None:
+        """Mirror likespecific.txt while retaining matching execution state."""
+
+        if self._table != "specific_like":
+            raise ValueError("Like synchronization requires specific_like")
+        normalized: dict[str, str] = {}
+        for username in usernames:
+            cleaned = username.strip()
+            if cleaned:
+                normalized.setdefault(cleaned.casefold(), cleaned)
+        existing = self._connection.execute(
+            "SELECT user_id, username FROM specific_like"
+        ).fetchall()
+        existing_by_name = {
+            str(row[1]).casefold(): (int(row[0]), str(row[1])) for row in existing
+        }
+        for key, username in normalized.items():
+            current = existing_by_name.get(key)
+            if current is None:
+                self.upsert_username(
+                    username,
+                    {
+                        "likes_count": 0,
+                        "last_like_date": None,
+                        "status": "PENDING",
+                        "liked": 0,
+                        "like_date": None,
+                        "last_session_id": None,
+                    },
+                )
+            elif current[1] != username:
+                self.upsert_username(username, {})
+        removed_ids = [
+            user_id
+            for key, (user_id, _username) in existing_by_name.items()
+            if key not in normalized
+        ]
+        if removed_ids:
+            placeholders = ", ".join("?" for _ in removed_ids)
+            self._connection.execute(
+                f"DELETE FROM specific_like WHERE user_id IN ({placeholders})",
+                removed_ids,
+            )
+
+    def pending_like_usernames(self) -> tuple[str, ...]:
+        if self._table != "specific_like":
+            raise ValueError("Pending Like users require specific_like")
+        rows = self._connection.execute(
+            "SELECT username FROM specific_like "
+            "WHERE liked = 0 AND (status IS NULL OR status = 'PENDING') "
+            "ORDER BY user_id"
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
+    def mark_specific_like_result(
+        self,
+        username: str,
+        *,
+        status: str,
+        likes_count: int,
+        processed_at: str,
+        last_session_id: str,
+    ) -> None:
+        """Persist one terminal Specific Like outcome.
+
+        ``liked`` is historical success and is set only after a verified Like.
+        """
+
+        if self._table != "specific_like":
+            raise ValueError("Specific Like updates require specific_like")
+        liked = int(likes_count > 0 and status == "SUCCESS")
+        timestamp = utc_timestamp(processed_at)
+        self._connection.execute(
+            "UPDATE specific_like SET liked = ?, likes_count = likes_count + ?, "
+            "like_date = CASE WHEN ? = 1 THEN ? ELSE like_date END, "
+            "last_like_date = CASE WHEN ? = 1 THEN ? ELSE last_like_date END, "
+            "last_session_id = ?, status = ? "
+            "WHERE username = ? COLLATE NOCASE",
+            (
+                liked,
+                likes_count,
+                liked,
+                timestamp,
+                liked,
+                timestamp,
+                last_session_id,
+                status,
+                username,
+            ),
+        )
+
+    def count_successful_likes_between(self, start: str, end: str) -> int:
+        if self._table != "specific_like":
+            raise ValueError("Like counts require specific_like")
+        row = self._connection.execute(
+            "SELECT COALESCE(SUM(likes_count), 0) FROM specific_like "
+            "WHERE liked = 1 AND like_date >= ? AND like_date < ?",
             (utc_timestamp(start), utc_timestamp(end)),
         ).fetchone()
         return int(row[0])

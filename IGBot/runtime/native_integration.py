@@ -9,7 +9,7 @@ import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,11 +17,13 @@ import yaml
 
 from IGBot.core.device import AssignedAccount
 from IGBot.core.session_engine import SessionState as UiSessionState
+from IGBot.notifications import NotificationService, ZeroInteractionsDetector
 from IGBot.runtime.account_verification import (
     AndroidInstagramProfileProvider,
     AndroidInstagramStateProvider,
 )
 from IGBot.runtime.airplane_mode import AndroidAirplaneModeProvider
+from IGBot.runtime.analytics import AnalyticsService, increment_analytics
 from IGBot.runtime.application import AndroidApplicationProvider
 from IGBot.runtime.candidates import (
     Candidate,
@@ -33,8 +35,16 @@ from IGBot.runtime.candidates import (
     SpecificUsersProvider,
 )
 from IGBot.runtime.context import RuntimeContext
-from IGBot.runtime.database import FollowRecord, RuntimeDatabase
+from IGBot.runtime.database import DailyLimitResolver, FollowRecord, RuntimeDatabase
 from IGBot.runtime.database.timestamps import utc_timestamp
+from IGBot.runtime.dm import (
+    AndroidDMProvider,
+    DMModule,
+    DMSettings,
+    SpecificDMPersistence,
+    SpecificDMRecipients,
+    SpecificDMSynchronizer,
+)
 from IGBot.runtime.eligibility import follow_provider_is_configured
 from IGBot.runtime.follow import (
     AndroidContactScraper,
@@ -48,7 +58,6 @@ from IGBot.runtime.follow import (
     FollowModuleSettings,
     TextFilterSettings,
 )
-from IGBot.runtime.follow.daily_limits import remaining_daily_follows
 from IGBot.runtime.follow.fast_filters import FollowFastFilters
 from IGBot.runtime.follow.source_session import (
     FollowProviderSequence,
@@ -62,9 +71,24 @@ from IGBot.runtime.follower_synchronization import (
     RuntimeFollowerWriter,
 )
 from IGBot.runtime.hooks import HookEventType, HookResult
+from IGBot.runtime.ignore import IgnoreService
+from IGBot.runtime.like import (
+    AndroidLikeProvider,
+    LikeModule,
+    LikeModuleSettings,
+    LikePostFilterSettings,
+    SpecificLikeCandidates,
+    SpecificLikeNavigation,
+    SpecificLikePersistence,
+    SpecificLikeSynchronizer,
+)
 from IGBot.runtime.modules import InteractionModule
 from IGBot.runtime.network import AndroidNetworkProvider
-from IGBot.runtime.profile_database import GlobalDatabaseWriter, ProfileUpdate
+from IGBot.runtime.profile_database import (
+    GlobalDatabaseWriter,
+    GlobalProfileWriterError,
+    ProfileUpdate,
+)
 from IGBot.runtime.recent_apps import AndroidRecentAppsProvider
 from IGBot.runtime.recovery import RecoveryDecision
 from IGBot.runtime.scheduler import (
@@ -96,13 +120,14 @@ from IGBot.runtime.unfollow import (
     AndroidFollowingListSearchUnfollowProvider,
     AndroidFollowingListUnfollowProvider,
     AndroidUnfollowProvider,
-    FollowingListDatabase,
     SpecificUnfollowModule,
     SpecificUnfollowSynchronizer,
     UnfollowModule,
     UnfollowSettings,
 )
 from IGBot.services.global_settings_service import GlobalSettingsService
+from IGBot.services.message_storage_service import MessageStorageService
+from IGBot.services.specific_lists_service import SpecificListsService
 
 logger = logging.getLogger(__name__)
 # RuntimeContext diagnostics must reach the existing root-attached Qt Live Log
@@ -113,22 +138,53 @@ logger.setLevel(logging.DEBUG)
 class PythonRuntimeLogger:
     """Forward structured native-runtime events into the existing Live Log."""
 
+    def __init__(
+        self,
+        *,
+        account_directory: Path | None = None,
+        account_username: str = "",
+        phone_id: str = "",
+        session_id: object = "",
+        developer_mode: bool = False,
+    ) -> None:
+        self._extra = {
+            "account_directory": str(account_directory) if account_directory else "",
+            "account_username": account_username,
+            "phone_id": phone_id,
+            "session_id": str(session_id),
+            "developer_mode": developer_mode,
+        }
+
     @staticmethod
     def _message(message: str, fields: Mapping[str, object]) -> str:
         suffix = " ".join(f"{key}={value}" for key, value in fields.items())
         return f"{message} ({suffix})" if suffix else message
 
     def debug(self, message: str, **fields: object) -> None:
-        logger.debug(self._message(message, fields))
+        logger.debug(self._message(message, fields), extra=self._extra)
 
     def info(self, message: str, **fields: object) -> None:
-        logger.info(self._message(message, fields))
+        logger.info(self._message(message, fields), extra=self._extra)
 
     def warning(self, message: str, **fields: object) -> None:
-        logger.warning(self._message(message, fields))
+        logger.warning(self._message(message, fields), extra=self._extra)
 
     def error(self, message: str, **fields: object) -> None:
-        logger.error(self._message(message, fields))
+        logger.error(self._message(message, fields), extra=self._extra)
+
+    def session_started(self) -> None:
+        self.info(
+            "=" * 24 + " Session Started " + "=" * 24,
+            session_id=self._extra["session_id"],
+            phone_id=self._extra["phone_id"],
+        )
+
+    def session_finished(self, status: str) -> None:
+        self.info(
+            "=" * 23 + " Session Finished " + "=" * 23,
+            session_id=self._extra["session_id"],
+            status=status,
+        )
 
 
 class _LoggingNotifier:
@@ -137,46 +193,77 @@ class _LoggingNotifier:
 
 
 class _ProfilePersistence:
-    def __init__(self, writer: GlobalDatabaseWriter) -> None:
+    def __init__(
+        self,
+        writer: GlobalDatabaseWriter,
+        *,
+        account: str = "",
+        diagnostic_logger: PythonRuntimeLogger | None = None,
+    ) -> None:
         self._writer = writer
+        self._account = account
+        self._logger = diagnostic_logger
         self._profiles: dict[str, CandidateProfile] = {}
 
     def submit(
         self,
         profile: CandidateProfile,
         details: Mapping[str, str] | None = None,
+        *,
+        operation: str = "Update profile observation",
     ) -> None:
         details = details or {}
         self._profiles[profile.username.casefold()] = profile
-        self._writer.submit(
-            ProfileUpdate(
-                username=profile.username,
-                full_name=profile.display_name,
-                biography=profile.biography,
-                category=profile.category,
-                website=details.get("website", profile.website),
-                phone=details.get("phone", ""),
-                email=details.get("email", ""),
-                address=details.get("address", profile.address),
-                followers=profile.followers,
-                following=profile.following,
-                posts=profile.posts,
-                is_private=profile.is_private,
-                is_business=profile.is_business,
-                is_verified=profile.is_verified,
-                follow_status=profile.follow_status,
-                source_account=profile.candidate.source,
-                discovered_at=utc_timestamp(datetime.now(timezone.utc)),
+        try:
+            self._writer.submit(
+                ProfileUpdate(
+                    username=profile.username,
+                    full_name=profile.display_name,
+                    biography=profile.biography,
+                    category=profile.category,
+                    website=details.get("website", profile.website),
+                    phone=details.get("phone", ""),
+                    email=details.get("email", ""),
+                    address=details.get("address", profile.address),
+                    followers=profile.followers,
+                    following=profile.following,
+                    posts=profile.posts,
+                    is_private=profile.is_private,
+                    is_business=profile.is_business,
+                    is_verified=profile.is_verified,
+                    follow_status=profile.follow_status,
+                    source_account=profile.candidate.source,
+                    discovered_at=utc_timestamp(datetime.now(timezone.utc)),
+                ),
+                account=self._account,
+                operation=operation,
             )
-        )
+        except GlobalProfileWriterError as error:
+            self._log_failure(error)
 
     def mark_followed(self, username: str, status: str) -> None:
         profile = self._profiles.get(username.casefold())
         if profile is not None:
-            self.submit(replace(profile, follow_status=status))
+            self.submit(
+                replace(profile, follow_status=status),
+                operation="Update Follow history",
+            )
 
     def observe(self, _context: RuntimeContext, profile: CandidateProfile) -> None:
         self.submit(profile)
+
+    def _log_failure(self, error: GlobalProfileWriterError) -> None:
+        if self._logger is None or error.reported:
+            return
+        self._logger.error(
+            "Global profile writer failed",
+            account=error.account or self._account or "<unknown>",
+            operation=error.operation,
+            profile=error.profile or "<none>",
+            database=str(error.database),
+            exception=f"{type(error.cause).__name__}: {error.cause}",
+        )
+        error.reported = True
 
 
 class _ProfileObservationHooks:
@@ -210,7 +297,11 @@ class _ProfileObservationHooks:
                     "[Contact] Contact scraping failed.", detail=contact.detail or ""
                 )
 
-        self._persistence.submit(profile, details)
+        self._persistence.submit(
+            profile,
+            details,
+            operation="Update profile and contact observation",
+        )
         return (HookResult(True, "Profile persistence queued."),)
 
 
@@ -258,12 +349,14 @@ class AndroidFollowersDiscovery:
         *,
         following: bool = False,
         follow_back_enabled: bool = False,
+        include_followed_candidates: bool = False,
         cancellation_requested: Callable[[], bool] = lambda: False,
         fast_filters: FollowFastFilters | None = None,
     ) -> None:
         self._android = android
         self._following = following
         self._follow_back_enabled = follow_back_enabled
+        self._include_followed_candidates = include_followed_candidates
         self._cancellation_requested = cancellation_requested
         self._fast_filters = fast_filters or FollowFastFilters()
         self._seen: set[str] = set()
@@ -382,7 +475,7 @@ class AndroidFollowersDiscovery:
                 self._last_rows = ()
                 continue
             self._last_rows = rows
-            scrolled = self._android.scroll_followers(context)
+            scrolled = self._android.scroll_followers(context, overlapping=True)
             if scrolled.status is not AndroidFollowStatus.SUCCESS:
                 if self.session.letter_search:
                     context.logger.info("[Search] Letter completed.")
@@ -399,6 +492,19 @@ class AndroidFollowersDiscovery:
             if normalized in self._seen:
                 continue
             self._seen.add(normalized)
+            if self._include_followed_candidates and button_state in {
+                "follow",
+                "follow back",
+                "message",
+                "following",
+                "requested",
+            }:
+                return DiscoveryResult(
+                    DiscoveryStatus.ACCOUNT_FOUND,
+                    CandidateObservation(
+                        username=username, display_name=subtitle or None
+                    ),
+                )
             if button_state in {"message", "following", "requested"}:
                 context.logger.info(
                     "[Candidate] Skipping already-followed account",
@@ -592,10 +698,170 @@ class _FollowModuleProvider:
             unfollow = self._build_unfollow(context)
             if unfollow is not None:
                 modules.append(unfollow)
+            like = self._build_like(context)
+            if like is not None:
+                modules.append(like)
+            dm = self._build_dm(context)
+            if dm is not None:
+                modules.append(dm)
             self._modules[key] = tuple(modules)
         return self._modules[key]
 
+    def _build_dm(self, context: RuntimeContext) -> DMModule | None:
+        enabled = self._enabled(self._configuration.get("pm-percentage"))
+        messages = MessageStorageService(context.session.account_directory)
+        message = messages.load(messages.WELCOME_DM)
+        if not enabled or not message.strip():
+            return None
+        specific = self._configuration.get("igbot-dm-method") == "specific-users"
+        if specific:
+            SpecificDMSynchronizer().synchronize(
+                context.session.account_directory, context.ignore_service
+            )
+        daily = DailyLimitResolver(context.session.account_directory).capacity(
+            "dm", self._configuration.get("total-pm-limit")
+        ).remaining
+        hourly = self._integer_limit(
+            self._runtime_settings.get("maximum_dms_per_hour"), default=100_000
+        )
+        return DMModule(
+            context,
+            DMSettings(
+                enabled=True,
+                configured=True,
+                message=message,
+                budget=str(self._configuration.get("igbot-dm-budget") or "1"),
+                daily_remaining=daily,
+                hourly_remaining=hourly or 100_000,
+                action_delay=str(
+                    self._configuration.get("igbot-dm-action-delay") or "0"
+                ),
+            ),
+            AndroidDMProvider(self._android),
+            recipients=SpecificDMRecipients() if specific else None,
+            persistence=SpecificDMPersistence() if specific else None,
+            private_fallback=specific,
+            bounded_search=specific,
+        )
+
+    def _build_like(self, context: RuntimeContext) -> LikeModule | None:
+        configured_methods = self._configuration.get("igbot-like-methods")
+        like_methods = (
+            {str(method) for method in configured_methods}
+            if isinstance(configured_methods, (list, tuple))
+            else None
+        )
+        sources = self._string_list(
+            self._configuration.get("igbot-like-sources-followers")
+        )
+        specific = self._string_list(self._configuration.get("blogger"))
+        if like_methods is not None:
+            if "blogger-followers" not in like_methods:
+                sources = []
+            if "blogger" not in like_methods:
+                specific = []
+        enabled = self._enabled(self._configuration.get("likes-percentage"))
+        if not enabled or (not specific and not sources):
+            return None
+        if specific:
+            context.logger.info("[Specific Like] Synchronizing specific users...")
+            SpecificLikeSynchronizer().synchronize(
+                context.session.account_directory, context.ignore_service
+            )
+            candidates = SpecificLikeCandidates(context.session.account_directory)
+            profile_navigation = SpecificLikeNavigation(self._android)
+            persistence = SpecificLikePersistence()
+        else:
+            discovery_settings = FollowersDiscoverySettings(
+                scrolling_timeout_seconds=max(
+                    1,
+                    int(
+                        self._runtime_settings.get("maximum_source_scrolling_time") or 5
+                    )
+                    * 60,
+                ),
+                use_random_search_letters=bool(
+                    self._runtime_settings.get("use_random_search_letters")
+                ),
+                first_character_pool=str(
+                    self._runtime_settings.get("first_character_pool") or ""
+                ),
+                second_character_pool=str(
+                    self._runtime_settings.get("second_character_pool") or ""
+                ),
+            )
+            candidates = FollowSourcesProvider(
+                sources,
+                AndroidFollowersDiscovery(
+                    self._android,
+                    include_followed_candidates=True,
+                    cancellation_requested=self._cancellation_requested,
+                ),
+                _AllowVisibleCandidates(),
+                _UnusedBiographyReader(),
+                discovery_settings,
+                source_label="Like Source Followers",
+                source_path=(
+                    context.session.account_directory
+                    / "Lists"
+                    / "like_sources_followers.txt"
+                ),
+            )
+            profile_navigation = self._android
+            persistence = None
+        daily = DailyLimitResolver(context.session.account_directory).capacity(
+            "like", self._configuration.get("total-likes-limit")
+        ).remaining
+        hourly = self._integer_limit(
+            self._runtime_settings.get("maximum_likes_per_hour"), default=100_000
+        )
+        profile_filters = FollowFilterSettings(
+            allow_private=True,
+            min_followers=self._optional_integer(self._filters.get("min_followers")),
+            max_followers=self._optional_integer(self._filters.get("max_followers")),
+            min_following=self._optional_integer(self._filters.get("min_followings")),
+            max_following=self._optional_integer(self._filters.get("max_followings")),
+            min_posts=self._optional_integer(self._filters.get("min_posts")),
+            keywords=TextFilterSettings(
+                required=self._string_list(self._filters.get("mandatory_words")),
+                blocked=self._string_list(self._filters.get("blacklist_words")),
+            ),
+            allowed_alphabets=self._string_list(self._filters.get("specific_alphabet")),
+            biography_languages=self._string_list(
+                self._filters.get("biography_language")
+            ),
+        )
+        return LikeModule(
+            context,
+            LikeModuleSettings(
+                enabled=True,
+                configured=True,
+                budget=1,
+                daily_remaining=daily,
+                hourly_remaining=hourly or 100_000,
+            ),
+            candidates,
+            AndroidLikeProvider(
+                profile_navigation,
+                likes_per_profile=self._configuration.get("likes-count") or 1,
+                photo_view_time=self._configuration.get("watch-photo-time") or 0,
+                reel_view_time=self._configuration.get("watch-video-time") or 0,
+                profile_filters=profile_filters,
+                post_filters=LikePostFilterSettings(
+                    minimum_likes=self._optional_integer(
+                        self._filters.get("min_likers")
+                    ),
+                    maximum_likes=self._optional_integer(
+                        self._filters.get("max_likers")
+                    ),
+                ),
+            ),
+            persistence=persistence,
+        )
+
     def _build_unfollow(self, context: RuntimeContext) -> object | None:
+        if not self._truthy(self._unfollow_extensions.get("enabled")):
+            return None
         method = str(self._unfollow_extensions.get("method") or "search")
         if method == "all-followings":
             return self._build_all_followings_unfollow(context)
@@ -603,21 +869,9 @@ class _FollowModuleProvider:
             return self._build_specific_unfollow(context)
         if method not in {"search", "following-list-search"}:
             return None
-        configured = self._configuration.get("unfollow") or self._configuration.get(
-            "unfollow-non-followers"
-        )
-        if not self._enabled(configured):
-            return None
-        daily_limit = self._integer_limit(
-            self._configuration.get("total-unfollows-limit"), default=100_000
-        )
-        start = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        with RuntimeDatabase(context.session.account_directory) as database:
-            completed = database.follow.count_unfollowed_between(
-                start.isoformat(), (start + timedelta(days=1)).isoformat()
-            )
+        daily = DailyLimitResolver(context.session.account_directory).capacity(
+            "unfollow", self._configuration.get("total-unfollows-limit")
+        ).remaining
         hourly = (
             self._integer_limit(
                 self._runtime_settings.get("maximum_unfollows_per_hour"),
@@ -635,8 +889,8 @@ class _FollowModuleProvider:
             UnfollowSettings(
                 enabled=True,
                 configured=True,
-                budget=str(configured),
-                daily_remaining=max(0, daily_limit - completed),
+                budget=str(self._unfollow_extensions.get("budget") or "1"),
+                daily_remaining=daily,
                 hourly_remaining=hourly,
                 delay_days=self._integer_limit(
                     self._configuration.get("unfollow-delay"), default=0
@@ -655,18 +909,12 @@ class _FollowModuleProvider:
         if not self._truthy(self._unfollow_extensions.get("enabled")):
             return None
         context.logger.info("[Specific Unfollow] Loading specific users...")
-        SpecificUnfollowSynchronizer().synchronize(context.session.account_directory)
-        daily_limit = self._integer_limit(
-            self._configuration.get("total-unfollows-limit"), default=100_000
+        SpecificUnfollowSynchronizer().synchronize(
+            context.session.account_directory, context.ignore_service
         )
-        start = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        end = start + timedelta(days=1)
-        with RuntimeDatabase(context.session.account_directory) as database:
-            completed = database.specific_unfollow.count_successful_unfollows_between(
-                utc_timestamp(start), utc_timestamp(end)
-            )
+        daily = DailyLimitResolver(context.session.account_directory).capacity(
+            "unfollow", self._configuration.get("total-unfollows-limit")
+        ).remaining
         hourly = (
             self._integer_limit(
                 self._runtime_settings.get("maximum_unfollows_per_hour"),
@@ -680,7 +928,7 @@ class _FollowModuleProvider:
                 enabled=True,
                 configured=True,
                 budget=str(self._unfollow_extensions.get("budget") or "1"),
-                daily_remaining=max(0, daily_limit - completed),
+                daily_remaining=daily,
                 hourly_remaining=hourly,
                 delay_days=0,
             ),
@@ -692,17 +940,9 @@ class _FollowModuleProvider:
     ) -> AllFollowingsUnfollowModule | None:
         if not self._truthy(self._unfollow_extensions.get("enabled")):
             return None
-        daily_limit = self._integer_limit(
-            self._configuration.get("total-unfollows-limit"), default=100_000
-        )
-        start = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        end = start + timedelta(days=1)
-        with FollowingListDatabase(context.session.account_directory) as database:
-            completed = database.count_unfollowed_between(
-                utc_timestamp(start), utc_timestamp(end)
-            )
+        daily = DailyLimitResolver(context.session.account_directory).capacity(
+            "unfollow", self._configuration.get("total-unfollows-limit")
+        ).remaining
         hourly = (
             self._integer_limit(
                 self._runtime_settings.get("maximum_unfollows_per_hour"),
@@ -717,7 +957,7 @@ class _FollowModuleProvider:
                 enabled=True,
                 configured=True,
                 budget=str(configured),
-                daily_remaining=max(0, daily_limit - completed),
+                daily_remaining=daily,
                 hourly_remaining=hourly,
                 delay_days=0,
             ),
@@ -728,19 +968,31 @@ class _FollowModuleProvider:
         )
 
     def _build(self, context: RuntimeContext) -> FollowModule:
+        configured_methods = self._configuration.get("igbot-follow-methods")
+        follow_methods = (
+            {str(method) for method in configured_methods}
+            if isinstance(configured_methods, (list, tuple))
+            else None
+        )
         follower_sources = self._string_list(
-            self._configuration.get("blogger-followers")
+            self._configuration.get("igbot-follow-sources-followers")
         )
         following_sources = self._string_list(
-            self._configuration.get("blogger-following")
+            self._configuration.get("igbot-follow-sources-following")
         )
         specific_enabled = self._enabled(self._configuration.get("blogger"))
+        if follow_methods is not None:
+            if "blogger-followers" not in follow_methods:
+                follower_sources = []
+            if "blogger-following" not in follow_methods:
+                following_sources = []
+            if "blogger" not in follow_methods:
+                specific_enabled = False
         enabled = self._enabled(self._configuration.get("follow-percentage"))
         budget = self._configuration.get("follow-limit") or 1
-        daily = remaining_daily_follows(
-            context.session.account_directory,
-            self._configuration.get("total-follows-limit"),
-        )
+        daily = DailyLimitResolver(context.session.account_directory).capacity(
+            "follow", self._configuration.get("total-follows-limit")
+        ).remaining
         hourly = self._integer_limit(
             self._runtime_settings.get("maximum_follows_per_hour"),
             default=100_000,
@@ -794,6 +1046,20 @@ class _FollowModuleProvider:
                     _AllowVisibleCandidates(),
                     _UnusedBiographyReader(),
                     discovery_settings,
+                    source_label=(
+                        "Follow User's Following"
+                        if following
+                        else "Follow User's Followers"
+                    ),
+                    source_path=(
+                        context.session.account_directory
+                        / "Lists"
+                        / (
+                            "follow_sources_following.txt"
+                            if following
+                            else "follow_sources_followers.txt"
+                        )
+                    ),
                 )
                 for sources, following in (
                     (follower_sources, False),
@@ -933,6 +1199,12 @@ class _NativeFollowExecutor:
         self._profile_persistence = profile_persistence
 
     def execute(self, context, module, budget) -> ModuleExecutionResult:
+        if getattr(module, "module", None) is InteractionModule.DM:
+            context.logger.info("Executing DMModule")
+            return module.execute(context, budget)
+        if getattr(module, "module", None) is InteractionModule.LIKE:
+            context.logger.info("Executing LikeModule")
+            return module.execute(context, budget)
         if (
             getattr(module, "module", InteractionModule.FOLLOW)
             is InteractionModule.UNFOLLOW
@@ -967,10 +1239,30 @@ class _NativeFollowExecutor:
         context.logger.info(
             "Follow execution started", username=domain.candidate.username
         )
-        android_result = self._android.execute_follow(context)
+        android_result = self._android.execute_follow(
+            context,
+            continuation=(
+                "search"
+                if domain.candidate.provider_type
+                is CandidateProviderType.SPECIFIC_ACCOUNTS
+                else "followers"
+            ),
+        )
         context.logger.info(
             "AndroidFollowProvider completed", status=android_result.status
         )
+        if (
+            context.cancellation_checkpoint("Follow Android interaction")
+            and android_result.status
+            not in (AndroidFollowStatus.SUCCESS, AndroidFollowStatus.REQUESTED)
+        ):
+            return ModuleExecutionResult(
+                execution_started=True,
+                execution_finished=True,
+                next_module_state=module.state,
+                detail="Follow execution cancelled.",
+                outcome=ModuleExecutionOutcome.SUCCESS,
+            )
         if android_result.status in (
             AndroidFollowStatus.SUCCESS,
             AndroidFollowStatus.REQUESTED,
@@ -997,11 +1289,14 @@ class _NativeFollowExecutor:
                 self._persist_follow(
                     context, domain.candidate, muted=android_result.muted
                 )
+            increment_analytics(context, "followed")
             outcome = module.complete_verified_follow()
         elif android_result.status is AndroidFollowStatus.GHOST_BLOCK_DETECTED:
             outcome = ModuleExecutionOutcome.ACTION_BLOCK
         else:
             outcome = ModuleExecutionOutcome.SUCCESS
+        if android_result.navigation_failed:
+            outcome = ModuleExecutionOutcome.NAVIGATION_FAILED
         if domain.candidate.provider_type is CandidateProviderType.SPECIFIC_ACCOUNTS:
             module.mark_candidate_processed(context, domain.candidate)
         return ModuleExecutionResult(
@@ -1011,6 +1306,10 @@ class _NativeFollowExecutor:
             detail=android_result.detail,
             outcome=outcome,
             module_result=android_result,
+            verified_successes=int(
+                android_result.status
+                in (AndroidFollowStatus.SUCCESS, AndroidFollowStatus.REQUESTED)
+            ),
         )
 
     @staticmethod
@@ -1091,11 +1390,38 @@ class NativeAccountRuntime:
         self.state = UiSessionState.IDLE
         self._stop_event = threading.Event()
         self._session_id = uuid4()
+        configuration = self._mapping(self.account.config_path)
+        self._runtime_logger = PythonRuntimeLogger(
+            account_directory=self.account.config_path.parent,
+            account_username=self.account.username,
+            phone_id=self.account.device_id,
+            session_id=self._session_id,
+            developer_mode=bool(configuration.get("debug", False)),
+        )
+        self._notification_detector: ZeroInteractionsDetector | None = None
+        try:
+            metadata = self._mapping(self.account.config_path.parent / "account.json")
+            self._notification_detector = ZeroInteractionsDetector(
+                NotificationService(self.workspace)
+            )
+            self._notification_detector.register_account(
+                account_directory=self.account.config_path.parent,
+                username=self.account.username,
+                device=self.account.device_id,
+                tag=str(metadata.get("tag") or ""),
+            )
+        except Exception as error:  # noqa: BLE001 - notification isolation boundary
+            self._runtime_logger.warning(
+                "Notification lifecycle initialization failed", detail=str(error)
+            )
         self._controller = controller or self._compose()
 
     def start(self, state_changed) -> None:
         self.state = UiSessionState.STARTING
         state_changed(self.state)
+        runtime_logger = getattr(self, "_runtime_logger", None)
+        if runtime_logger is not None:
+            runtime_logger.session_started()
         logger.info("Starting Native Runtime for %s", self.account.username)
         context = SessionContext(
             self._session_id,
@@ -1111,6 +1437,11 @@ class NativeAccountRuntime:
                 raise RuntimeError(
                     result.startup_result.failure_reason or "Native startup failed."
                 )
+            runtime_context = getattr(result, "context", None)
+            if isinstance(runtime_context, RuntimeContext):
+                self._record_notification_lifecycle(runtime_context)
+            if self._stop_event.is_set():
+                self._runtime_logger.info("Session stopping")
             self.state = UiSessionState.STOPPED
             state_changed(self.state)
         except Exception:
@@ -1118,11 +1449,49 @@ class NativeAccountRuntime:
             state_changed(self.state)
             raise
         finally:
+            if runtime_logger is not None:
+                runtime_logger.session_finished(self.state.value)
+                if self._stop_event.is_set():
+                    runtime_logger.info("Session stopped")
             writer = getattr(self, "_global_profile_writer", None)
             if writer is not None:
-                writer.close()
+                try:
+                    writer.close()
+                except GlobalProfileWriterError:
+                    # The worker already emitted complete operation diagnostics.
+                    # Global aggregation is secondary; a verified interaction and
+                    # its account runtime commit remain authoritative.
+                    pass
+                except Exception as error:  # noqa: BLE001 - shutdown isolation
+                    self._runtime_logger.error(
+                        "Global profile writer shutdown failed",
+                        account=self.account.username,
+                        operation="Close global profile writer",
+                        profile="<none>",
+                        database=str(writer.path),
+                        exception=f"{type(error).__name__}: {error}",
+                    )
+
+    def _record_notification_lifecycle(self, context: RuntimeContext) -> None:
+        """Reconcile notifications without allowing them to alter runtime truth."""
+        if self._notification_detector is None:
+            return
+        try:
+            metadata = self._mapping(self.account.config_path.parent / "account.json")
+            self._notification_detector.record_completed_session(
+                account_directory=self.account.config_path.parent,
+                username=self.account.username,
+                device=self.account.device_id,
+                tag=str(metadata.get("tag") or ""),
+                verified_interactions=context.verified_interactions,
+            )
+        except Exception as error:  # noqa: BLE001 - notification isolation boundary
+            context.logger.warning(
+                "Notification lifecycle update failed", detail=str(error)
+            )
 
     def request_stop(self, state_changed) -> None:
+        self._runtime_logger.info("Stop requested")
         self.state = UiSessionState.STOPPING
         state_changed(self.state)
         self._stop_event.set()
@@ -1140,9 +1509,18 @@ class NativeAccountRuntime:
             runtime_settings.get("wait_after_launching_instagram") or 0
         )
         runtime_settings.setdefault("follower_synchronization_limit", 200)
-        runtime_logger = PythonRuntimeLogger()
-        self._global_profile_writer = GlobalDatabaseWriter(self.workspace)
-        persistence = _ProfilePersistence(self._global_profile_writer)
+        runtime_logger = self._runtime_logger
+        ignore_service = IgnoreService.load(self.account.config_path.parent)
+        self._global_profile_writer = GlobalDatabaseWriter(
+            self.workspace,
+            account=self.account.username,
+            diagnostic_logger=runtime_logger,
+        )
+        persistence = _ProfilePersistence(
+            self._global_profile_writer,
+            account=self.account.username,
+            diagnostic_logger=runtime_logger,
+        )
         extensions = account_metadata.get("runtime_extensions")
         follow_extensions = (
             extensions.get("follow") if isinstance(extensions, dict) else {}
@@ -1150,9 +1528,32 @@ class NativeAccountRuntime:
         unfollow_extensions = (
             extensions.get("unfollow") if isinstance(extensions, dict) else {}
         )
+        dm_extensions = extensions.get("dm") if isinstance(extensions, dict) else {}
+        source_lists = SpecificListsService(self.account.config_path.parent)
+        source_lists.initialize()
+        configuration.update(source_lists.source_values())
+        if isinstance(dm_extensions, dict):
+            configuration["igbot-dm-method"] = str(
+                dm_extensions.get("method") or "new-followers"
+            )
+            configuration["igbot-dm-budget"] = str(
+                dm_extensions.get("budget") or "1"
+            )
+            configuration["igbot-dm-action-delay"] = str(
+                dm_extensions.get("action_delay") or "0"
+            )
         if isinstance(follow_extensions, dict):
+            if "methods" in follow_extensions:
+                configuration["igbot-follow-methods"] = list(
+                    follow_extensions.get("methods") or []
+                )
             runtime_settings["only_active_stories"] = bool(
                 follow_extensions.get("only_active_stories")
+            )
+        like_extensions = extensions.get("like") if isinstance(extensions, dict) else {}
+        if isinstance(like_extensions, dict) and "methods" in like_extensions:
+            configuration["igbot-like-methods"] = list(
+                like_extensions.get("methods") or []
             )
         android = AndroidFollowProvider(
             AndroidContactScraper(),
@@ -1210,6 +1611,10 @@ class NativeAccountRuntime:
             scheduler_loop,
             runtime_logger,
             runtime_settings=runtime_settings,
+            ignore_service=ignore_service,
+            analytics=AnalyticsService(self.account.config_path.parent),
+            cancellation_requested=self._stop_event.is_set,
+            cancellation_wait=self._stop_event.wait,
         )
 
     @staticmethod

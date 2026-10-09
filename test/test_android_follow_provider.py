@@ -357,6 +357,76 @@ def test_source_search_never_opens_non_exact_result(tmp_path):
     assert (210, 10) not in device.clicks
 
 
+def test_bounded_specific_search_finds_exact_username_after_one_accounts_scroll(
+    tmp_path,
+):
+    accounts = hierarchy(
+        search_user_row("ranked_first"),
+        node(
+            resource_id=instagram_id("recycler_view"),
+            bounds="[0,300][1080,1800]",
+            scrollable=True,
+        ),
+    )
+    scrolled = hierarchy(
+        search_user_row("exact_user", "[0,800][1080,1000]"),
+        node(
+            resource_id=instagram_id("recycler_view"),
+            bounds="[0,300][1080,1800]",
+            scrollable=True,
+        ),
+    )
+    device = FakeDevice(
+        (
+            hierarchy(node(resource_id=instagram_id("search_tab"))),
+            hierarchy(node(resource_id=instagram_id("action_bar_search_edit_text"))),
+            hierarchy(node(text="Search")),
+            hierarchy(node(text="Accounts", resource_id=instagram_id("accounts_tab"))),
+            accounts,
+            scrolled,
+            hierarchy(
+                node(text="exact_user", resource_id=instagram_id("action_bar_title"))
+            ),
+        )
+    )
+
+    result = make_provider(device, search_timeout=1).locate_source(
+        make_context(tmp_path), "exact_user", bounded_accounts_scroll=True
+    )
+
+    assert result.status is AndroidFollowStatus.SUCCESS
+    assert len(device.swipes) == 1
+    assert device.clicks[-1] == (540, 900)
+
+
+def test_bounded_specific_search_stops_after_single_accounts_scroll(tmp_path):
+    results = hierarchy(
+        search_user_row("not_the_user"),
+        node(
+            resource_id=instagram_id("recycler_view"),
+            bounds="[0,300][1080,1800]",
+            scrollable=True,
+        ),
+    )
+    device = FakeDevice(
+        (
+            hierarchy(node(resource_id=instagram_id("search_tab"))),
+            hierarchy(node(resource_id=instagram_id("action_bar_search_edit_text"))),
+            hierarchy(node(text="Search")),
+            hierarchy(node(text="Accounts", resource_id=instagram_id("accounts_tab"))),
+            results,
+            results,
+        )
+    )
+
+    result = make_provider(device, search_timeout=1).locate_source(
+        make_context(tmp_path), "missing_user", bounded_accounts_scroll=True
+    )
+
+    assert result.status is AndroidFollowStatus.SOURCE_NOT_FOUND
+    assert len(device.swipes) == 1
+
+
 def test_search_ignores_keyword_suggestion_and_clicks_exact_account_row(tmp_path):
     results = hierarchy(
         node(
@@ -592,6 +662,33 @@ def test_followers_navigation_actions_preserve_existing_list(tmp_path):
     assert device.keys == [("az", True)]
     assert device.swipes == [((150, 699, 150, 101), {"duration": 0.4})]
     assert device.presses == ["back"]
+
+
+def test_followers_list_supports_overlapping_viewports(tmp_path):
+    scrollable = hierarchy(
+        node(
+            resource_id=instagram_id("follow_list_container"),
+            bounds="[0,100][300,700]",
+            scrollable=True,
+        )
+    )
+    device = FakeDevice((scrollable,))
+    provider = make_provider(device)
+
+    context = make_context(tmp_path)
+    result = provider.scroll_followers(context, overlapping=True)
+
+    assert result.status is AndroidFollowStatus.SUCCESS
+    assert device.swipes == [((150, 699, 150, 309), {"duration": 0.4})]
+    assert (
+        "debug",
+        "[Followers] Overlapping scroll.",
+        {
+            "recycler_height": 600,
+            "swipe_distance": 390,
+            "overlap_percent": 35,
+        },
+    ) in context.logger.messages
 
 
 def test_following_list_scrolls_with_overlapping_viewports(tmp_path):
@@ -1144,7 +1241,8 @@ def test_existing_follow_states_are_never_tapped(tmp_path, state, expected):
 
     assert result.status is expected
     assert device.clicks == []
-    assert device.presses == ["back"]
+    assert device.presses == ["back", "back"]
+    assert result.navigation_failed is True
 
 
 @pytest.mark.parametrize(
@@ -1183,7 +1281,8 @@ def test_follow_tap_verifies_result_after_configured_delay(
 
     assert result.status is expected
     assert device.clicks == [(50, 50)]
-    assert device.presses == ["back"]
+    assert device.presses == ["back", "back"]
+    assert result.navigation_failed is True
     assert sum(sleeps) == pytest.approx(3)
 
 
@@ -1291,7 +1390,8 @@ def test_verified_follow_dynamically_enables_mute_switches_and_returns(tmp_path)
     messages = [message for _level, message, _fields in context.logger.messages]
     assert "[Mute] Mute settings opened." in messages
     assert "[Mute] Mute switches ready." in messages
-    assert messages[-1] == "[Mute] Mute completed."
+    assert "[Mute] Mute completed." in messages
+    assert messages[-1] == "[Follow] Navigation handoff verified."
 
 
 def test_follow_success_does_not_report_muted_when_mute_menu_fails(tmp_path):
@@ -1349,7 +1449,7 @@ def test_mute_never_runs_without_verified_following(tmp_path, verified_state):
 
     messages = [message for _level, message, _fields in context.logger.messages]
     assert not any(message.startswith("[Mute]") for message in messages)
-    assert device.presses == ["back"]
+    assert device.presses == ["back", "back"]
 
 
 def test_all_required_android_result_states_are_available():

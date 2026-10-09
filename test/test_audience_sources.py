@@ -2,7 +2,7 @@ import yaml
 from PySide6.QtCore import QMimeData
 from PySide6.QtGui import QKeySequence, QTextCursor
 from PySide6.QtTest import QSignalSpy
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QPushButton
 
 from IGBot.core.device import AssignedAccount
 from IGBot.services.account_assignment_service import AccountAssignmentService
@@ -84,6 +84,74 @@ def test_inventory_initializes_specific_users_files_for_existing_account(tmp_pat
     assert {path.name for path in lists.directory.iterdir()} == set(lists.FILENAMES)
 
 
+def test_legacy_sources_migrate_once_into_independent_module_files(tmp_path):
+    service, account = configuration(tmp_path)
+
+    loaded = service.load_configuration(account.config_path)
+    lists = SpecificListsService(account.config_path.parent)
+
+    assert lists.load("follow_sources_followers.txt") == [
+        "source.one",
+        "source_two",
+    ]
+    assert lists.load("follow_sources_following.txt") == ["following.source"]
+    for filename in (
+        "like_sources_followers.txt",
+        "story_sources_followers.txt",
+        "comment_sources_followers.txt",
+    ):
+        assert lists.load(filename) == ["source.one", "source_two"]
+    assert loaded["igbot-follow-sources-followers"] == [
+        "source.one",
+        "source_two",
+    ]
+    assert loaded["igbot-like-sources-followers"] == [
+        "source.one",
+        "source_two",
+    ]
+
+    lists.save("like_sources_followers.txt", ["like.only"])
+    service.load_configuration(account.config_path)
+
+    assert lists.load("like_sources_followers.txt") == ["like.only"]
+    assert lists.load("follow_sources_followers.txt") == [
+        "source.one",
+        "source_two",
+    ]
+
+
+def test_account_module_source_editors_are_independent(tmp_path):
+    QApplication.instance() or QApplication([])
+    service, account = configuration(tmp_path)
+    page = AccountPage()
+    page.set_account(account)
+    page.set_configuration(service.load_configuration(account.config_path))
+
+    follow = page.follow_page.sources.rows["blogger-followers"]
+    follow.set_entries(["follow.only"])
+    page.follow_page.sources._changed()
+
+    assert follow.entries() == ["follow.only"]
+    assert page.like_page.sources.rows["blogger-followers"].entries() == [
+        "source.one",
+        "source_two",
+    ]
+    assert page.story_page.sources.rows["blogger-followers"].entries() == [
+        "source.one",
+        "source_two",
+    ]
+    assert page.comment_page.sources.rows["blogger-followers"].entries() == [
+        "source.one",
+        "source_two",
+    ]
+    lists = SpecificListsService(account.config_path.parent)
+    assert lists.load("follow_sources_followers.txt") == ["follow.only"]
+    assert lists.load("like_sources_followers.txt") == [
+        "source.one",
+        "source_two",
+    ]
+
+
 def test_follow_specific_users_popup_loads_and_saves_account_file(tmp_path, mocker):
     account_directory = tmp_path / "Accounts" / "account"
     account_directory.mkdir(parents=True)
@@ -104,7 +172,7 @@ def test_follow_specific_users_popup_loads_and_saves_account_file(tmp_path, mock
 
     page._edit_source("blogger")
 
-    assert entries.call_count == 1
+    assert entries.called
     assert lists.load("followspecific.txt") == ["saved.one", "saved.two"]
     assert page.rows["blogger"].entries() == ["saved.one", "saved.two"]
 
@@ -200,8 +268,36 @@ def test_target_editor_supports_copy_paste_and_save_shortcut():
     assert dialog.result() == QDialog.Accepted
 
 
+def test_specific_users_editor_matches_plain_ignore_list_editor():
+    QApplication.instance() or QApplication([])
+    dialog = TargetEditorDialog(
+        "Follow Specific Users",
+        [" First.User ", "first.user", "SECOND"],
+        specific_users=True,
+    )
+
+    assert dialog.count.text() == "2 accounts"
+    assert dialog.guidance.text() == (
+        "One username per line.\n"
+        "Usernames are automatically normalized to lowercase, trimmed, and "
+        "deduplicated when saving."
+    )
+    assert [
+        button.text()
+        for button in dialog.findChildren(QPushButton)
+        if button.isVisibleTo(dialog)
+    ] == ["Cancel", "Save"]
+
+    dialog.editor.setPlainText(" New.User \nnew.user\n Another_User\n\n")
+    dialog._validate_and_accept()
+
+    assert dialog.result() == QDialog.Accepted
+    assert dialog.editor.toPlainText() == "new.user\nanother_user"
+
+
 def test_audience_source_validation_rejects_enabled_empty_source():
-    page = AccountPage().follow_page.sources
+    account_page = AccountPage()
+    page = account_page.follow_page.sources
     page.set_configuration({})
     page.rows["blogger-followers"].enabled.setChecked(True)
 
@@ -211,6 +307,85 @@ def test_audience_source_validation_rejects_enabled_empty_source():
         assert "at least one target" in str(error)
     else:
         raise AssertionError("An enabled empty source must be rejected.")
+
+
+def test_account_save_ignores_disabled_like_provider_requirements():
+    page = AccountPage()
+    page.set_configuration({})
+    page.follow_page.enabled.setChecked(True)
+    page.follow_page.sources.rows["blogger-followers"].set_entries(["follow.source"])
+    page.follow_page.sources.rows["blogger-followers"].enabled.setChecked(True)
+    page.like_page.enabled.setChecked(False)
+    page.like_page.sources.rows["blogger-followers"].enabled.setChecked(True)
+
+    values = page.configuration_values()
+
+    assert values["follow-percentage"] != "0"
+    assert values.get("likes-percentage", "0") == "0"
+
+
+def test_enabled_like_without_source_provider_does_not_require_targets():
+    page = AccountPage()
+    page.set_configuration({})
+    page.like_page.enabled.setChecked(True)
+
+    values = page.configuration_values()
+
+    assert values["likes-percentage"] != "0"
+    assert values["igbot-like-methods"] == []
+
+
+def test_enabled_like_source_followers_requires_its_own_targets():
+    page = AccountPage()
+    page.set_configuration({})
+    page.like_page.enabled.setChecked(True)
+    page.like_page.sources.rows["blogger-followers"].enabled.setChecked(True)
+
+    try:
+        page.configuration_values()
+    except ValueError as error:
+        assert str(error) == "Add at least one target for Like Source Followers."
+    else:
+        raise AssertionError("An enabled Like source must require Like targets.")
+
+
+def test_enabled_follow_source_followers_requires_only_follow_targets():
+    page = AccountPage()
+    page.set_configuration({})
+    page.follow_page.enabled.setChecked(True)
+    page.follow_page.sources.rows["blogger-followers"].enabled.setChecked(True)
+    page.like_page.sources.rows["blogger-followers"].set_entries(["like.source"])
+    page.like_page.sources.rows["blogger-followers"].enabled.setChecked(True)
+
+    try:
+        page.configuration_values()
+    except ValueError as error:
+        assert str(error) == "Add at least one target for Follow User's Followers."
+    else:
+        raise AssertionError("An enabled Follow source must require Follow targets.")
+
+
+def test_disabled_unfollow_specific_provider_does_not_require_targets():
+    page = AccountPage()
+    page.set_configuration({})
+    page.unfollow_page.specific_users.enabled.setChecked(True)
+    page.unfollow_page.enabled.setChecked(False)
+
+    page.configuration_values()
+
+
+def test_enabled_dm_specific_provider_requires_targets():
+    page = AccountPage()
+    page.set_configuration({})
+    page.dm_page.enabled.setChecked(True)
+    page.dm_page.specific_accounts.enabled.setChecked(True)
+
+    try:
+        page.configuration_values()
+    except ValueError as error:
+        assert str(error) == "Add at least one target for Send DMs to Specific Accounts."
+    else:
+        raise AssertionError("An enabled Specific DM provider must require targets.")
 
 
 def test_module_source_label_launches_shared_target_editor_request():
@@ -314,7 +489,8 @@ def test_configuration_sections_are_permanently_expanded():
 
 
 def test_follow_schedule_is_collapsed_and_weekdays_are_vertical():
-    page = AccountPage().follow_page
+    account_page = AccountPage()
+    page = account_page.follow_page
 
     assert page.schedule_section.toggle.isCheckable()
     assert not page.schedule_section.toggle.isChecked()

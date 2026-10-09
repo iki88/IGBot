@@ -39,14 +39,14 @@ class TemplateEditorDialog(QDialog):
         subtitle.setObjectName("dialogSubtitle")
         self.tabs = QTabWidget(self)
         self.tabs.setObjectName("accountTabs")
-        self.follow = FollowConfigurationPage(self.tabs, include_sources=False)
-        self.unfollow = UnfollowConfigurationPage(self.tabs, include_file_targets=False)
+        self.follow = FollowConfigurationPage(self.tabs, include_sources=True)
+        self.unfollow = UnfollowConfigurationPage(self.tabs, include_file_targets=True)
         self.like = LikeConfigurationPage(
-            self.tabs, include_file_targets=False, include_sources=False
+            self.tabs, include_file_targets=False, include_sources=True
         )
         self.story = StoryConfigurationPage(self.tabs, include_sources=False)
         self.dm = DMConfigurationPage(
-            self.tabs, include_messages=False, include_sources=False
+            self.tabs, include_messages=False, include_sources=True
         )
         self.comment = CommentConfigurationPage(
             self.tabs, include_comments=False, include_sources=False
@@ -61,6 +61,7 @@ class TemplateEditorDialog(QDialog):
         ):
             page.set_configuration(configuration)
             self.tabs.addTab(page, label)
+        self._configure_method_only_controls(configuration)
 
         self.error = QLabel(self)
         self.error.setObjectName("dialogError")
@@ -88,12 +89,43 @@ class TemplateEditorDialog(QDialog):
 
     def values(self) -> dict:
         values = self.follow.values()
+        values.update(self.follow.runtime_extension_values())
         values.update(self.unfollow.values())
+        values.update(self.unfollow.runtime_extension_values())
         values.update(self.like.values())
+        values.update(self.like.runtime_extension_values())
         values.update(self.story.values())
         values.update(self.dm.values())
+        values.update(self.dm.runtime_extension_values())
         values.update(self.comment.values())
+        values["igbot-template-follow-methods"] = [
+            key
+            for key in ("blogger-followers", "blogger-following", "blogger")
+            if self.follow.sources.rows[key].enabled.isChecked()
+        ]
+        values["igbot-template-like-methods"] = [
+            key
+            for key in ("blogger-followers", "blogger")
+            if self.like.sources.rows[key].enabled.isChecked()
+        ]
         return values
+
+    def _configure_method_only_controls(self, configuration: dict) -> None:
+        follow_methods = set(configuration.get("igbot-template-follow-methods") or ())
+        like_methods = set(configuration.get("igbot-template-like-methods") or ())
+        for key, row in self.follow.sources.rows.items():
+            row.enabled.setChecked(key in follow_methods)
+            row.name.setEnabled(False)
+            row.count.hide()
+        for key, row in self.like.sources.rows.items():
+            if row.isVisibleTo(self.like.sources):
+                row.enabled.setChecked(key in like_methods)
+            row.name.setEnabled(False)
+            row.count.hide()
+        self.unfollow.specific_users.name.setEnabled(False)
+        self.unfollow.specific_users.count.hide()
+        self.dm.specific_accounts.name.setEnabled(False)
+        self.dm.specific_accounts.count.hide()
 
     def _request_save(self) -> None:
         try:

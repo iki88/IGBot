@@ -55,7 +55,12 @@ class StoryConfigurationPage(QScrollArea):
         overview.body_layout.addLayout(row)
         layout.addWidget(overview)
 
-        self.sources = AudienceSourcesPage(container)
+        self.sources = AudienceSourcesPage(
+            container,
+            source_list_filenames={
+                "blogger-followers": "story_sources_followers.txt"
+            },
+        )
         self.sources.setVisible(include_sources)
         layout.addWidget(self.sources)
 

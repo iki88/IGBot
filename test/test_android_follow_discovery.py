@@ -4,7 +4,11 @@ from uuid import uuid4
 
 from IGBot.runtime import RuntimeContext, SessionContext
 from IGBot.runtime.candidates import DiscoveryStatus, FollowersDiscoverySettings
-from IGBot.runtime.follow import AndroidFollowProvider
+from IGBot.runtime.follow import (
+    AndroidFollowProvider,
+    AndroidFollowResult,
+    AndroidFollowStatus,
+)
 from IGBot.runtime.follow.fast_filters import FollowFastFilters
 from IGBot.runtime.native_integration import AndroidFollowersDiscovery
 
@@ -51,15 +55,47 @@ def row(username, button):
     </node>"""
 
 
-def discovery(tmp_path, rows, *, follow_back_enabled=False):
+def discovery(
+    tmp_path,
+    rows,
+    *,
+    follow_back_enabled=False,
+    include_followed_candidates=False,
+):
     device = Device(f"<hierarchy>{''.join(rows)}</hierarchy>")
     android = AndroidFollowProvider(
         object(), device_factory=lambda _serial: device, navigation_wait=0
     )
-    return AndroidFollowersDiscovery(android, follow_back_enabled=follow_back_enabled)
+    return AndroidFollowersDiscovery(
+        android,
+        follow_back_enabled=follow_back_enabled,
+        include_followed_candidates=include_followed_candidates,
+    )
 
 
 SETTINGS = FollowersDiscoverySettings(scrolling_timeout_seconds=30)
+
+
+def test_shared_discovery_always_requests_overlapping_scroll(tmp_path):
+    runtime_context = context(tmp_path)
+    provider = discovery(tmp_path, [])
+    provider._strategy_selected = True
+    scroll_modes = []
+
+    def fail_after_recording(_context, *, overlapping=False):
+        scroll_modes.append(overlapping)
+        return AndroidFollowResult(AndroidFollowStatus.FOLLOW_FAILED, "stop")
+
+    provider._android.scroll_followers = fail_after_recording
+
+    result = provider.next_follower(
+        runtime_context,
+        "source",
+        FollowersDiscoverySettings(scrolling_timeout_seconds=10**12),
+    )
+
+    assert result.status is DiscoveryStatus.SCROLL_BLOCK
+    assert scroll_modes == [True]
 
 
 def test_message_rows_are_skipped_before_opening_a_profile(tmp_path):
@@ -77,6 +113,19 @@ def test_message_rows_are_skipped_before_opening_a_profile(tmp_path):
         "[Candidate] Skipping already-followed account",
         {"button": "Message", "username": "already_followed"},
     ) in runtime_context.logger.messages
+
+
+def test_like_discovery_reuses_rows_without_follow_state_filtering(tmp_path):
+    provider = discovery(
+        tmp_path,
+        [row("already_followed", "Message")],
+        include_followed_candidates=True,
+    )
+
+    result = provider.next_follower(context(tmp_path), "source", SETTINGS)
+
+    assert result.status is DiscoveryStatus.ACCOUNT_FOUND
+    assert result.observation.username == "already_followed"
 
 
 def test_follow_back_row_respects_follow_setting(tmp_path):

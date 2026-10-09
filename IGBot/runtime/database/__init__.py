@@ -1,5 +1,12 @@
 """Per-account Runtime Database schema and repository boundary."""
 
+from IGBot.runtime.database.daily_limits import (
+    DailyLimitCapacity,
+    DailyLimitRecord,
+    DailyLimitResolver,
+    DailyLimitsRepository,
+    ModuleUsageRepository,
+)
 from IGBot.runtime.database.database import RuntimeDatabase
 from IGBot.runtime.database.models import (
     CommentRecord,
@@ -28,10 +35,15 @@ __all__ = [
     "CommentRepository",
     "DMRecord",
     "DMRepository",
+    "DailyLimitCapacity",
+    "DailyLimitRecord",
+    "DailyLimitResolver",
+    "DailyLimitsRepository",
     "FollowRecord",
     "FollowRepository",
     "LikeRecord",
     "LikeRepository",
+    "ModuleUsageRepository",
     "RuntimeDatabase",
     "SpecificInteractionRepository",
     "SpecificProgress",

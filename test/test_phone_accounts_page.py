@@ -1,10 +1,15 @@
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from IGBot.core.device import AssignedAccount, DeviceRecord
+from IGBot.runtime.analytics import AnalyticsDatabase
+from IGBot.services.account_metadata_service import AccountMetadataService
+from IGBot.ui.pages.account_statistics_page import AccountStatisticsPage
 from IGBot.ui.pages.phone_accounts_page import PhoneAccountsPage
+from IGBot.ui.widgets.trend_indicator_delegate import TrendIndicatorDelegate
 
 
 def test_phone_accounts_page_shows_clean_empty_state():
@@ -92,15 +97,21 @@ def test_active_account_options_include_transfer_archive_and_open_folder():
         config_path=Path("accounts/real_account/config.yml"),
     )
     page.set_phone(DeviceRecord("phone-a", "Rack One", True), [account])
+    ignore_requests = []
+    page.ignore_list_requested.connect(ignore_requests.append)
     menu = page.build_account_options(account)
 
     assert [action.text() for action in menu.actions()] == [
         "Transfer Account",
         "Archive Account",
         "Apply Template...",
+        "Ignored Accounts List...",
         "Open Account Folder",
+        "Enable Debug Logging",
     ]
     assert all(action.isEnabled() for action in menu.actions())
+    menu.actions()[3].trigger()
+    assert ignore_requests == [account]
     assert application is not None
 
 
@@ -126,20 +137,53 @@ def test_archived_account_options_include_restore_open_folder_and_delete():
 
     assert [action.text() for action in actions] == [
         "Restore Account",
+        "Ignored Accounts List...",
         "Open Account Folder",
+        "Enable Debug Logging",
         "Delete Account",
     ]
     assert actions[0].isEnabled()
     assert actions[1].isEnabled()
     assert actions[2].isEnabled()
+    assert actions[3].isEnabled()
+    assert actions[4].isEnabled()
 
     actions[0].trigger()
-    actions[1].trigger()
     actions[2].trigger()
+    actions[4].trigger()
 
     assert restore_requests == ["archived_account"]
     assert opened_folders == [str(Path("accounts/archived_account"))]
     assert delete_requests == ["archived_account"]
+    assert application is not None
+
+
+def test_account_options_reflect_and_emit_existing_debug_setting(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    directory = tmp_path / "accounts" / "real_account"
+    directory.mkdir(parents=True)
+    config_path = directory / "config.yml"
+    config_path.write_text(
+        "username: real_account\ndebug: true\n", encoding="utf-8"
+    )
+    account = AssignedAccount(
+        "real_account", "phone-a", "com.instagram.android", config_path
+    )
+    page = PhoneAccountsPage()
+    requests = []
+    page.debug_logging_requested.connect(
+        lambda selected, enabled: requests.append((selected, enabled))
+    )
+
+    menu = page.build_account_options(account)
+    action = next(
+        item for item in menu.actions() if item.text() == "Enable Debug Logging"
+    )
+    assert action.isChecked()
+
+    action.trigger()
+
+    assert requests == [(account, False)]
     assert application is not None
 
 
@@ -185,7 +229,7 @@ def test_account_actions_are_shared_and_route_existing_workflows():
         "edit",
     ]
     assert [action.tooltip for action in page.actions_delegate.ACTIONS] == [
-        "Analytics",
+        "Statistics",
         "Edit Account",
     ]
     assert [action.name for action in page.actions_delegate.visible_actions()] == [
@@ -225,8 +269,75 @@ def test_global_accounts_workspace_supports_username_search():
     assert [action.name for action in page.actions_delegate.visible_actions()] == [
         "analytics",
         "edit",
+        "archive",
     ]
-    assert page.table.columnWidth(page.model.ACTIONS) == 78
+    assert page.table.columnWidth(page.model.ACTIONS) == 112
+    assert application is not None
+
+
+def test_accounts_and_phone_accounts_display_configured_tag(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    directory = tmp_path / "accounts" / "tagged"
+    directory.mkdir(parents=True)
+    config_path = directory / "config.yml"
+    config_path.write_text("username: tagged\n", encoding="utf-8")
+    AccountMetadataService().save(
+        directory, "tagged", "secret", "phone-a", tag="Warmup"
+    )
+    account = AssignedAccount("tagged", "phone-a", "com.instagram.android", config_path)
+    page = PhoneAccountsPage()
+
+    page.set_all_accounts([account])
+    assert page.model.index(0, page.model.TAG).data() == "Warmup"
+    page.set_phone(DeviceRecord("phone-a", "Rack One", True), [account])
+    assert page.model.index(0, page.model.TAG).data() == "Warmup"
+    assert page.model.HEADERS[page.model.USERNAME + 1] == "Tag"
+    assert application is not None
+
+
+def test_statistics_action_always_routes_account():
+    application = QApplication.instance() or QApplication([])
+    page = PhoneAccountsPage()
+    account = AssignedAccount(
+        "real_account",
+        "phone-a",
+        "com.instagram.android",
+        Path("accounts/real_account/config.yml"),
+    )
+    requested = []
+    page.statistics_requested.connect(requested.append)
+
+    page._handle_account_action("analytics", account)
+
+    assert requested == [account]
+    assert page.actions_delegate._is_enabled("analytics", account)
+    assert application is not None
+
+
+def test_statistics_dialog_handles_missing_and_existing_analytics(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    directory = tmp_path / "accounts" / "statistics"
+    directory.mkdir(parents=True)
+    config_path = directory / "config.yml"
+    config_path.write_text("username: statistics\n", encoding="utf-8")
+    account = AssignedAccount(
+        "statistics", "phone-a", "com.instagram.android", config_path
+    )
+
+    empty = AccountStatisticsPage()
+    empty.set_account(account)
+    assert empty.empty.isVisibleTo(empty)
+    assert not empty.table.isVisibleTo(empty)
+    assert not (directory / "analytics.db").exists()
+
+    with AnalyticsDatabase(directory) as database:
+        database.update_snapshot("statistics", posts=4, followers=20, following=8)
+    populated = AccountStatisticsPage()
+    populated.set_account(account)
+    assert populated.table.objectName() == "statisticsTable"
+    assert populated.table.rowCount() == 1
+    assert populated.table.item(0, 0).text() == datetime.now(timezone.utc).date().isoformat()
+    assert populated.table.item(0, 3).text() == "20"
     assert application is not None
 
 
@@ -245,8 +356,10 @@ def test_phone_account_table_uses_final_dense_operator_columns():
         "Start Hour",
         "End Hour",
         "Username",
+        "Tag",
         "Followers",
         "Following",
+        "Posts",
         "Followed",
         "Unfollowed",
         "Story",
@@ -266,6 +379,55 @@ def test_phone_account_table_uses_final_dense_operator_columns():
         == Qt.AlignCenter
     )
     assert application is not None
+
+
+def test_phone_accounts_reads_today_analytics_and_computes_snapshot_delta(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    directory = tmp_path / "accounts" / "analytic_account"
+    directory.mkdir(parents=True)
+    config_path = directory / "config.yml"
+    config_path.write_text("username: analytic_account\n", encoding="utf-8")
+    account = AssignedAccount(
+        "analytic_account", "phone-a", "com.instagram.android", config_path
+    )
+    with AnalyticsDatabase(directory) as database:
+        previous_day = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+        database._connection.execute(
+            """
+            INSERT INTO daily_summary (
+                date, username, posts, followers, following
+            ) VALUES (?, 'analytic_account', 10, 100, 50)
+            """,
+            (previous_day,),
+        )
+        database.update_snapshot(
+            "analytic_account", posts=11, followers=108, following=47
+        )
+        database.increment("analytic_account", "followed", 2)
+        database.increment("analytic_account", "liked", 3)
+
+    page = PhoneAccountsPage()
+    page.set_all_accounts([account])
+
+    columns = {name: page.model.HEADERS.index(name) for name in page.model.HEADERS}
+    assert page.model.index(0, columns["Followers"]).data() == "108 ▲8"
+    assert page.model.index(0, columns["Following"]).data() == "47 ▼3"
+    assert page.model.index(0, columns["Posts"]).data() == "11 ▲1"
+    assert (
+        page.table.itemDelegateForColumn(columns["Followers"])
+        is page.trend_delegate
+    )
+    assert page.model.index(0, columns["Followed"]).data() == "2"
+    assert page.model.index(0, columns["Like"]).data() == "3"
+    assert application is not None
+
+
+def test_trend_indicator_delegate_separates_only_the_arrow_for_styling():
+    assert TrendIndicatorDelegate.segments("127 ▲10") == ("127 ", "▲", "10")
+    assert TrendIndicatorDelegate.segments("41 ▼8") == ("41 ", "▼", "8")
+    assert TrendIndicatorDelegate.segments("25") is None
+    assert TrendIndicatorDelegate.INCREASE_COLOR.name() == "#22c55e"
+    assert TrendIndicatorDelegate.DECREASE_COLOR.name() == "#ef4444"
 
 
 def test_accounts_overview_displays_saved_timer_values(tmp_path):

@@ -92,7 +92,12 @@ class CommentConfigurationPage(QScrollArea):
         method_section.body_layout.addLayout(method_row)
         layout.addWidget(method_section)
 
-        self.sources = AudienceSourcesPage(container)
+        self.sources = AudienceSourcesPage(
+            container,
+            source_list_filenames={
+                "blogger-followers": "comment_sources_followers.txt"
+            },
+        )
         self.sources.setVisible(include_sources)
         layout.addWidget(self.sources)
 

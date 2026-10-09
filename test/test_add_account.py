@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from PySide6.QtWidgets import QApplication, QLineEdit
 from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.services.account_assignment_service import AccountAssignmentService
 from IGBot.services.device_inventory_service import DeviceInventoryService
+from IGBot.services.specific_lists_service import SpecificListsService
 from IGBot.ui.controllers.device_controller import DeviceController
 from IGBot.ui.widgets.add_account_dialog import AddAccountDialog
 
@@ -59,6 +61,12 @@ def test_add_account_copies_templates_and_assigns_current_phone(tmp_path):
         "dmspecific.txt",
         "commentspecific.txt",
         "unfollowspecific.txt",
+        "ignore.txt",
+        "follow_sources_followers.txt",
+        "follow_sources_following.txt",
+        "like_sources_followers.txt",
+        "story_sources_followers.txt",
+        "comment_sources_followers.txt",
     }
     metadata = json.loads((directory / "account.json").read_text(encoding="utf-8"))
     assert metadata["username"] == "real_account"
@@ -69,6 +77,44 @@ def test_add_account_copies_templates_and_assigns_current_phone(tmp_path):
     restarted = AccountAssignmentService(tmp_path / "accounts")
     restored = restarted.load_configuration(directory / "config.yml")
     assert restored["password"] == "password:value#1"
+
+
+def test_new_account_from_default_template_starts_with_all_modules_disabled(
+    tmp_path,
+):
+    workspace = tmp_path / "workspace"
+    accounts = workspace / "accounts"
+    accounts.mkdir(parents=True)
+    shutil.copytree(
+        Path(__file__).resolve().parents[1] / "config-examples",
+        workspace / "config-examples",
+    )
+    service = DeviceInventoryService(
+        inventory_path=workspace / "data" / "devices.json",
+        account_assignments=AccountAssignmentService(accounts),
+        workspace_root=workspace,
+    )
+    service._save_state(
+        {"devices": [{"serial": "phone-a", "phone_name": "T1"}], "deleted": []}
+    )
+
+    account = service.add_account("new_account", "secret", "phone-a")
+    configuration = service.account_configuration(account)
+
+    assert configuration["follow-percentage"] == 0
+    assert configuration["unfollow"] == 0
+    assert configuration["unfollow-any"] == 0
+    assert configuration["unfollow-non-followers"] == 0
+    assert configuration["unfollow-any-non-followers"] == 0
+    assert configuration["unfollow-any-followers"] == 0
+    assert configuration["unfollow-from-file"] == []
+    assert configuration["likes-percentage"] == 0
+    assert configuration["stories-count"] == 0
+    assert configuration["comment-percentage"] == 0
+    assert configuration["pm-percentage"] == 0
+    lists = account.config_path.parent / "Lists"
+    for filename in SpecificListsService.SOURCE_FILES.values():
+        assert not (lists / filename).read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(

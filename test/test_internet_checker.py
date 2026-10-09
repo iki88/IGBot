@@ -156,6 +156,35 @@ def test_internet_checker_retries_every_sixty_seconds_until_restored(tmp_path):
     ]
 
 
+def test_internet_retry_wait_is_interrupted_by_runtime_stop(tmp_path):
+    stopped = False
+
+    def cancellation_wait(seconds):
+        nonlocal stopped
+        assert seconds == 60
+        stopped = True
+        return True
+
+    context = make_context(tmp_path)
+    context.cancellation_requested = lambda: stopped
+    context.cancellation_wait = cancellation_wait
+    provider = SequenceNetworkProvider((NetworkCheckResult(False),))
+
+    result = InternetChecker(
+        provider,
+        sleeper=lambda _seconds: (_ for _ in ()).throw(
+            AssertionError("interruptible wait must not call the fixed sleeper")
+        ),
+    ).execute(context)
+
+    assert result.status is StartupStageStatus.SKIPPED
+    assert provider.contexts == [context]
+    assert any(
+        message == "Cancellation observed. Stopping after current checkpoint."
+        for _level, message, _fields in context.logger.messages
+    )
+
+
 def test_provider_exception_returns_structured_failure(tmp_path):
     class FailingProvider:
         def check(self, context):

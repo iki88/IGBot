@@ -22,6 +22,7 @@ from IGBot.runtime.follow.models import (
     FollowModuleSettings,
 )
 from IGBot.runtime.hooks import HookEvent, HookEventType, HookManager
+from IGBot.runtime.ignore import log_ignored
 from IGBot.runtime.modules import InteractionModule, ModuleStateMachine
 from IGBot.runtime.scheduler import (
     ExecutionBudget,
@@ -134,7 +135,6 @@ class FollowModule:
         daily_reached, hourly_reached = self.record_verified_follow()
         self._context.logger.info(
             "Follow limit evaluation completed",
-            operation_limit_reached=True,
             hourly_limit_reached=hourly_reached,
             daily_limit_reached=daily_reached,
         )
@@ -215,6 +215,9 @@ class FollowModule:
             candidate = discovered.candidate
             if candidate is None:
                 raise RuntimeError("Candidate provider returned no candidate")
+            if context.ignore_service.is_ignored(candidate.username):
+                log_ignored(context, candidate.username)
+                continue
             if self._cancelled(context, "opening candidate"):
                 return self._cancelled_result()
             profile = self._profile_provider.open_profile(context, candidate)
@@ -247,6 +250,17 @@ class FollowModule:
                         f"Candidate profile could not be opened: {candidate.username}"
                     ),
                 )
+            if context.ignore_service.is_ignored(profile.username):
+                log_ignored(context, profile.username)
+                restored = self._profile_provider.return_to_followers(context)
+                self._mark_specific_processed(context, candidate)
+                if not restored.succeeded:
+                    return self._result(
+                        FollowModuleResultStatus.FILTER_REJECTED,
+                        outcome=ModuleExecutionOutcome.NAVIGATION_FAILED,
+                        detail=restored.detail,
+                    )
+                continue
             context.logger.info(
                 "Candidate processing started", username=candidate.username
             )
@@ -306,6 +320,7 @@ class FollowModule:
                 )
                 return self._result(
                     qualification.status,
+                    outcome=ModuleExecutionOutcome.NAVIGATION_FAILED,
                     detail=restored.detail or qualification.detail,
                 )
             context.logger.info(

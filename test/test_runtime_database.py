@@ -5,6 +5,7 @@ import pytest
 from IGBot.runtime.database import (
     CommentRecord,
     CommentRepository,
+    DailyLimitsRepository,
     DMRecord,
     DMRepository,
     FollowRecord,
@@ -57,6 +58,7 @@ def test_runtime_database_creates_discovery_and_specific_users_tables(tmp_path):
         "specific_dm",
         "specific_comment",
         "specific_progress",
+        "daily_limits",
     }
 
 
@@ -74,6 +76,7 @@ def test_runtime_database_constructs_named_repositories(tmp_path):
         assert isinstance(database.specific_dm, SpecificInteractionRepository)
         assert isinstance(database.specific_comment, SpecificInteractionRepository)
         assert isinstance(database.specific_progress, SpecificProgressRepository)
+        assert isinstance(database.daily_limits, DailyLimitsRepository)
 
 
 def test_account_discovery_eagerly_initializes_existing_runtime_database(tmp_path):
@@ -106,6 +109,7 @@ def test_account_discovery_eagerly_initializes_existing_runtime_database(tmp_pat
         "specific_dm",
         "specific_comment",
         "specific_progress",
+        "daily_limits",
     }.issubset(table_names(database_path))
     with RuntimeDatabase(account_directory) as database:
         assert database.users.get_by_username("preserved_user") is not None
@@ -145,11 +149,15 @@ def test_runtime_database_schema_matches_the_frozen_contract(tmp_path):
         ),
         "like": (
             "user_id",
+            "username",
             "source",
+            "status",
             "likes_count",
             "last_like_date",
+            "processed_date",
             "follow_back",
             "follow_back_date",
+            "last_session_id",
         ),
         "comment": (
             "user_id",
@@ -174,6 +182,7 @@ def test_runtime_database_schema_matches_the_frozen_contract(tmp_path):
             "last_dm_date",
             "last_message",
             "last_reply",
+            "status",
         ),
         "specific_follow": (
             "user_id",
@@ -199,6 +208,9 @@ def test_runtime_database_schema_matches_the_frozen_contract(tmp_path):
             "likes_count",
             "last_like_date",
             "status",
+            "liked",
+            "like_date",
+            "last_session_id",
         ),
         "specific_dm": (
             "user_id",
@@ -220,9 +232,45 @@ def test_runtime_database_schema_matches_the_frozen_contract(tmp_path):
             "completed",
             "repeat",
         ),
+        "daily_limits": (
+            "module",
+            "limit_date",
+            "configured_spec",
+            "resolved_target",
+            "created_at",
+            "updated_at",
+        ),
     }
     for table_name, columns in expected_columns.items():
         assert table_columns(database_path, table_name) == columns
+
+
+def test_specific_like_legacy_rows_migrate_without_losing_completion(tmp_path):
+    database_path = tmp_path / "runtime.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "CREATE TABLE specific_like ("
+            "user_id INTEGER PRIMARY KEY, username TEXT NOT NULL, "
+            "likes_count INTEGER NOT NULL DEFAULT 0, last_like_date TEXT, status TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO specific_like VALUES (1, 'completed.user', 2, "
+            "'2026-09-26 10:00:00', 'SUCCESS')"
+        )
+
+    with RuntimeDatabase(tmp_path) as database:
+        row = database._connection.execute(
+            "SELECT username, likes_count, liked, like_date, status "
+            "FROM specific_like WHERE user_id = 1"
+        ).fetchone()
+
+    assert tuple(row) == (
+        "completed.user",
+        2,
+        1,
+        "2026-09-26 10:00:00",
+        "SUCCESS",
+    )
 
 
 def test_repositories_persist_only_their_owned_state(tmp_path):
@@ -245,9 +293,13 @@ def test_repositories_persist_only_their_owned_state(tmp_path):
         database.like.save(
             LikeRecord(
                 user.id,
+                username=user.username,
                 source="source_account",
+                status="SUCCESS",
                 likes_count=3,
                 last_like_date="2026-09-04T12:02:00+00:00",
+                processed_date="2026-09-04T12:02:00+00:00",
+                last_session_id="session-2",
             )
         )
         database.comment.save(
@@ -282,6 +334,8 @@ def test_repositories_persist_only_their_owned_state(tmp_path):
         assert database.follow.get(user.id).follow_back is True
         assert database.follow.get(user.id).follow_date == "2026-09-04 12:01:00"
         assert database.like.get(user.id).likes_count == 3
+        assert database.like.get(user.id).username == "Target.User"
+        assert database.like.get(user.id).status == "SUCCESS"
         assert database.like.get(user.id).last_like_date == "2026-09-04 12:02:00"
         assert database.comment.get(user.id).comments_count == 2
         assert database.comment.get(user.id).last_comment_date == "2026-09-04 12:03:00"
@@ -289,6 +343,46 @@ def test_repositories_persist_only_their_owned_state(tmp_path):
         assert database.story.get(user.id).last_story_date == "2026-09-04 12:04:00"
         assert database.dm.get(user.id).last_reply == "Hi"
         assert database.dm.get(user.id).last_dm_date == "2026-09-04 12:05:00"
+
+
+def test_dm_repository_selects_unmessaged_follow_backs_from_follow_and_like(tmp_path):
+    with RuntimeDatabase(tmp_path) as database:
+        followed = database.users.create("followed.back", "2026-09-27 10:00:00")
+        database.follow.save(
+            FollowRecord(
+                followed.id,
+                followed.username,
+                "follow-source",
+                follow_date="2026-09-27 10:00:00",
+                follow_back=True,
+            )
+        )
+        liked = database.users.create("liked.back", "2026-09-27 10:01:00")
+        database.like.save(
+            LikeRecord(
+                liked.id,
+                liked.username,
+                "like-source",
+                follow_back=True,
+            )
+        )
+        sent = database.users.create("already.sent", "2026-09-27 10:02:00")
+        database.follow.save(
+            FollowRecord(
+                sent.id,
+                sent.username,
+                "follow-source",
+                follow_back=True,
+            )
+        )
+        database.dm.save(DMRecord(sent.id, dm_count=1, status="SUCCESS"))
+
+        candidates = database.dm.eligible_new_followers()
+
+    assert candidates == (
+        (followed.id, "followed.back", "follow-source"),
+        (liked.id, "liked.back", "like-source"),
+    )
 
 
 def test_runtime_database_rolls_back_context_on_error(tmp_path):
@@ -402,4 +496,43 @@ def test_legacy_runtime_database_migrates_follow_without_losing_state(tmp_path):
         "specific_dm",
         "specific_comment",
         "specific_progress",
+        "daily_limits",
     }
+
+
+def test_existing_like_rows_migrate_to_source_aware_candidate_history(tmp_path):
+    with RuntimeDatabase(tmp_path) as database:
+        user = database.users.create("legacy_like", "2026-09-20T10:00:00+00:00", "LIKE")
+    path = tmp_path / "runtime.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TRIGGER IF EXISTS like_username_sync")
+        connection.execute('DROP TABLE "like"')
+        connection.execute("""
+            CREATE TABLE "like" (
+                user_id INTEGER PRIMARY KEY,
+                source TEXT,
+                likes_count INTEGER NOT NULL DEFAULT 0,
+                last_like_date TEXT,
+                follow_back INTEGER NOT NULL DEFAULT 0,
+                follow_back_date TEXT
+            )
+            """)
+        connection.execute(
+            'INSERT INTO "like" VALUES (?, ?, ?, ?, ?, ?)',
+            (user.id, "legacy_source", 2, "2026-09-20 10:05:00", 1, None),
+        )
+
+    with RuntimeDatabase(tmp_path) as database:
+        migrated = database.like.get(user.id, "legacy_source")
+
+        assert migrated == LikeRecord(
+            user_id=user.id,
+            username="legacy_like",
+            source="legacy_source",
+            status="SUCCESS",
+            likes_count=2,
+            last_like_date="2026-09-20 10:05:00",
+            processed_date="2026-09-20 10:05:00",
+            follow_back=True,
+            last_session_id=None,
+        )

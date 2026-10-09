@@ -175,12 +175,18 @@ class AndroidFollowProvider:
         self.profile_loading_timed_out = False
 
     def locate_source(
-        self, context: RuntimeContext, source_username: str
+        self,
+        context: RuntimeContext,
+        source_username: str,
+        *,
+        bounded_accounts_scroll: bool = False,
     ) -> AndroidFollowResult:
         """Locate and open an exact source username through Instagram Search."""
 
         username = source_username.strip()
         context.logger.info("[Search] Starting source search", source=username)
+        if context.cancellation_checkpoint("Search opening"):
+            return self._search_failure(username, "Search cancelled.")
         if not username:
             context.logger.error("[Search] Action failed", reason="empty source")
             return AndroidFollowResult(
@@ -209,8 +215,10 @@ class AndroidFollowProvider:
                     context.logger.error(
                         "[Search] Action failed", reason="Search tab unavailable"
                     )
-                    return self._source_not_found(
-                        username, "Search tab is unavailable."
+                    return self._search_failure(
+                        username,
+                        "Search tab is unavailable.",
+                        navigation=bounded_accounts_scroll,
                     )
                 context.logger.info(
                     "[Search] Search tab detected", resource_id=search_tab.resource_id
@@ -225,19 +233,34 @@ class AndroidFollowProvider:
                 context.logger.error(
                     "[Search] Action failed", reason="Search field unavailable"
                 )
-                return self._source_not_found(username, "Search input is unavailable.")
+                return self._search_failure(
+                    username,
+                    "Search input is unavailable.",
+                    navigation=bounded_accounts_scroll,
+                )
             context.logger.info(
                 "[Search] Search field detected", resource_id=search_input.resource_id
             )
             self._tap(device, search_input)
+            if context.cancellation_checkpoint("Search username entry"):
+                return self._search_failure(username, "Search cancelled.")
             context.logger.info("[Search] Searching source", source=username)
             device.send_keys(username, clear=True)
             context.logger.info("[Search] Source username entered", source=username)
             self._sleeper(self._search_settle_delay())
-            return self._poll_source_search(context, device, username)
+            return self._poll_source_search(
+                context,
+                device,
+                username,
+                bounded_accounts_scroll=bounded_accounts_scroll,
+            )
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             context.logger.error("[Search] Action failed", reason=str(error))
-            return self._source_not_found(username, f"Source search failed: {error}")
+            return self._search_failure(
+                username,
+                f"Source search failed: {error}",
+                navigation=bounded_accounts_scroll,
+            )
 
     def open_account(
         self, context: RuntimeContext, username: str
@@ -250,12 +273,19 @@ class AndroidFollowProvider:
         return CandidateObservation(username=username)
 
     def _poll_source_search(
-        self, context: RuntimeContext, device: object, username: str
+        self,
+        context: RuntimeContext,
+        device: object,
+        username: str,
+        *,
+        bounded_accounts_scroll: bool = False,
     ) -> AndroidFollowResult:
         state = _SearchState.RESULTS
         deadline = self._clock() + self._search_timeout
         attempt = 0
         while True:
+            if context.cancellation_checkpoint("Search result polling"):
+                return self._search_failure(username, "Search cancelled.")
             attempt += 1
             context.logger.debug(
                 "[Search] Waiting for UI element",
@@ -319,6 +349,9 @@ class AndroidFollowProvider:
                         )
                         state = _SearchState.SEARCH_RESULTS
                 elif state is _SearchState.SEARCH_RESULTS:
+                    if bounded_accounts_scroll and self._search_user_rows(hierarchy):
+                        state = _SearchState.ACCOUNTS_RESULTS
+                        continue
                     accounts_tab = self._find_navigation(
                         nodes, self._ACCOUNTS_TAB_IDS, "accounts"
                     )
@@ -343,6 +376,39 @@ class AndroidFollowProvider:
                         device.click(*accounts_tab.center)
                         context.logger.info("[Search] Accounts tab switch performed")
                         state = _SearchState.ACCOUNTS_RESULTS
+                elif (
+                    state is _SearchState.ACCOUNTS_RESULTS
+                    and bounded_accounts_scroll
+                    and self._search_user_rows(hierarchy)
+                ):
+                    context.logger.info(
+                        "[Search] Exact username not initially visible. "
+                        "Scrolling Accounts results once."
+                    )
+                    if not self._scroll_search_results(device, nodes):
+                        return self._search_failure(
+                            username,
+                            "Accounts results could not be scrolled.",
+                            navigation=True,
+                        )
+                    self._sleeper(self._search_poll_interval)
+                    scrolled_hierarchy = device.dump_hierarchy(compressed=False)
+                    exact = self._exact_search_user_row(scrolled_hierarchy, username)
+                    if exact is None:
+                        context.logger.info(
+                            "[Search] Exact username not found after bounded search.",
+                            source=username,
+                        )
+                        return self._source_not_found(
+                            username,
+                            "Exact username was not found after one Accounts scroll.",
+                        )
+                    context.logger.info(
+                        "[Search] Exact username found after Accounts scroll.",
+                        source=username,
+                    )
+                    device.click(*exact.center)
+                    state = _SearchState.PROFILE
 
             if self._clock() >= deadline:
                 context.logger.error(
@@ -356,6 +422,8 @@ class AndroidFollowProvider:
                     if state is _SearchState.PROFILE
                     else "Exact source username was not found before timeout."
                 )
+                if bounded_accounts_scroll and state is _SearchState.PROFILE:
+                    return self._search_failure(username, detail, navigation=False)
                 return self._source_not_found(username, detail)
 
             context.logger.debug(
@@ -490,7 +558,9 @@ class AndroidFollowProvider:
                 f"Followers search failed: {error}",
             )
 
-    def scroll_followers(self, context: RuntimeContext) -> AndroidFollowResult:
+    def scroll_followers(
+        self, context: RuntimeContext, *, overlapping: bool = False
+    ) -> AndroidFollowResult:
         """Perform one bounded followers-list scroll action."""
 
         try:
@@ -504,7 +574,23 @@ class AndroidFollowProvider:
                 )
             left, top, right, bottom = container.bounds
             x = (left + right) // 2
-            device.swipe(x, bottom - 1, x, top + 1, duration=0.4)
+            start_y = bottom - 1
+            end_y = top + 1
+            if overlapping:
+                visible_height = bottom - top
+                distance = max(1, round(visible_height * 0.65))
+                end_y = max(top + 1, start_y - distance)
+                swipe_distance = start_y - end_y
+                overlap_percent = round(
+                    (1 - (swipe_distance / visible_height)) * 100
+                )
+                context.logger.debug(
+                    "[Followers] Overlapping scroll.",
+                    recycler_height=visible_height,
+                    swipe_distance=swipe_distance,
+                    overlap_percent=overlap_percent,
+                )
+            device.swipe(x, start_y, x, end_y, duration=0.4)
             self._wait()
             return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
@@ -591,7 +677,7 @@ class AndroidFollowProvider:
             )
             if observed_username.casefold() != candidate.username.casefold():
                 context.logger.error(
-                    "[Candidate] Profile verification failed",
+                    "[Candidate] Profile username mismatch. Aborting interaction.",
                     expected=candidate.username,
                     observed=observed_username,
                 )
@@ -746,10 +832,16 @@ class AndroidFollowProvider:
                 f"Contact scraping failed: {error}",
             )
 
-    def execute_follow(self, context: RuntimeContext) -> AndroidFollowResult:
+    def execute_follow(
+        self, context: RuntimeContext, *, continuation: str = "followers"
+    ) -> AndroidFollowResult:
         """Tap Follow once, verify it, and return to the followers list."""
 
         try:
+            if context.cancellation_checkpoint("Follow execution"):
+                return AndroidFollowResult(
+                    AndroidFollowStatus.FOLLOW_FAILED, "Follow execution cancelled."
+                )
             device = self._device(context)
             button = self._follow_button(self._fresh_nodes(device))
             state = self._button_state(button)
@@ -765,11 +857,19 @@ class AndroidFollowProvider:
                     "Follow button is unavailable.",
                 )
             else:
+                if context.cancellation_checkpoint("Follow button tap"):
+                    return AndroidFollowResult(
+                        AndroidFollowStatus.FOLLOW_FAILED,
+                        "Follow execution cancelled.",
+                    )
                 device.click(*button.center)
                 verified = self._poll_follow_state(context, device)
                 if verified == "following":
                     result = AndroidFollowResult(AndroidFollowStatus.SUCCESS)
-                    return self._mute_and_return(context, device, result)
+                    returned = self._mute_and_return(context, device, result)
+                    return self._verify_follow_handoff(
+                        context, device, returned, continuation=continuation
+                    )
                 elif verified == "requested":
                     result = AndroidFollowResult(AndroidFollowStatus.REQUESTED)
                 elif verified == "follow":
@@ -781,12 +881,74 @@ class AndroidFollowProvider:
                         AndroidFollowStatus.FOLLOW_FAILED,
                         "Follow state could not be verified.",
                     )
-            return self._navigate_back(context, device, result)
+            returned = self._navigate_back(context, device, result)
+            return self._verify_follow_handoff(
+                context, device, returned, continuation=continuation
+            )
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             return AndroidFollowResult(
                 AndroidFollowStatus.FOLLOW_FAILED,
                 f"Follow execution failed: {error}",
             )
+
+    def _verify_follow_handoff(
+        self,
+        context: RuntimeContext,
+        device: object,
+        interaction: AndroidFollowResult,
+        *,
+        continuation: str,
+    ) -> AndroidFollowResult:
+        """Boundedly verify the post-Follow continuation surface."""
+
+        search_expected = continuation == "search"
+        expected = "Instagram Search" if search_expected else "Followers list"
+        context.logger.info(
+            "[Follow] Restoring expected continuation screen.",
+            expected=expected,
+        )
+        current = self._fresh_nodes(device)
+        verified = (
+            self._find_by_id(current, self._SEARCH_INPUT_IDS) is not None
+            if search_expected
+            else self._is_followers_screen(current)
+        )
+        if verified:
+            context.logger.info(
+                "[Follow] Navigation handoff verified.",
+                expected=expected,
+            )
+            return interaction
+        recovered = (
+            self.return_to_search(context)
+            if search_expected
+            else self.return_to_followers(context)
+        )
+        if recovered.succeeded:
+            context.logger.info(
+                "[Follow] Navigation handoff recovered.", expected=expected
+            )
+            return interaction
+        context.logger.warning(
+            "[Follow] Navigation handoff failed. Returning NAVIGATION_FAILED.",
+            expected=expected,
+        )
+        detail = " ".join(
+            value
+            for value in (
+                interaction.detail,
+                recovered.detail or f"{expected} could not be restored.",
+            )
+            if value
+        )
+        return AndroidFollowResult(
+            interaction.status,
+            detail,
+            profile=interaction.profile,
+            contact_details=interaction.contact_details,
+            muted=interaction.muted,
+            navigation_failed=True,
+        )
 
     def _mute_and_return(
         self,
@@ -1018,6 +1180,8 @@ class AndroidFollowProvider:
         polls = max(1, ceil(self._verification_delay / interval)) if interval else 1
         state = ""
         for attempt in range(polls + 1):
+            if context.cancellation_checkpoint("Follow verification"):
+                return ""
             state = self._button_state(
                 self._follow_button(
                     self._nodes(device.dump_hierarchy(compressed=False))
@@ -1071,6 +1235,11 @@ class AndroidFollowProvider:
             )
         context.logger.info("[Candidate] Followers list restored.")
         return result
+
+    def return_to_search(self, context: RuntimeContext) -> AndroidFollowResult:
+        """Return from a Specific Users profile to the existing Search surface."""
+
+        return self._return_to_search(context)
 
     def _recover_after_profile_failure(
         self, context: RuntimeContext, candidate: Candidate
@@ -1212,6 +1381,37 @@ class AndroidFollowProvider:
                     ("row_search_user_container",),
                 )
         return None
+
+    @classmethod
+    def _search_user_rows(cls, hierarchy: str) -> tuple[str, ...]:
+        root = ET.fromstring(hierarchy)
+        return tuple(
+            child.get("text", "").strip()
+            for row in root.iter("node")
+            if cls._id_has_suffix(
+                row.get("resource-id", ""), ("row_search_user_container",)
+            )
+            for child in row.iter("node")
+            if cls._id_has_suffix(
+                child.get("resource-id", ""), ("row_search_user_username",)
+            )
+            and child.get("text", "").strip()
+        )
+
+    @classmethod
+    def _scroll_search_results(cls, device: object, nodes: tuple[_Node, ...]) -> bool:
+        container = cls._find_scrollable(nodes)
+        if container is None:
+            return False
+        left, top, right, bottom = container.bounds
+        height = bottom - top
+        if height <= 0:
+            return False
+        x = (left + right) // 2
+        start_y = bottom - 1
+        end_y = max(top + 1, start_y - round(height * 0.65))
+        device.swipe(x, start_y, x, end_y, duration=0.4)
+        return True
 
     @classmethod
     def _find_scrollable(cls, nodes: tuple[_Node, ...]) -> _Node | None:
@@ -1380,6 +1580,16 @@ class AndroidFollowProvider:
         return AndroidFollowResult(
             AndroidFollowStatus.SOURCE_NOT_FOUND,
             f"{detail} ({username})",
+        )
+
+    @staticmethod
+    def _search_failure(
+        username: str, detail: str, *, navigation: bool
+    ) -> AndroidFollowResult:
+        return AndroidFollowResult(
+            AndroidFollowStatus.FOLLOW_FAILED,
+            f"{detail} ({username})",
+            navigation_failed=navigation,
         )
 
     @staticmethod

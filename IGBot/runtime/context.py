@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from IGBot.runtime.ignore import IgnoreService
 from IGBot.runtime.state import SessionState
 
 if TYPE_CHECKING:
+    from IGBot.runtime.analytics import AnalyticsService
     from IGBot.runtime.logging import RuntimeLogger
     from IGBot.runtime.session.models import SessionContext
     from IGBot.runtime.startup.models import StartupResult
@@ -28,3 +30,21 @@ class RuntimeContext:
     runtime_settings: Mapping[str, object] = field(default_factory=dict)
     session_state: SessionState = SessionState.PENDING
     startup_result: StartupResult | None = None
+    ignore_service: IgnoreService = field(default_factory=IgnoreService)
+    analytics: AnalyticsService | None = None
+    verified_interactions: int = 0
+    cancellation_requested: Callable[[], bool] = field(default=lambda: False)
+    cancellation_wait: Callable[[float], bool] | None = None
+    cancellation_logged: bool = False
+
+    def cancellation_checkpoint(self, stage: str) -> bool:
+        """Observe session cancellation at a safe, non-transactional boundary."""
+
+        cancelled = self.cancellation_requested()
+        if cancelled and not self.cancellation_logged:
+            self.logger.info(
+                "Cancellation observed. Stopping after current checkpoint.",
+                checkpoint=stage,
+            )
+            self.cancellation_logged = True
+        return cancelled

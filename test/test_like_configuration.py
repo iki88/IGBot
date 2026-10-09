@@ -59,6 +59,15 @@ def test_like_load_status_and_dirty_state(tmp_path):
     assert page.is_dirty
 
 
+def test_like_methods_use_follow_checkbox_style():
+    page = LikeConfigurationPage()
+
+    for method in ("blogger-followers", "blogger"):
+        row = page.sources.rows[method]
+        assert row.enabled.objectName() != "configurationSwitch"
+        assert row.name.objectName() == "checkboxLinkButton"
+
+
 def test_like_save_uses_only_documented_engine_keys(tmp_path):
     service, account = configuration(tmp_path)
     page = LikeConfigurationPage()
@@ -116,15 +125,29 @@ def test_like_uses_follow_product_layout_and_hides_low_priority_controls():
     page = LikeConfigurationPage()
 
     assert page.enabled.text() == "Enable Like"
-    assert page.sources.rows["blogger-followers"].name.text() == (
-        "Like Source's Followers"
-    )
+    assert page.sources.rows["blogger-followers"].name.text() == "Like Source Followers"
     assert page.sources.rows["blogger"].name.text() == "Like Posts of Specific Users"
     assert page.sources.rows["blogger-following"].isHidden()
     assert page.media.controls["carousel-count"].isHidden()
     assert page.media.controls["carousel-percentage"].isHidden()
     assert page.limit_behaviour.isHidden()
     assert page.schedule_section.body.isHidden()
+
+
+def test_like_specific_users_uses_account_local_like_txt(tmp_path):
+    service, account = configuration(tmp_path)
+    page = AccountPage()
+    page.set_account(account)
+    configured = service.load_configuration(account.config_path)
+    configured["blogger"] = ["first.user", "second.user"]
+
+    page.set_configuration(configured)
+
+    specific = account.config_path.parent / "Lists" / "likespecific.txt"
+    assert specific.read_text(encoding="utf-8").splitlines() == [
+        "first.user",
+        "second.user",
+    ]
 
 
 def test_like_optional_filters_reveal_only_documented_controls():
@@ -146,6 +169,31 @@ def test_like_optional_filters_reveal_only_documented_controls():
     assert not page.followers_filter.isHidden()
     assert not page.followings_filter.isHidden()
     assert not page.filters.isHidden()
+
+
+def test_like_additional_profile_filters_load_and_save_runtime_values():
+    page = LikeConfigurationPage()
+    page.set_configuration(
+        {
+            "mandatory_words": ["travel"],
+            "blacklist_words": ["spam"],
+            "specific_alphabet": ["latin", "greek"],
+            "biography_language": ["en", "de"],
+        }
+    )
+
+    assert tuple(page.word_filters) == (
+        "mandatory_words",
+        "blacklist_words",
+        "specific_alphabet",
+        "biography_language",
+    )
+    assert page.word_filters["specific_alphabet"].name.text() == "Allowed Alphabets"
+    assert page.word_filters["biography_language"].name.text() == ("Biography Language")
+    assert page.word_filters["specific_alphabet"].entries() == ["latin", "greek"]
+    assert page.word_filters["biography_language"].entries() == ["en", "de"]
+    assert page.values()["specific_alphabet"] == ["latin", "greek"]
+    assert page.values()["biography_language"] == ["en", "de"]
 
 
 def test_like_filters_and_behaviour_use_engine_keys_only(tmp_path):
@@ -192,7 +240,7 @@ def test_disabling_like_filter_removes_engine_filter_key(tmp_path):
     assert "max_likers" not in filters
 
 
-def test_like_action_fields_are_aligned_and_runtime_extensions_are_not_saved():
+def test_like_action_fields_are_aligned_and_runtime_extensions_are_saved():
     page = LikeConfigurationPage()
     page.set_configuration({"likes-percentage": "100"})
     controls = (
@@ -215,10 +263,53 @@ def test_like_action_fields_are_aligned_and_runtime_extensions_are_not_saved():
     page.schedule_days.controls["monday"].setChecked(False)
 
     values = page.values()
-    assert not any(
-        "users-to-like" in key or "delay" in key or "schedule" in key for key in values
-    )
+    extensions = page.runtime_extension_values()
+    assert extensions == {
+        "igbot-like-budget": "5-10",
+        "igbot-like-action-delay": "2-6",
+        "igbot-like-auto-increment-enabled": False,
+        "igbot-like-auto-increment-by": "1",
+        "igbot-like-auto-increment-maximum": "",
+    }
     assert values["likes-percentage"] == "100"
+
+
+def test_like_action_extensions_round_trip_through_account_metadata(tmp_path):
+    service, account = configuration(tmp_path)
+    page = LikeConfigurationPage()
+    loaded = service.load_configuration(account.config_path)
+    page.set_configuration(loaded)
+    page.user_amount.minimum.setValue(4)
+    page.user_amount.maximum.setValue(9)
+    page.delay.minimum.setValue(3)
+    page.delay.maximum.setValue(7)
+    page.automatic_daily_increment.enabled.setChecked(True)
+    page.automatic_daily_increment.increment.setText("4")
+    page.automatic_daily_increment.maximum.setText("70")
+    settings = page.values()
+    settings.update(page.runtime_extension_values())
+
+    service.update_configuration(
+        account, "account", "secret", "com.instagram.clone", settings
+    )
+    restored = service.load_configuration(account.config_path)
+
+    assert restored["igbot-like-budget"] == "4-9"
+    assert restored["igbot-like-action-delay"] == "3-7"
+    assert restored["igbot-like-auto-increment-enabled"] is True
+    assert restored["igbot-like-auto-increment-by"] == "4"
+    assert restored["igbot-like-auto-increment-maximum"] == "70"
+
+
+@pytest.mark.parametrize(
+    ("entered", "stored"), [("2", "2-2"), ("2-2", "2-2"), ("1-3", "1-3")]
+)
+def test_likes_per_profile_normalizes_fixed_values(entered, stored):
+    page = LikeConfigurationPage()
+    page.set_configuration({})
+    page.interaction.controls["likes-count"].setText(entered)
+
+    assert page.values()["likes-count"] == stored
 
 
 def test_like_view_times_follow_likes_per_profile_in_action_grid():
@@ -234,7 +325,37 @@ def test_like_view_times_follow_likes_per_profile_in_action_grid():
         index = page.action_grid.indexOf(control)
         positions[key] = page.action_grid.getItemPosition(index)[0]
 
-    assert positions == {"likes": 3, "photo": 4, "video": 5, "percentage": 6}
+    assert positions == {"likes": 2, "photo": 3, "video": 4, "percentage": 5}
+    daily = page.limits.controls["total-likes-limit"]
+    assert page.action_grid.getItemPosition(page.action_grid.indexOf(daily))[0] == 6
+    assert page.limits.labels["total-likes-limit"].text() == "Daily Like Limit"
+    assert page.action_grid.getItemPosition(
+        page.action_grid.indexOf(page.like_limit_help)
+    )[0] == 10
+    assert page.like_limit_help.objectName() == "configurationHint"
+    assert page.like_limit_help.text() == (
+        "Daily hard limit. The bot will never exceed this number of likes per day."
+    )
+
+
+def test_like_automatic_daily_increment_enablement_and_range_validation():
+    page = LikeConfigurationPage()
+    page.set_configuration(
+        {
+            "igbot-like-auto-increment-enabled": True,
+            "igbot-like-auto-increment-by": "2",
+            "igbot-like-auto-increment-maximum": "60-80",
+        }
+    )
+    automatic = page.automatic_daily_increment
+
+    assert automatic.increment.isEnabled()
+    assert automatic.maximum.isEnabled()
+    assert automatic.values()["igbot-like-auto-increment-maximum"] == "60-80"
+
+    automatic.maximum.setText("80-60")
+    with pytest.raises(ValueError, match="ascending range"):
+        page.runtime_extension_values()
 
 
 def test_minimum_posts_is_a_single_left_aligned_numeric_field():

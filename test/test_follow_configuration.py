@@ -481,9 +481,14 @@ def test_follow_product_layout_and_runtime_extensions_are_not_persisted():
         page.action_grid.getItemPosition(
             page.action_grid.indexOf(page.follow_limit_help)
         )[0]
-        == 3
+        == 6
     )
     assert "Daily hard limit" in page.follow_limit_help.text()
+    assert page.follow_limit.labels["total-follows-limit"].text() == "Daily Follow Limit"
+    assert page.follow_limit_help.text() == (
+        "Daily hard limit. The bot will never exceed this number of follows per day."
+    )
+    assert "\n" not in page.follow_limit_help.text()
 
     page.delay.minimum.setValue(4)
     page.delay.maximum.setValue(9)
@@ -512,6 +517,55 @@ def test_follow_product_layout_and_runtime_extensions_are_not_persisted():
     for row in page.list_filters.values():
         assert row.name.objectName() == "checkboxLinkButton"
         assert row.layout().spacing() == 0
+
+
+def test_follow_automatic_daily_increment_ui_and_validation():
+    page = FollowConfigurationPage()
+    automatic = page.automatic_daily_increment
+    page.set_configuration({})
+
+    assert not automatic.enabled.isChecked()
+    assert not automatic.increment.isEnabled()
+    assert not automatic.maximum.isEnabled()
+
+    automatic.enabled.setChecked(True)
+    automatic.increment.setText("5")
+    automatic.maximum.setText("60-80")
+    assert page.runtime_extension_values() == {
+        "igbot-follow-mute-after-follow": False,
+        "igbot-follow-only-active-stories": False,
+        "igbot-follow-auto-increment-enabled": True,
+        "igbot-follow-auto-increment-by": "5",
+        "igbot-follow-auto-increment-maximum": "60-80",
+    }
+
+    automatic.increment.setText("1-2")
+    with pytest.raises(ValueError, match="positive integer"):
+        page.runtime_extension_values()
+
+
+def test_follow_automatic_daily_increment_round_trip(tmp_path):
+    service, account = _configuration(tmp_path)
+    page = AccountPage()
+    page.set_account(account)
+    page.set_configuration(service.load_configuration(account.config_path))
+    automatic = page.follow_page.automatic_daily_increment
+    automatic.enabled.setChecked(True)
+    automatic.increment.setText("5")
+    automatic.maximum.setText("60-80")
+
+    service.update_configuration(
+        account,
+        "account",
+        "secret",
+        "com.example.app",
+        page.configuration_values(),
+    )
+    restored = service.load_configuration(account.config_path)
+
+    assert restored["igbot-follow-auto-increment-enabled"] is True
+    assert restored["igbot-follow-auto-increment-by"] == "5"
+    assert restored["igbot-follow-auto-increment-maximum"] == "60-80"
 
 
 def test_follow_save_removes_obsolete_filter_fields(tmp_path):

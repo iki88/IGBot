@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from IGBot.ui.icons import archive_icon, phone_icon
+from IGBot.ui.icons import archive_icon, notification_icon, phone_icon
 from IGBot.ui.version import APPLICATION_VERSION
 
 
@@ -55,6 +55,11 @@ class NavigationSidebar(QWidget):
                 self.style().standardIcon(QStyle.SP_FileDialogListView), "Templates"
             )
         )
+        self.notifications_item = QListWidgetItem(
+            notification_icon(), "Notifications (0)"
+        )
+        self.notifications_item.setData(Qt.UserRole, 0)
+        self.navigation.addItem(self.notifications_item)
         self._size_navigation_list(self.navigation)
         self.navigation.setCurrentRow(0)
         self.navigation.itemClicked.connect(self._select_workspace)
@@ -100,7 +105,7 @@ class NavigationSidebar(QWidget):
         # QListWidget reserves spacing at the viewport edges as well as between rows.
         spacing = navigation.spacing() * (navigation.count() + 3)
         frame = navigation.frameWidth() * 2
-        navigation.setFixedHeight(row_height * navigation.count() + spacing + frame)
+        navigation.setFixedHeight(row_height * navigation.count() + spacing + frame + 2)
 
     def _select_workspace(self, item: QListWidgetItem) -> None:
         self.settings_navigation.clearSelection()
@@ -108,4 +113,9 @@ class NavigationSidebar(QWidget):
 
     def _select_settings(self, item: QListWidgetItem) -> None:
         self.navigation.clearSelection()
-        self.page_selected.emit(5 + self.settings_navigation.row(item))
+        self.page_selected.emit(6 + self.settings_navigation.row(item))
+
+    def set_notification_count(self, count: int) -> None:
+        count = max(0, int(count))
+        self.notifications_item.setText(f"Notifications ({count})")
+        self.notifications_item.setData(Qt.UserRole, count)

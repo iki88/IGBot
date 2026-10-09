@@ -6,7 +6,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from IGBot.runtime.context import RuntimeContext
 from IGBot.runtime.follower_synchronization.models import FollowerReadResult
@@ -38,6 +38,14 @@ class AndroidFollowerReader:
         "profile_header_followers_stacked_familiar",
     )
     _FOLLOWERS_VALUE_IDS = ("profile_header_familiar_followers_value",)
+    _FOLLOWING_VALUE_IDS = ("profile_header_familiar_following_value",)
+    _POSTS_VALUE_IDS = ("profile_header_familiar_post_count_value",)
+    _PROFILE_USERNAME_IDS = (
+        "action_bar_title",
+        "profile_header_username",
+        "profile_header_user_name",
+        "profile_username",
+    )
     _USERNAME_IDS = (
         "follow_list_username",
         "row_user_primary_name",
@@ -66,6 +74,8 @@ class AndroidFollowerReader:
 
         if limit <= 0:
             raise ValueError("Follower synchronization limit must be positive")
+        if context.cancellation_checkpoint("Follower Synchronization start"):
+            return FollowerReadResult(False, detail="Synchronization cancelled.")
         try:
             device = self._device_factory(context.session.phone_id)
             nodes = self._nodes(device.dump_hierarchy(compressed=False))
@@ -74,13 +84,22 @@ class AndroidFollowerReader:
                 return FollowerReadResult(False, detail="Profile is not available.")
             device.click(*profile.center)
             self._sleeper(self._navigation_wait)
+            if context.cancellation_checkpoint("Follower Synchronization profile"):
+                return FollowerReadResult(False, detail="Synchronization cancelled.")
 
             nodes = self._nodes(device.dump_hierarchy(compressed=False))
+            snapshot = {
+                "username": self._node_text(nodes, self._PROFILE_USERNAME_IDS)
+                or context.session.account_username,
+                "posts": self._profile_count(nodes, self._POSTS_VALUE_IDS),
+                "followers": self._profile_count(nodes, self._FOLLOWERS_VALUE_IDS),
+                "following": self._profile_count(nodes, self._FOLLOWING_VALUE_IDS),
+            }
             if self._has_zero_followers(nodes):
                 context.logger.info(
                     "Follower Synchronization detected an empty followers list"
                 )
-                return FollowerReadResult(True)
+                return FollowerReadResult(True, **snapshot)
             followers = self._find(nodes, self._FOLLOWERS_IDS)
             if followers is None:
                 return FollowerReadResult(
@@ -88,17 +107,23 @@ class AndroidFollowerReader:
                 )
             device.click(*followers.center)
             self._sleeper(self._navigation_wait)
-            return self._read_list(device, limit)
+            if context.cancellation_checkpoint("Follower Synchronization list"):
+                return FollowerReadResult(False, detail="Synchronization cancelled.")
+            return replace(self._read_list(context, device, limit), **snapshot)
         except Exception as error:  # noqa: BLE001 - platform isolation boundary
             return FollowerReadResult(
                 False, detail=f"Follower list inspection failed: {error}"
             )
 
-    def _read_list(self, device: object, limit: int) -> FollowerReadResult:
+    def _read_list(
+        self, context: RuntimeContext, device: object, limit: int
+    ) -> FollowerReadResult:
         usernames: list[str] = []
         seen: set[str] = set()
         last_see_more_hierarchy: str | None = None
         while len(usernames) < limit:
+            if context.cancellation_checkpoint("Follower Synchronization scan"):
+                return FollowerReadResult(False, detail="Synchronization cancelled.")
             hierarchy = device.dump_hierarchy(compressed=False)
             nodes = self._nodes(hierarchy)
             see_more = self._find(nodes, self._SEE_MORE_IDS)
@@ -172,6 +197,28 @@ class AndroidFollowerReader:
             if description in {"0follower", "0followers"}:
                 return True
         return False
+
+    @classmethod
+    def _node_text(cls, nodes: tuple[_Node, ...], identifiers: tuple[str, ...]) -> str:
+        node = cls._find(nodes, identifiers)
+        return node.text.strip() if node is not None else ""
+
+    @classmethod
+    def _profile_count(
+        cls, nodes: tuple[_Node, ...], identifiers: tuple[str, ...]
+    ) -> int | None:
+        value = cls._node_text(nodes, identifiers).casefold().replace(",", "")
+        if not value:
+            return None
+        multiplier = 1
+        if value.endswith("k"):
+            value, multiplier = value[:-1], 1_000
+        elif value.endswith("m"):
+            value, multiplier = value[:-1], 1_000_000
+        try:
+            return int(float(value) * multiplier)
+        except ValueError:
+            return None
 
     @classmethod
     def _find(

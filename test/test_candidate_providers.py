@@ -19,6 +19,7 @@ from IGBot.runtime.candidates import (
     SpecificUsersProvider,
 )
 from IGBot.runtime.database import RuntimeDatabase
+from IGBot.runtime.ignore import IgnoreService
 
 
 class StubLogger:
@@ -408,6 +409,25 @@ def test_specific_users_provider_advances_past_unavailable_username(tmp_path):
     result = provider.next_candidate(context)
 
     assert result.candidate.username == "working_user"
+    with RuntimeDatabase(tmp_path) as database:
+        assert database.specific_progress.get("follow").current_position == 1
+
+
+def test_specific_follow_ignore_skips_without_searching_instagram(tmp_path):
+    context = make_context(tmp_path)
+    context.ignore_service = IgnoreService(frozenset({"ignored_user"}))
+    lists = tmp_path / "Lists"
+    lists.mkdir()
+    (lists / "followspecific.txt").write_text(
+        "ignored_user\nworking_user\n", encoding="utf-8"
+    )
+    discovery = RecordingSpecificDiscovery((CandidateObservation("working_user"),))
+    provider = SpecificUsersProvider(tmp_path, discovery)
+
+    result = provider.next_candidate(context)
+
+    assert result.candidate.username == "working_user"
+    assert discovery.calls == [(context, "working_user")]
     with RuntimeDatabase(tmp_path) as database:
         assert database.specific_progress.get("follow").current_position == 1
 

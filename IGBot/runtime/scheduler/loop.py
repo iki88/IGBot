@@ -18,6 +18,7 @@ from IGBot.runtime.scheduler.contracts import (
 )
 from IGBot.runtime.scheduler.models import (
     ModuleExecutionOutcome,
+    ModuleOperation,
     SchedulerLoopResult,
     SchedulerResult,
 )
@@ -88,26 +89,36 @@ class SchedulerLoop:
                     None,
                 )
 
-            result = (
-                self._scheduler.evaluate_selected(
-                    context, selected_dm, start_module=True
+            selected = selected_dm or self._scheduler.select(modules)
+            if selected is None:
+                result = SchedulerResult(
+                    selected_module=None,
+                    budget=None,
+                    execution_started=False,
+                    execution_finished=False,
+                    next_module_state=None,
+                    detail="No eligible modules.",
                 )
-                if selected_dm is not None
-                else self._evaluate_random(context, modules)
-            )
-            cycles.append(result)
-            if selected_dm is not None and result.execution_started:
-                initial_dm_executed = True
-
-            if result.selected_module is None:
+                cycles.append(result)
                 self._sleeper(self._idle_wait_seconds)
                 continue
 
-            module = next(
-                item for item in modules if item.module is result.selected_module
-            )
-            updated = self._apply_outcome(context, module, result)
-            cycles[-1] = updated
+            context.logger.info("Scheduler selected module", module=selected.module.value)
+            operation_cycles = self._run_operation(context, selected)
+            cycles.extend(operation_cycles)
+            if selected_dm is not None and any(
+                result.execution_started for result in operation_cycles
+            ):
+                initial_dm_executed = True
+            if operation_cycles and (
+                operation_cycles[-1].outcome
+                is ModuleExecutionOutcome.NAVIGATION_FAILED
+            ):
+                context.logger.warning(
+                    "Scheduler session ending after failed navigation handoff.",
+                    module=selected.module.value,
+                )
+                break
 
         context.logger.info("Smart Scheduler Loop stopped", cycles=len(cycles))
         return SchedulerLoopResult(
@@ -116,22 +127,72 @@ class SchedulerLoop:
             initial_dm_executed=initial_dm_executed,
         )
 
-    def _evaluate_random(
+    def _run_operation(
         self,
         context: RuntimeContext,
-        modules: tuple[BudgetedRuntimeModule, ...],
-    ) -> SchedulerResult:
-        selected = self._scheduler.select(modules)
-        if selected is None:
-            return SchedulerResult(
-                selected_module=None,
-                budget=None,
-                execution_started=False,
-                execution_finished=False,
-                next_module_state=None,
-                detail="No eligible modules.",
+        module: BudgetedRuntimeModule,
+    ) -> tuple[SchedulerResult, ...]:
+        operation = ModuleOperation(module.module, self._scheduler.resolve_budget(module))
+        context.logger.info(
+            "ModuleOperation created",
+            module=module.module.value,
+            target=operation.target,
+        )
+        results: list[SchedulerResult] = []
+        first_step = True
+        while first_step or self._session_activity.is_active(context):
+            first_step = False
+            if context.cancellation_checkpoint(
+                f"{module.module.value} ModuleOperation"
+            ):
+                break
+            if operation.completed:
+                break
+            if not module.is_eligible():
+                context.logger.info(
+                    "ModuleOperation relinquished",
+                    module=module.module.value,
+                    verified=operation.verified_successes,
+                    target=operation.target,
+                    reason="module no longer eligible",
+                )
+                break
+            budget = operation.remaining_budget(module.daily_remaining)
+            result = self._scheduler.evaluate_with_budget(
+                context,
+                module,
+                budget,
+                start_module=True,
             )
-        return self._scheduler.evaluate_selected(context, selected, start_module=True)
+            updated = self._apply_outcome(context, module, result)
+            results.append(updated)
+            operation.record(updated.verified_successes)
+            if updated.verified_successes:
+                context.logger.info(
+                    f"Verified {module.module.value}",
+                    verified=operation.verified_successes,
+                    target=operation.target,
+                    remaining=operation.remaining,
+                )
+            if operation.completed:
+                context.logger.info(
+                    "ModuleOperation completed",
+                    module=module.module.value,
+                    verified=operation.verified_successes,
+                    target=operation.target,
+                )
+                context.logger.info("Scheduler selecting next module")
+                break
+            if updated.outcome is not ModuleExecutionOutcome.SUCCESS:
+                context.logger.info(
+                    "ModuleOperation relinquished",
+                    module=module.module.value,
+                    verified=operation.verified_successes,
+                    target=operation.target,
+                    reason=(updated.outcome.value if updated.outcome else "unknown"),
+                )
+                break
+        return tuple(results)
 
     def _apply_outcome(
         self,

@@ -17,6 +17,19 @@ from PySide6.QtWidgets import (
 )
 
 
+def valid_integer_range(value: str, *, allow_empty: bool = True) -> bool:
+    """Return whether text uses the shared fixed/ascending-range syntax."""
+
+    if not value:
+        return allow_empty
+    if not re.fullmatch(r"\d+(?:-\d+)?", value):
+        return False
+    if "-" not in value:
+        return True
+    minimum, maximum = (int(part) for part in value.split("-", 1))
+    return minimum <= maximum
+
+
 class WheelSafeSpinBox(QSpinBox):
     """Integer editor that ignores incidental mouse-wheel input."""
 
@@ -270,16 +283,104 @@ class RangeSettings(QWidget):
         values = {}
         for key, control in self.controls.items():
             value = control.text().strip()
-            valid = not value or bool(re.fullmatch(r"\d+(?:-\d+)?", value))
-            if valid and "-" in value:
-                minimum, maximum = (int(part) for part in value.split("-", 1))
-                valid = minimum <= maximum
+            valid = valid_integer_range(value)
             control.setStyleSheet("" if valid else "border: 1px solid #EF4444;")
             if not valid:
                 control.setFocus()
                 raise ValueError(f"{key} must be a number or ascending range.")
             values[key] = value
         return values
+
+
+class AutomaticDailyIncrementSettings(QWidget):
+    """Shared UI and validation for future automatic daily-limit increments."""
+
+    changed = Signal()
+
+    def __init__(
+        self,
+        enabled_key: str,
+        increment_key: str,
+        maximum_key: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.enabled_key = enabled_key
+        self.increment_key = increment_key
+        self.maximum_key = maximum_key
+        layout = QGridLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setHorizontalSpacing(12)
+        layout.setVerticalSpacing(8)
+
+        self.enabled = QCheckBox("Enable Automatic Daily Increment", self)
+        self.increment_label = QLabel("Increase Daily Limit By", self)
+        self.increment = QLineEdit(self)
+        self.increment.setObjectName("dialogInput")
+        self.increment.setPlaceholderText("5")
+        self.maximum_label = QLabel("Maximum Daily Limit", self)
+        self.maximum = QLineEdit(self)
+        self.maximum.setObjectName("dialogInput")
+        self.maximum.setPlaceholderText("60 or 60-80")
+        self.increment.setFixedWidth(180)
+        self.maximum.setFixedWidth(180)
+
+        layout.addWidget(self.enabled, 0, 0, 1, 4)
+        layout.addWidget(self.increment_label, 1, 0)
+        layout.addWidget(self.increment, 1, 1)
+        layout.addWidget(self.maximum_label, 2, 0)
+        layout.addWidget(self.maximum, 2, 1)
+        layout.setColumnStretch(4, 1)
+
+        self.enabled.toggled.connect(self._enabled_changed)
+        self.increment.textChanged.connect(self.changed)
+        self.maximum.textChanged.connect(self.changed)
+        self._set_fields_enabled(False)
+
+    def set_values(self, values: dict) -> None:
+        self.increment.setText(str(values.get(self.increment_key) or "1"))
+        maximum = values.get(self.maximum_key)
+        self.maximum.setText("" if maximum is None else str(maximum))
+        self.enabled.setChecked(bool(values.get(self.enabled_key, False)))
+        self._set_fields_enabled(self.enabled.isChecked())
+        self.increment.setStyleSheet("")
+        self.maximum.setStyleSheet("")
+
+    def values(self) -> dict[str, object]:
+        increment = self.increment.text().strip()
+        maximum = self.maximum.text().strip()
+        if self.enabled.isChecked():
+            if not re.fullmatch(r"[1-9]\d*", increment):
+                self.increment.setStyleSheet("border: 1px solid #EF4444;")
+                self.increment.setFocus()
+                raise ValueError("Increase Daily Limit By must be a positive integer.")
+            self.increment.setStyleSheet("")
+            valid_maximum = valid_integer_range(maximum, allow_empty=False)
+            if not valid_maximum:
+                self.maximum.setStyleSheet("border: 1px solid #EF4444;")
+                self.maximum.setFocus()
+                raise ValueError(
+                    "Maximum Daily Limit must be a number or ascending range."
+                )
+            self.maximum.setStyleSheet("")
+        return {
+            self.enabled_key: self.enabled.isChecked(),
+            self.increment_key: increment,
+            self.maximum_key: maximum,
+        }
+
+    def _enabled_changed(self, checked: bool) -> None:
+        self._set_fields_enabled(checked)
+        self.changed.emit()
+
+    def _set_fields_enabled(self, enabled: bool) -> None:
+        for widget in (
+            self.increment_label,
+            self.increment,
+            self.maximum_label,
+            self.maximum,
+        ):
+            widget.setEnabled(enabled)
 
 
 class RangePairSettings(QWidget):

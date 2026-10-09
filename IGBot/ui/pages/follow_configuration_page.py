@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
 from IGBot.ui.widgets.configuration_widgets import (
+    AutomaticDailyIncrementSettings,
     CheckboxGroup,
     CollapsibleSection,
     ConfigurationSection,
@@ -35,6 +36,11 @@ class FollowConfigurationPage(QScrollArea):
 
     changed = Signal()
     PROFILE_COUNT_MAX = 2_000_000_000
+    AUTO_INCREMENT_KEYS = (
+        "igbot-follow-auto-increment-enabled",
+        "igbot-follow-auto-increment-by",
+        "igbot-follow-auto-increment-maximum",
+    )
 
     PROFILE_SETTINGS: ClassVar[dict[str, str]] = {
         "min_followers": "Minimum Followers",
@@ -96,6 +102,10 @@ class FollowConfigurationPage(QScrollArea):
             include_advanced=False,
             section_title="Follow Method",
             switch_style=False,
+            source_list_filenames={
+                "blogger-followers": "follow_sources_followers.txt",
+                "blogger-following": "follow_sources_following.txt",
+            },
         )
         self.sources.setObjectName("moduleSources")
         self.sources.setVisible(include_sources)
@@ -118,7 +128,7 @@ class FollowConfigurationPage(QScrollArea):
             action_fields,
         )
         self.follow_limit = RangeSettings(
-            {"total-follows-limit": "Follow limit"}, action_fields
+            {"total-follows-limit": "Daily Follow Limit"}, action_fields
         )
         action_field_width = 180
         for control in (
@@ -137,14 +147,17 @@ class FollowConfigurationPage(QScrollArea):
         limit_layout.removeWidget(self.follow_limit.controls[limit_key])
         action_grid.addWidget(self.follow_limit.labels[limit_key], 2, 0)
         action_grid.addWidget(self.follow_limit.controls[limit_key], 2, 1)
+        self.automatic_daily_increment = AutomaticDailyIncrementSettings(
+            *self.AUTO_INCREMENT_KEYS, actions_section
+        )
+        action_grid.addWidget(self.automatic_daily_increment, 3, 0, 3, 4)
         self.follow_limit_help = QLabel(
-            "Daily hard limit.\n"
-            "The bot will never exceed this number of follows per day.",
+            "Daily hard limit. The bot will never exceed this number of follows per day.",
             actions_section,
         )
         self.follow_limit_help.setWordWrap(True)
         self.follow_limit_help.setObjectName("configurationHint")
-        action_grid.addWidget(self.follow_limit_help, 3, 0, 1, 4)
+        action_grid.addWidget(self.follow_limit_help, 6, 0, 1, 4)
         action_grid.setColumnStretch(4, 1)
         actions_section.body_layout.addWidget(action_fields)
         layout.addWidget(actions_section)
@@ -237,6 +250,9 @@ class FollowConfigurationPage(QScrollArea):
         self.follow_amount.changed.connect(lambda: self._field_changed("follow-limit"))
         self.follow_limit.changed.connect(
             lambda: self._field_changed("total-follows-limit")
+        )
+        self.automatic_daily_increment.changed.connect(
+            self._runtime_extension_changed
         )
         for key, control in self.profile_settings.controls.items():
             control.valueChanged.connect(
@@ -352,6 +368,7 @@ class FollowConfigurationPage(QScrollArea):
             self.enabled.setChecked(percentage != "0")
             self.follow_amount.set_value(configuration.get("follow-limit"))
             self.follow_limit.set_values(configuration)
+            self.automatic_daily_increment.set_values(configuration)
             self.profile_settings.set_values(configuration)
             self._set_numeric_filter_enabled(
                 self.followers_filter_enabled,
@@ -374,6 +391,10 @@ class FollowConfigurationPage(QScrollArea):
                 row.set_entries(value if isinstance(value, list) else [])
                 row.enabled.setChecked(bool(value))
             self.sources.set_configuration(configuration)
+            if "igbot-follow-methods" in configuration:
+                selected_methods = set(configuration.get("igbot-follow-methods") or ())
+                for key, row in self.sources.rows.items():
+                    row.enabled.setChecked(key in selected_methods)
             self._reset_runtime_extensions(configuration)
         finally:
             self._loading = False
@@ -418,6 +439,16 @@ class FollowConfigurationPage(QScrollArea):
         return {
             "igbot-follow-mute-after-follow": self.mute_after_follow.isChecked(),
             "igbot-follow-only-active-stories": self.only_active_stories.isChecked(),
+            **self.automatic_daily_increment.values(),
+        }
+
+    def method_values(self) -> dict[str, list[str]]:
+        return {
+            "igbot-follow-methods": [
+                key
+                for key in ("blogger-followers", "blogger-following", "blogger")
+                if self.sources.rows[key].enabled.isChecked()
+            ]
         }
 
     def _edit_list_filter(self, key: str) -> None:

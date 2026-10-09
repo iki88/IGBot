@@ -17,6 +17,7 @@ import yaml
 from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.core.phone_manager import PhoneManager
 from IGBot.core.session_engine import SessionEngine, SessionState
+from IGBot.services.specific_lists_service import SpecificListsService
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -367,6 +368,14 @@ class PhoneScheduler:
             return None, "account configuration is incomplete"
         runtime_extensions = metadata.get("runtime_extensions")
         if isinstance(runtime_extensions, dict):
+            follow = runtime_extensions.get("follow")
+            if isinstance(follow, dict) and "methods" in follow:
+                configuration["igbot-follow-methods"] = list(
+                    follow.get("methods") or []
+                )
+            like = runtime_extensions.get("like")
+            if isinstance(like, dict) and "methods" in like:
+                configuration["igbot-like-methods"] = list(like.get("methods") or [])
             unfollow = runtime_extensions.get("unfollow")
             if isinstance(unfollow, dict):
                 configuration["igbot-unfollow-enabled"] = bool(unfollow.get("enabled"))
@@ -379,6 +388,9 @@ class PhoneScheduler:
                 configuration["igbot-unfollow-budget"] = str(
                     unfollow.get("budget") or "1"
                 )
+        lists = SpecificListsService(account.config_path.parent)
+        lists.initialize()
+        configuration.update(lists.source_values())
         if str(configuration.get("username") or "").strip() != account.username:
             return None, "configured username does not match account identity"
         configured_device = str(configuration.get("device") or "").strip()
@@ -397,11 +409,6 @@ class PhoneScheduler:
             return None, "persisted Application ID does not match inventory"
         if not self._native_configuration_ready(configuration):
             return None, "no enabled native module has complete configuration"
-        directory = account.config_path.parent
-        if not any(
-            (directory / name).is_file() for name in ("runtime.db", "sessions.json")
-        ):
-            return None, "no completed onboarding/session history is available"
         return configuration, None
 
     @staticmethod

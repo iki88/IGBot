@@ -175,7 +175,7 @@ def test_all_followings_navigation_failure_enters_backoff(tmp_path):
 
     result = module.execute(context, None)
 
-    assert result.outcome is ModuleExecutionOutcome.SCROLL_BLOCK
+    assert result.outcome is ModuleExecutionOutcome.NAVIGATION_FAILED
 
 
 def test_following_list_search_navigation_failure_enters_backoff(tmp_path):
@@ -194,4 +194,4 @@ def test_following_list_search_navigation_failure_enters_backoff(tmp_path):
 
     result = module.execute(context, None)
 
-    assert result.outcome is ModuleExecutionOutcome.SCROLL_BLOCK
+    assert result.outcome is ModuleExecutionOutcome.NAVIGATION_FAILED

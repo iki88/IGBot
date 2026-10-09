@@ -110,6 +110,9 @@ class DeviceInventoryService:
             account, username, password, app_id, settings, tag
         )
 
+    def update_account_debug_logging(self, account, enabled: bool):
+        return self._account_assignments.update_debug_logging(account, enabled)
+
     def installed_packages(self, serial: str):
         from IGBot.services.android_package_service import AndroidPackageService
 

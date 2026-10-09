@@ -135,6 +135,40 @@ QFrame#contentCard {
     border-radius: 8px;
 }
 
+QFrame#notificationSummaryCard {
+    background-color: #19212A;
+    border: 1px solid #354252;
+    border-radius: 8px;
+}
+
+QFrame#notificationSummaryCard:hover {
+    background-color: #1E2935;
+    border-color: #526274;
+}
+
+QFrame#notificationSummaryCard[selected="true"] {
+    background-color: #182B43;
+    border: 1px solid #3B82F6;
+}
+
+QFrame#notificationSummaryCard[selected="true"]:hover {
+    background-color: #1C3452;
+    border-color: #60A5FA;
+}
+
+QLabel#notificationSummaryLabel,
+QLabel#filterLabel {
+    color: #9AA7B3;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#notificationSummaryValue {
+    color: #F2F5F8;
+    font-size: 30px;
+    font-weight: 700;
+}
+
 QPushButton {
     min-height: 35px;
     padding: 0 13px;
@@ -233,7 +267,9 @@ QLabel#offlineSummary {
 }
 
 QTableView#deviceTable,
-QTableView#accountsTable {
+QTableView#accountsTable,
+QTableView#notificationsTable,
+QTableView#statisticsTable {
     alternate-background-color: #0f151c;
     background-color: #0b1016;
     border: 1px solid #28323e;
@@ -246,7 +282,9 @@ QTableView#accountsTable {
 }
 
 QTableView#deviceTable::item,
-QTableView#accountsTable::item {
+QTableView#accountsTable::item,
+QTableView#notificationsTable::item,
+QTableView#statisticsTable::item {
     border-bottom: 1px solid #1c242e;
     padding: 0 9px;
 }
@@ -256,7 +294,9 @@ QTableView#accountsTable::item {
 }
 
 QTableView#deviceTable::item:selected,
-QTableView#accountsTable::item:selected {
+QTableView#accountsTable::item:selected,
+QTableView#notificationsTable::item:selected,
+QTableView#statisticsTable::item:selected {
     background-color: #173b66;
 }
 
@@ -712,9 +752,13 @@ QTabWidget#accountTabs QTabBar::tab:hover { background-color: #27272A; color: #F
 QTabWidget#accountTabs QTabBar::tab:selected { background-color: #27272A; border-bottom: 3px solid #3B82F6; color: #F9FAFB; }
 
 QTableView#deviceTable,
-QTableView#accountsTable { background-color: #18181B; alternate-background-color: #202023; border-color: #3F3F46; color: #F9FAFB; gridline-color: #27272A; selection-background-color: #1D4ED8; }
+QTableView#accountsTable,
+QTableView#notificationsTable,
+QTableView#statisticsTable { background-color: #18181B; alternate-background-color: #202023; border-color: #3F3F46; color: #F9FAFB; gridline-color: #27272A; selection-background-color: #1D4ED8; }
 QTableView#deviceTable::item:selected,
-QTableView#accountsTable::item:selected { background-color: #1D4ED8; color: #F9FAFB; }
+QTableView#accountsTable::item:selected,
+QTableView#notificationsTable::item:selected,
+QTableView#statisticsTable::item:selected { background-color: #1D4ED8; color: #F9FAFB; }
 QHeaderView::section { background-color: #27272A; border-color: #3F3F46; color: #A1A1AA; }
 
 QToolButton#fleetStartButton,

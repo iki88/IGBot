@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from uuid import UUID
 
+from IGBot.runtime.analytics import AnalyticsService
 from IGBot.runtime.context import RuntimeContext
+from IGBot.runtime.ignore import IgnoreService
 from IGBot.runtime.logging import RuntimeLogger
 from IGBot.runtime.scheduler.contracts import SchedulerEntryPoint
 from IGBot.runtime.session.models import (
@@ -27,11 +29,19 @@ class SessionController:
         logger: RuntimeLogger,
         *,
         runtime_settings: Mapping[str, object] | None = None,
+        ignore_service: IgnoreService | None = None,
+        analytics: AnalyticsService | None = None,
+        cancellation_requested: Callable[[], bool] = lambda: False,
+        cancellation_wait: Callable[[float], bool] | None = None,
     ) -> None:
         self._startup_pipeline = startup_pipeline
         self._scheduler = scheduler
         self._logger = logger
         self._runtime_settings = dict(runtime_settings or {})
+        self._ignore_service = ignore_service or IgnoreService()
+        self._analytics = analytics
+        self._cancellation_requested = cancellation_requested
+        self._cancellation_wait = cancellation_wait
         self._contexts: dict[UUID, RuntimeContext] = {}
 
     def start(self, context: SessionContext) -> SessionStartResult:
@@ -41,7 +51,13 @@ class SessionController:
 
         handle = SessionHandle(context.session_id)
         runtime_context = RuntimeContext(
-            context, self._logger, runtime_settings=dict(self._runtime_settings)
+            context,
+            self._logger,
+            runtime_settings=dict(self._runtime_settings),
+            ignore_service=self._ignore_service,
+            analytics=self._analytics,
+            cancellation_requested=self._cancellation_requested,
+            cancellation_wait=self._cancellation_wait,
         )
         runtime_context.session_state = SessionState.STARTING
         self._contexts[context.session_id] = runtime_context

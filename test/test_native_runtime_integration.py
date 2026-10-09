@@ -24,6 +24,7 @@ from IGBot.runtime.follow import (
 )
 from IGBot.runtime.follow.daily_limits import successful_follows_today
 from IGBot.runtime.follower_synchronization import RuntimeFollowerComparer
+from IGBot.runtime.like import LikeModule
 from IGBot.runtime.native_integration import (
     NativeAccountRuntime,
     PythonRuntimeLogger,
@@ -122,7 +123,7 @@ def test_runtime_diagnostics_reach_existing_live_log_in_order():
     finally:
         panel.detach_logging()
 
-    expected = [message for _level, message, _fields in messages]
+    expected = [message for level, message, _fields in messages if level != "debug"]
     positions = [
         next(i for i, line in enumerate(lines) if message in line)
         for message in expected
@@ -132,6 +133,21 @@ def test_runtime_diagnostics_reach_existing_live_log_in_order():
         matching = [line for line in lines if message in line]
         assert len(matching) == 1
         assert re.match(r"\d{2}:\d{2}:\d{2}\s+\w+\s+", matching[0])
+    assert not any(messages[1][1] in line for line in lines)
+
+
+def test_runtime_debug_reaches_live_log_in_developer_mode():
+    application = QApplication.instance() or QApplication([])
+    panel = LiveLogPanel()
+    runtime_logger = PythonRuntimeLogger(developer_mode=True)
+
+    try:
+        runtime_logger.debug("Developer diagnostic")
+        application.processEvents()
+        assert "Developer diagnostic" in panel.output.toPlainText()
+        assert application is not None
+    finally:
+        panel.detach_logging()
 
 
 @pytest.mark.parametrize(
@@ -178,7 +194,7 @@ def test_verified_follow_persists_global_and_account_history_without_duplicates(
             return None
 
     class Android:
-        def execute_follow(self, _context):
+        def execute_follow(self, _context, *, continuation="followers"):
             return AndroidFollowResult(android_status, muted=android_muted)
 
     writer = GlobalDatabaseWriter(tmp_path)
@@ -186,11 +202,14 @@ def test_verified_follow_persists_global_and_account_history_without_duplicates(
     persistence.submit(CandidateProfile(candidate, candidate.username))
     executor = _NativeFollowExecutor(None, Android(), persistence)
     try:
-        executor.execute(context, Module(), None)
-        executor.execute(context, Module(), None)
+        first_result = executor.execute(context, Module(), None)
+        second_result = executor.execute(context, Module(), None)
         writer.flush()
     finally:
         writer.close()
+
+    assert first_result.verified_successes == 1
+    assert second_result.verified_successes == 1
 
     with sqlite3.connect(tmp_path / "global_profiles.db") as connection:
         assert connection.execute(
@@ -267,7 +286,7 @@ def test_specific_follow_persists_only_specific_history(tmp_path):
             self.processed.append(processed_candidate)
 
     class Android:
-        def execute_follow(self, _context):
+        def execute_follow(self, _context, *, continuation="followers"):
             return AndroidFollowResult(AndroidFollowStatus.SUCCESS, muted=True)
 
     writer = GlobalDatabaseWriter(tmp_path)
@@ -332,7 +351,7 @@ def test_follow_daily_remaining_uses_persisted_successes_after_limit_change(tmp_
                 "follow-percentage": 100,
                 "follow-limit": 1,
                 "total-follows-limit": daily_limit,
-                "blogger-followers": ["source"],
+                "igbot-follow-sources-followers": ["source"],
             },
             {},
             {},
@@ -343,6 +362,52 @@ def test_follow_daily_remaining_uses_persisted_successes_after_limit_change(tmp_
 
     assert module_for(3).daily_remaining == 1
     assert module_for(5).daily_remaining == 3
+
+
+def test_native_factories_never_fall_back_to_legacy_discovery_sources(tmp_path):
+    context = RuntimeContext(
+        SessionContext(
+            uuid4(),
+            "alice",
+            "PHONE",
+            "com.instagram.android",
+            tmp_path / "account",
+            datetime.now(timezone.utc),
+        ),
+        PythonRuntimeLogger(),
+    )
+    follow_provider = _FollowModuleProvider(
+        {
+            "follow-percentage": "100",
+            "igbot-follow-sources-followers": ["follow.configured"],
+            "blogger-followers": ["username1", "username2"],
+        },
+        {},
+        {},
+        SimpleNamespace(),
+        SimpleNamespace(),
+    )
+    follow = next(iter(follow_provider.modules_for(context)))
+
+    like_provider = _FollowModuleProvider(
+        {
+            "likes-percentage": "100",
+            "igbot-like-sources-followers": ["like.configured"],
+            "blogger-followers": ["username1", "username2"],
+        },
+        {},
+        {},
+        SimpleNamespace(),
+        SimpleNamespace(),
+    )
+    like = next(
+        module
+        for module in like_provider.modules_for(context)
+        if isinstance(module, LikeModule)
+    )
+
+    assert follow._candidate_provider._sources == ("follow.configured",)
+    assert like._candidates._sources == ("like.configured",)
 
 
 def test_native_factory_builds_all_followings_unfollow_from_ui_metadata(tmp_path):
@@ -416,6 +481,42 @@ def test_native_factory_builds_following_list_search_unfollow(tmp_path):
     assert isinstance(unfollow._android, AndroidFollowingListSearchUnfollowProvider)
     assert unfollow._settings.require_no_follow_back
     assert unfollow._continue_after_search_failure
+
+
+def test_native_factory_builds_search_unfollow_without_legacy_enable_flags(tmp_path):
+    context = RuntimeContext(
+        SessionContext(
+            uuid4(),
+            "alice",
+            "PHONE",
+            "com.instagram.android",
+            tmp_path / "account",
+            datetime.now(timezone.utc),
+        ),
+        PythonRuntimeLogger(),
+    )
+    provider = _FollowModuleProvider(
+        {
+            "total-unfollows-limit": "10",
+            "unfollow-delay": "3",
+        },
+        {},
+        {},
+        SimpleNamespace(),
+        SimpleNamespace(),
+        unfollow_extensions={
+            "enabled": True,
+            "method": "search",
+            "budget": "5-10",
+        },
+    )
+
+    modules = tuple(provider.modules_for(context))
+
+    unfollow = next(module for module in modules if isinstance(module, UnfollowModule))
+    assert unfollow.budget_configuration == "5-10"
+    assert unfollow._settings.delay_days == 3
+    assert unfollow._settings.require_no_follow_back is False
 
 
 def test_native_factory_synchronizes_and_builds_specific_unfollow(tmp_path):

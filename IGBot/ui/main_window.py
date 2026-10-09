@@ -3,24 +3,35 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QDialog, QMainWindow, QSplitter, QStackedWidget
+from PySide6.QtWidgets import (
+    QDialog,
+    QMainWindow,
+    QMessageBox,
+    QSplitter,
+    QStackedWidget,
+)
 
 from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.core.session_engine import SessionState
+from IGBot.notifications import NotificationService
+from IGBot.runtime.ignore import IgnoreService
 from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
 from IGBot.services.device_inventory_service import DeviceInventoryService
 from IGBot.services.global_settings_service import GlobalSettingsService
 from IGBot.ui.controllers.device_controller import DeviceController
 from IGBot.ui.controllers.session_controller import SessionController
 from IGBot.ui.pages.account_page import AccountPage
+from IGBot.ui.pages.account_statistics_page import AccountStatisticsPage
 from IGBot.ui.pages.activity_log_page import ActivityLogPage
 from IGBot.ui.pages.devices_page import DevicesPage
 from IGBot.ui.pages.global_settings_page import GlobalSettingsPage
+from IGBot.ui.pages.notifications_page import NotificationsPage
 from IGBot.ui.pages.phone_accounts_page import PhoneAccountsPage
 from IGBot.ui.pages.templates_page import TemplatesPage
 from IGBot.ui.widgets.add_account_dialog import AddAccountDialog
 from IGBot.ui.widgets.confirmation_dialog import ConfirmationDialog
 from IGBot.ui.widgets.error_dialog import ErrorDialog
+from IGBot.ui.widgets.ignore_list_dialog import IgnoreListDialog
 from IGBot.ui.widgets.live_log_panel import LiveLogPanel
 from IGBot.ui.widgets.navigation_sidebar import NavigationSidebar
 from IGBot.ui.widgets.package_selection_dialog import PackageSelectionDialog
@@ -46,11 +57,13 @@ class MainWindow(QMainWindow):
         self._managed_phone_serial: str | None = None
         self._workspace_context = "devices"
         self._account_return_context = "devices"
+        self._statistics_return_context = "accounts"
         self._templates = ()
         self._snapshot_in_progress = False
 
         service = device_service or DeviceInventoryService.for_workspace(Path.cwd())
         workspace_root = getattr(service, "workspace_root", Path.cwd())
+        self.notification_service = NotificationService(workspace_root)
         self.global_settings_service = GlobalSettingsService(workspace_root)
         self.device_controller = DeviceController(service, self)
         self.session_controller = SessionController(workspace_root, self)
@@ -61,17 +74,22 @@ class MainWindow(QMainWindow):
         self.phone_accounts_page = PhoneAccountsPage(self)
         self.live_log = LiveLogPanel(self)
         self.account_page = AccountPage(self)
+        self.statistics_page = AccountStatisticsPage(self)
         self.activity_log_page = ActivityLogPage(self.live_log, self)
         self.global_settings_page = GlobalSettingsPage(
             workspace_root, self, self.global_settings_service
         )
         self.templates_page = TemplatesPage(self)
+        self.notifications_page = NotificationsPage(
+            self, notification_service=self.notification_service
+        )
         self.devices_page.add_device_button.hide()
 
         self._build_shell()
         self._connect_signals()
         self.device_controller.refresh()
         self.device_controller.load_templates()
+        self._refresh_notifications()
 
     def _build_shell(self) -> None:
         self.addToolBar(Qt.TopToolBarArea, self.toolbar)
@@ -79,9 +97,11 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.devices_page)
         self.pages.addWidget(self.phone_accounts_page)
         self.pages.addWidget(self.account_page)
+        self.pages.addWidget(self.statistics_page)
         self.pages.addWidget(self.activity_log_page)
         self.pages.addWidget(self.global_settings_page)
         self.pages.addWidget(self.templates_page)
+        self.pages.addWidget(self.notifications_page)
 
         content_splitter = QSplitter(Qt.Vertical, self)
         content_splitter.setObjectName("contentSplitter")
@@ -152,6 +172,8 @@ class MainWindow(QMainWindow):
         )
         self.phone_accounts_page.back_requested.connect(self._open_devices)
         self.phone_accounts_page.account_open_requested.connect(self._open_account)
+        self.phone_accounts_page.statistics_requested.connect(self._show_statistics)
+        self.statistics_page.back_requested.connect(self._return_from_statistics)
         self.account_page.back_requested.connect(self._return_from_account)
         self.account_page.dirty_changed.connect(self._set_account_dirty)
         self.global_settings_page.dirty_changed.connect(self._set_global_settings_dirty)
@@ -185,6 +207,15 @@ class MainWindow(QMainWindow):
         )
         self.phone_accounts_page.apply_template_requested.connect(
             self._show_apply_template_dialog
+        )
+        self.phone_accounts_page.ignore_list_requested.connect(
+            self._show_ignore_list_dialog
+        )
+        self.phone_accounts_page.debug_logging_requested.connect(
+            self.device_controller.set_account_debug_logging
+        )
+        self.device_controller.debug_logging_saved.connect(
+            self._debug_logging_saved
         )
         self.device_controller.device_folder_ready.connect(
             lambda directory: QDesktopServices.openUrl(QUrl.fromLocalFile(directory))
@@ -397,6 +428,8 @@ class MainWindow(QMainWindow):
         self.devices_page.set_runtime_status(serial, status)
         self._update_runtime_toolbar(None)
         self.statusBar().showMessage(f"{serial}: {status}", 3000)
+        if status in {"Stopped", "Error", "Idle", "Waiting"}:
+            self._refresh_notifications()
 
     def _account_runtime_state_changed(self, username: str, status: str) -> None:
         self.phone_accounts_page.set_runtime_status(username, status)
@@ -443,6 +476,8 @@ class MainWindow(QMainWindow):
         elif page_index == 4:
             self._open_templates()
         elif page_index == 5:
+            self._open_notifications()
+        elif page_index == 6:
             self._open_global_settings()
 
     def _open_accounts(self) -> None:
@@ -488,6 +523,26 @@ class MainWindow(QMainWindow):
             "account", self.phone_accounts_page.build_account_options(account)
         )
         self.live_log.show()
+
+    def _show_statistics(self, account: AssignedAccount) -> None:
+        self._statistics_return_context = self._workspace_context
+        self.statistics_page.set_account(account)
+        self._workspace_context = "statistics"
+        self.pages.setCurrentWidget(self.statistics_page)
+        self.toolbar.set_context_title(f"Statistics — {account.username}")
+        self.toolbar.set_context("statistics")
+        self.live_log.hide()
+
+    def _return_from_statistics(self) -> None:
+        context = self._statistics_return_context
+        if context == "archived":
+            self.device_controller.load_archived_accounts()
+        elif context == "accounts":
+            self._open_accounts()
+        elif context == "phone" and self._managed_phone_serial:
+            self.device_controller.open_phone_accounts(self._managed_phone_serial)
+        else:
+            self._open_devices()
 
     def _show_account_configuration(self, account, configuration) -> None:
         current = self.account_page.account
@@ -610,6 +665,21 @@ class MainWindow(QMainWindow):
         self.live_log.show()
         self.device_controller.load_templates()
 
+    def _open_notifications(self) -> None:
+        self._refresh_notifications()
+        self._managed_phone_serial = None
+        self._workspace_context = "notifications"
+        self.pages.setCurrentWidget(self.notifications_page)
+        self.toolbar.set_context_title("Notifications")
+        self.toolbar.set_context("notifications")
+
+    def _refresh_notifications(self) -> None:
+        self.notifications_page.refresh()
+        self.sidebar.set_notification_count(
+            self.notification_service.count_active(badge_only=True)
+        )
+        self.live_log.show()
+
     def _templates_changed(self, templates) -> None:
         self._templates = tuple(templates)
         self.templates_page.set_templates(self._templates)
@@ -667,6 +737,26 @@ class MainWindow(QMainWindow):
         )
         if dialog.exec() == QDialog.Accepted:
             self.device_controller.apply_template(dialog.selected_template(), account)
+
+    def _show_ignore_list_dialog(self, account: AssignedAccount) -> None:
+        account_directory = account.config_path.parent
+        current = IgnoreService.load(account_directory)
+        dialog = IgnoreListDialog(sorted(current.usernames), self)
+        if dialog.exec() == QDialog.Accepted:
+            IgnoreService.save(account_directory, dialog.entries())
+
+    def _debug_logging_saved(self, account: AssignedAccount, enabled: bool) -> None:
+        logger.info(
+            "Debug Logging updated for %s: %s", account.username, enabled
+        )
+        QMessageBox.information(
+            self,
+            "Debug Logging",
+            "Debug Logging changes will take effect the next time this account "
+            "starts.\n\nStop and start the account to begin a new Debug Logging "
+            "session.",
+            QMessageBox.Ok,
+        )
 
     def _on_template_applied(self, account: AssignedAccount) -> None:
         if self.account_page.account == account:

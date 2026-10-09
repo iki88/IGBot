@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, time, timedelta, timezone
+from pathlib import Path
 
 from IGBot.core.device import AssignedAccount
-from IGBot.runtime.database import RuntimeDatabase
-from IGBot.runtime.follow.daily_limits import remaining_daily_follows
-from IGBot.runtime.unfollow.following_list_database import FollowingListDatabase
+from IGBot.runtime.database import DailyLimitResolver
+from IGBot.services.message_storage_service import MessageStorageService
 
 
 def _enabled(value: object) -> bool:
@@ -26,12 +25,25 @@ def _has_usernames(value: object) -> bool:
 def follow_provider_is_configured(configuration: Mapping[str, object]) -> bool:
     """Match the native Follow factory's provider selection and readiness rules."""
 
+    configured_methods = configuration.get("igbot-follow-methods")
+    methods = (
+        {str(method) for method in configured_methods}
+        if isinstance(configured_methods, (list, tuple))
+        else None
+    )
     specific_users = configuration.get("blogger")
+    if methods is not None and "blogger" not in methods:
+        specific_users = None
     if _enabled(specific_users):
         return _has_usernames(specific_users)
+    source_keys = (
+        ("igbot-follow-sources-followers", "blogger-followers"),
+        ("igbot-follow-sources-following", "blogger-following"),
+    )
     return any(
-        _has_usernames(configuration.get(key))
-        for key in ("blogger-followers", "blogger-following")
+        (methods is None or method in methods)
+        and _has_usernames(configuration.get(module_key))
+        for module_key, method in source_keys
     )
 
 
@@ -46,21 +58,60 @@ def native_follow_configuration_ready(configuration: Mapping[str, object]) -> bo
 def native_unfollow_configuration_ready(configuration: Mapping[str, object]) -> bool:
     """Report whether one implemented native Unfollow provider is enabled."""
 
+    if not bool(configuration.get("igbot-unfollow-enabled")):
+        return False
     method = str(configuration.get("igbot-unfollow-method") or "search")
-    if method in {"all-followings", "specific-users"}:
-        return bool(configuration.get("igbot-unfollow-enabled"))
-    return method in {"search", "following-list-search"} and any(
-        _enabled(configuration.get(key))
-        for key in ("unfollow", "unfollow-non-followers")
+    return method in {
+        "search",
+        "following-list-search",
+        "specific-users",
+        "all-followings",
+    }
+
+
+def native_like_configuration_ready(configuration: Mapping[str, object]) -> bool:
+    """Report whether one implemented native Like provider can run."""
+
+    followers = configuration.get("igbot-like-sources-followers")
+    configured_methods = configuration.get("igbot-like-methods")
+    methods = (
+        {str(method) for method in configured_methods}
+        if isinstance(configured_methods, (list, tuple))
+        else None
     )
+    specific_ready = (methods is None or "blogger" in methods) and _has_usernames(
+        configuration.get("blogger")
+    )
+    followers_ready = (
+        methods is None or "blogger-followers" in methods
+    ) and _has_usernames(followers)
+    return _enabled(configuration.get("likes-percentage")) and (
+        specific_ready or followers_ready
+    )
+
+
+def native_dm_configuration_ready(
+    configuration: Mapping[str, object], account_directory: str | Path | None = None
+) -> bool:
+    """Report whether the native DM module is enabled."""
+
+    if not _enabled(configuration.get("pm-percentage")):
+        return False
+    if account_directory is None:
+        return True
+    storage = MessageStorageService(account_directory)
+    return bool(storage.load(storage.WELCOME_DM).strip())
 
 
 def native_account_configuration_ready(configuration: Mapping[str, object]) -> bool:
     """Report whether any implemented native module is fully configured."""
 
-    return native_follow_configuration_ready(
-        configuration
-    ) or native_unfollow_configuration_ready(configuration)
+    return (
+        native_follow_configuration_ready(configuration)
+        or native_unfollow_configuration_ready(configuration)
+        or native_like_configuration_ready(configuration)
+        or native_dm_configuration_ready(configuration)
+    )
 
 
 def native_account_is_runnable(
@@ -86,40 +137,21 @@ def native_account_execution_capacity(
     """
 
     capacity: dict[str, int] = {}
+    resolver = DailyLimitResolver(account.config_path.parent)
     if native_follow_configuration_ready(configuration):
-        capacity["follow"] = remaining_daily_follows(
-            account.config_path.parent,
-            configuration.get("total-follows-limit"),
-        )
+        capacity["follow"] = resolver.capacity(
+            "follow", configuration.get("total-follows-limit")
+        ).remaining
     if native_unfollow_configuration_ready(configuration):
-        current = datetime.now(timezone.utc)
-        start = datetime.combine(current.date(), time.min, tzinfo=timezone.utc)
-        end = start + timedelta(days=1)
-        try:
-            limit = max(
-                0,
-                int(str(configuration.get("total-unfollows-limit")).split("-", 1)[-1]),
-            )
-        except (TypeError, ValueError):
-            limit = 100_000
-        method = str(configuration.get("igbot-unfollow-method") or "search")
-        if method == "all-followings":
-            with FollowingListDatabase(account.config_path.parent) as database:
-                completed = database.count_unfollowed_between(
-                    start.strftime("%Y-%m-%d %H:%M:%S"),
-                    end.strftime("%Y-%m-%d %H:%M:%S"),
-                )
-        elif method == "specific-users":
-            with RuntimeDatabase(account.config_path.parent) as database:
-                completed = (
-                    database.specific_unfollow.count_successful_unfollows_between(
-                        start.isoformat(), end.isoformat()
-                    )
-                )
-        else:
-            with RuntimeDatabase(account.config_path.parent) as database:
-                completed = database.follow.count_unfollowed_between(
-                    start.isoformat(), end.isoformat()
-                )
-        capacity["unfollow"] = max(0, limit - completed)
+        capacity["unfollow"] = resolver.capacity(
+            "unfollow", configuration.get("total-unfollows-limit")
+        ).remaining
+    if native_like_configuration_ready(configuration):
+        capacity["like"] = resolver.capacity(
+            "like", configuration.get("total-likes-limit")
+        ).remaining
+    if native_dm_configuration_ready(configuration, account.config_path.parent):
+        capacity["dm"] = resolver.capacity(
+            "dm", configuration.get("total-pm-limit")
+        ).remaining
     return capacity

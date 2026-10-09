@@ -64,6 +64,49 @@ def test_overview_contains_only_unified_account_information(tmp_path):
     assert application is not None
 
 
+def test_debug_logging_update_changes_only_existing_config_field(tmp_path):
+    service, account = _account(
+        tmp_path,
+        "# account settings\r\n"
+        "username: original\r\n"
+        "device: phone-a\r\n"
+        "app-id: com.instagram.android\r\n"
+        "debug: false # keep comment\r\n"
+        "screen-sleep: true\r\n",
+    )
+
+    updated = service.update_debug_logging(account, True)
+
+    content = updated.config_path.read_text(encoding="utf-8")
+    assert "debug: true # keep comment" in content
+    assert "screen-sleep: true" in content
+    assert yaml.safe_load(content)["debug"] is True
+
+
+def test_debug_logging_update_adds_missing_field(tmp_path):
+    service, account = _account(tmp_path)
+
+    service.update_debug_logging(account, True)
+
+    configuration = yaml.safe_load(account.config_path.read_text(encoding="utf-8"))
+    assert configuration["debug"] is True
+
+
+def test_normal_account_save_preserves_debug_logging_setting(tmp_path):
+    service, account = _account(tmp_path)
+    service.update_debug_logging(account, True)
+
+    service.update_configuration(
+        account,
+        "original",
+        "old#password",
+        "com.instagram.android",
+    )
+
+    configuration = yaml.safe_load(account.config_path.read_text(encoding="utf-8"))
+    assert configuration["debug"] is True
+
+
 def test_detect_button_shares_the_application_field_row():
     page = AccountPage()
 

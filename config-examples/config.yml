@@ -57,12 +57,12 @@ watch-photo-time: 3-4
 delete-interacted-users: true
 
 ## Unfollow (unfollow jobs)
-unfollow: 10-20
-unfollow-any: 10-20
-unfollow-non-followers: 10-20
-unfollow-any-non-followers: 10-20
-unfollow-any-followers: 10-20
-unfollow-from-file: [usernames1.txt 7-15, usernames2.txt 6]
+unfollow: 0
+unfollow-any: 0
+unfollow-non-followers: 0
+unfollow-any-non-followers: 0
+unfollow-any-followers: 0
+unfollow-from-file: []
 
 ## Special modifier for unfollow jobs
 sort-followers-newest-to-oldest: false
@@ -88,16 +88,16 @@ telegram-reports: false # for using telegram-reports you have also to configure 
 
 interactions-count: 30-40
 likes-count: 1-2
-likes-percentage: 100
-stories-count: 1-2
+likes-percentage: 0
+stories-count: 0
 stories-percentage: 30-40
 carousel-count: 2-3
 carousel-percentage: 60-70
 max-comments-pro-user: 1-2
-# comment-percentage: 30-40
-# pm-percentage: 30-40
+comment-percentage: 0
+pm-percentage: 0
 interact-percentage: 30-40
-follow-percentage: 30-40
+follow-percentage: 0
 follow-limit: 50
 skipped-list-limit: 10-15
 skipped-posts-limit: 5

@@ -32,6 +32,12 @@ class InternetChecker:
     def execute(self, context: RuntimeContext) -> StartupStageResult:
         """Poll until Internet is available, treating waiting as normal startup."""
         while True:
+            if context.cancellation_checkpoint("Internet Checker"):
+                return StartupStageResult(
+                    StartupStageName.INTERNET,
+                    StartupStageStatus.SKIPPED,
+                    detail="Internet check cancelled.",
+                )
             try:
                 observation = self._provider.check(context)
             except Exception as error:  # noqa: BLE001 - provider isolation boundary
@@ -52,4 +58,7 @@ class InternetChecker:
                 )
 
             context.logger.warning(self.RETRY_MESSAGE)
-            self._sleeper(self.RETRY_SECONDS)
+            if context.cancellation_wait is not None:
+                context.cancellation_wait(self.RETRY_SECONDS)
+            else:
+                self._sleeper(self.RETRY_SECONDS)

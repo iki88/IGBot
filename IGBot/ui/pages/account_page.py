@@ -52,7 +52,6 @@ class AccountPage(QWidget):
         self.account: AssignedAccount | None = None
         self.is_dirty = False
         self._loading = False
-        self._syncing_sources = False
 
         self.page_header = PageHeader(
             "Account", "Instagram account configuration.", self
@@ -95,10 +94,6 @@ class AccountPage(QWidget):
         self.tabs.addTab(self.dm_page, "DM")
         for name in self.TABS[8:]:
             self.tabs.addTab(QWidget(self.tabs), name)
-        for page in self._source_pages():
-            page.sources.changed.connect(
-                lambda page=page: self._sync_sources_from(page.sources)
-            )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 18, 22, 18)
@@ -213,31 +208,27 @@ class AccountPage(QWidget):
         values.update(self.comment_page.values())
         values.update(self.story_page.values())
         values.update(self.dm_page.values())
-        values.update(self.follow_page.sources.values())
-        values.update(self.follow_page.runtime_extension_values())
-        values.update(self.unfollow_page.runtime_extension_values())
-        return values
-
-    def _source_pages(self):
-        return (
-            self.follow_page,
-            self.like_page,
-            self.story_page,
-            self.dm_page,
-            self.comment_page,
+        # Provider requirements are conditional on both the module and method.
+        # The source widgets retain dormant selections, but those selections must
+        # never block saving an unrelated enabled module.
+        self.like_page.sources.values(validate=self.like_page.enabled.isChecked())
+        self.story_page.sources.values(validate=self.story_page.enabled.isChecked())
+        self.comment_page.sources.values(
+            validate=self.comment_page.spintax_method.isChecked()
         )
-
-    def _sync_sources_from(self, source) -> None:
-        if self._loading or self._syncing_sources:
-            return
-        self._syncing_sources = True
-        try:
-            values = source.state_values()
-            for page in self._source_pages():
-                if page.sources is not source:
-                    page.sources.set_configuration(values)
-        finally:
-            self._syncing_sources = False
+        self.dm_page.sources.values(validate=self.dm_page.enabled.isChecked())
+        values.update(
+            self.follow_page.sources.values(
+                validate=self.follow_page.enabled.isChecked()
+            )
+        )
+        values.update(self.follow_page.runtime_extension_values())
+        values.update(self.follow_page.method_values())
+        values.update(self.unfollow_page.runtime_extension_values())
+        values.update(self.like_page.runtime_extension_values())
+        values.update(self.like_page.method_values())
+        values.update(self.dm_page.runtime_extension_values())
+        return values
 
     def set_application_id(self, package: str) -> None:
         self.application_id.setText(package)
@@ -286,7 +277,11 @@ class AccountPage(QWidget):
     def set_account(self, account: AssignedAccount, phone_name: str = "") -> None:
         self.account = account
         self.follow_page.sources.set_account_directory(account.config_path.parent)
+        self.like_page.sources.set_account_directory(account.config_path.parent)
+        self.story_page.sources.set_account_directory(account.config_path.parent)
+        self.comment_page.sources.set_account_directory(account.config_path.parent)
         self.unfollow_page.set_account_directory(account.config_path.parent)
+        self.dm_page.sources.set_account_directory(account.config_path.parent)
         self._loading = True
         self.page_header.title.setText(account.username)
         self.page_header.subtitle.setText("Instagram account settings and activity.")

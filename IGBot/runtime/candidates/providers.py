@@ -22,6 +22,7 @@ from IGBot.runtime.candidates.models import (
 from IGBot.runtime.candidates.qualifier import CandidateQualifier
 from IGBot.runtime.context import RuntimeContext
 from IGBot.runtime.database import RuntimeDatabase, SpecificProgress
+from IGBot.runtime.ignore import log_ignored
 
 
 class FollowersProvider:
@@ -178,6 +179,11 @@ class SpecificUsersProvider:
         while position < len(usernames):
             username = usernames[position]
             context.logger.info(f"[Specific] Username: {username}")
+            if context.ignore_service.is_ignored(username):
+                log_ignored(context, username)
+                position += 1
+                self._save_progress(context, position, len(usernames))
+                continue
             context.logger.info("[Specific] Opening candidate profile.")
             observation = self._discovery.open_account(context, username)
             if observation is not None:

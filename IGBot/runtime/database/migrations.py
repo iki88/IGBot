@@ -13,6 +13,7 @@ TIMESTAMPS = {
     "follow_back_date",
     "unfollow_date",
     "last_like_date",
+    "processed_date",
     "last_comment_date",
     "last_story_date",
     "last_dm_date",
@@ -33,8 +34,22 @@ def migrate_runtime_schema(connection: sqlite3.Connection, repositories: tuple) 
         if "follow" in existing
         else set()
     )
-    if "username" in follow_columns and not any(
-        "GLOB '*Z'" in existing.get(name, "") for name in TABLES
+    like_columns = (
+        {row[1] for row in connection.execute('PRAGMA table_info("like")')}
+        if "like" in existing
+        else set()
+    )
+    like_current = {
+        "username",
+        "source",
+        "status",
+        "processed_date",
+        "last_session_id",
+    }.issubset(like_columns)
+    if (
+        "username" in follow_columns
+        and like_current
+        and not any("GLOB '*Z'" in existing.get(name, "") for name in TABLES)
     ):
         return
     if not any(name in existing for name in TABLES):
@@ -45,6 +60,7 @@ def migrate_runtime_schema(connection: sqlite3.Connection, repositories: tuple) 
     try:
         with connection:
             connection.execute("DROP TRIGGER IF EXISTS follow_username_sync")
+            connection.execute("DROP TRIGGER IF EXISTS like_username_sync")
             for name in TABLES:
                 if name in existing:
                     connection.execute(
@@ -65,6 +81,22 @@ def migrate_runtime_schema(connection: sqlite3.Connection, repositories: tuple) 
                     if name == "follow":
                         values["username"] = old_users[values["user_id"]]
                         values.setdefault("muted", 0)
+                    if name == "like":
+                        values["username"] = old_users[values["user_id"]]
+                        values["source"] = values.get("source") or ""
+                        values.setdefault(
+                            "status",
+                            "SUCCESS" if values.get("likes_count", 0) else "UNKNOWN",
+                        )
+                        values.setdefault(
+                            "processed_date", values.get("last_like_date")
+                        )
+                        values.setdefault("last_session_id", None)
+                    if name == "dm":
+                        values.setdefault(
+                            "status",
+                            "SUCCESS" if values.get("dm_count", 0) else "UNKNOWN",
+                        )
                     for column in TIMESTAMPS.intersection(values):
                         values[column] = optional_utc_timestamp(values[column])
                     columns = tuple(values)

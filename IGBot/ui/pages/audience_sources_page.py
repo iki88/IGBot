@@ -17,7 +17,7 @@ class AudienceSourcesPage(QWidget):
     changed = Signal()
     PRIORITY_SOURCES: ClassVar[dict[str, str]] = {
         "blogger-followers": "Follow User's Followers",
-        "blogger-following": "Follow User's Followings",
+        "blogger-following": "Follow User's Following",
         "blogger": "Follow Specific Users",
     }
     ADVANCED_SOURCES: ClassVar[dict[str, str]] = {
@@ -41,6 +41,8 @@ class AudienceSourcesPage(QWidget):
         include_advanced: bool = True,
         section_title: str = "Method",
         switch_style: bool = True,
+        specific_list_filename: str = "followspecific.txt",
+        source_list_filenames: dict[str, str] | None = None,
     ) -> None:
         super().__init__(parent)
         self._loading = False
@@ -48,6 +50,8 @@ class AudienceSourcesPage(QWidget):
         self._hidden_values: dict[str, list[str] | None] = {}
         self.rows: dict[str, TargetSourceRow] = {}
         self._specific_lists: SpecificListsService | None = None
+        self._specific_list_filename = specific_list_filename
+        self._source_list_filenames = dict(source_list_filenames or {})
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
@@ -90,26 +94,51 @@ class AudienceSourcesPage(QWidget):
                 if key in configuration
             }
             for key, row in self.rows.items():
-                value = configuration.get(key)
+                filename = self._source_list_filenames.get(key)
+                value = (
+                    self._specific_lists.load(filename)
+                    if filename is not None and self._specific_lists is not None
+                    else configuration.get(key)
+                )
                 entries = value if isinstance(value, list) else []
                 if (
                     key == "blogger"
                     and entries
                     and self._specific_lists is not None
-                    and not self._specific_lists.load("followspecific.txt")
+                    and not self._specific_lists.load(self._specific_list_filename)
                 ):
-                    self._specific_lists.save("followspecific.txt", entries)
+                    self._specific_lists.save(self._specific_list_filename, entries)
                 row.set_entries(entries)
                 row.enabled.setChecked(bool(entries))
         finally:
             self._loading = False
 
-    def values(self) -> dict:
+    def values(self, *, validate: bool = True) -> dict:
+        """Return configured source values.
+
+        Target presence is a runtime requirement only for an enabled module and
+        selected provider.  AccountPage passes ``validate=False`` for disabled
+        modules so their dormant method selection cannot block unrelated edits.
+        """
         values = {}
         for key, row in self.rows.items():
+            if key in self._source_list_filenames:
+                if validate and row.enabled.isChecked() and not row.entries():
+                    row.name.setStyleSheet("border: 1px solid #EF4444;")
+                    row.name.setFocus()
+                    raise ValueError(f"Add at least one target for {row.name.text()}.")
+                continue
             entries = row.entries()
+            if (
+                key == "blogger"
+                and row.enabled.isChecked()
+                and not entries
+                and self._specific_lists is not None
+            ):
+                entries = self._specific_lists.load(self._specific_list_filename)
+                row.set_entries(entries)
             if row.enabled.isChecked():
-                if not entries:
+                if validate and not entries:
                     row.name.setStyleSheet("border: 1px solid #EF4444;")
                     row.name.setFocus()
                     raise ValueError(f"Add at least one target for {row.name.text()}.")
@@ -134,15 +163,22 @@ class AudienceSourcesPage(QWidget):
     def _edit_source(self, key: str) -> None:
         row = self.rows[key]
         if key == "blogger" and self._specific_lists is not None:
-            row.set_entries(self._specific_lists.load("followspecific.txt"))
+            row.set_entries(self._specific_lists.load(self._specific_list_filename))
         dialog = TargetEditorDialog(
-            row.name.text(), row.entries(), self._validator_for(key), self
+            row.name.text(),
+            row.entries(),
+            self._validator_for(key),
+            self,
+            specific_users=key == "blogger",
         )
         if dialog.exec() == TargetEditorDialog.Accepted:
             entries = dialog.entries()
             row.set_entries(entries)
             if key == "blogger" and self._specific_lists is not None:
-                self._specific_lists.save("followspecific.txt", entries)
+                self._specific_lists.save(self._specific_list_filename, entries)
+            filename = self._source_list_filenames.get(key)
+            if filename is not None and self._specific_lists is not None:
+                self._specific_lists.save(filename, entries)
             row.enabled.setChecked(bool(entries))
             self._changed()
 
@@ -153,6 +189,12 @@ class AudienceSourcesPage(QWidget):
             return
         self._specific_lists = SpecificListsService(account_directory)
         self._specific_lists.initialize()
+        for key, filename in self._source_list_filenames.items():
+            row = self.rows.get(key)
+            if row is not None:
+                entries = self._specific_lists.load(filename)
+                row.set_entries(entries)
+                row.enabled.setChecked(bool(entries))
 
     def _validator_for(self, key: str):
         if key in self.USERNAME_KEYS:
@@ -163,4 +205,12 @@ class AudienceSourcesPage(QWidget):
 
     def _changed(self) -> None:
         if not self._loading:
+            if self._specific_lists is not None:
+                for key, filename in self._source_list_filenames.items():
+                    row = self.rows.get(key)
+                    if row is not None:
+                        self._specific_lists.save(
+                            filename,
+                            row.entries() if row.enabled.isChecked() else [],
+                        )
             self.changed.emit()

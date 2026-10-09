@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 
 from IGBot.ui.pages.audience_sources_page import AudienceSourcesPage
 from IGBot.ui.widgets.configuration_widgets import (
+    AutomaticDailyIncrementSettings,
     CheckboxGroup,
     CollapsibleSection,
     ConfigurationSection,
@@ -20,6 +21,11 @@ from IGBot.ui.widgets.configuration_widgets import (
     RangePairSettings,
     RangeSettings,
     TextListSettings,
+)
+from IGBot.ui.widgets.filter_selection_dialog import (
+    ALPHABETS,
+    LANGUAGES,
+    FilterSelectionDialog,
 )
 from IGBot.ui.widgets.target_editor_dialog import TargetEditorDialog
 from IGBot.ui.widgets.target_source_row import TargetSourceRow
@@ -29,6 +35,13 @@ class LikeConfigurationPage(QScrollArea):
     """Operator-focused editor for documented engine Like settings."""
 
     changed = Signal()
+    USER_AMOUNT_KEY = "igbot-like-budget"
+    ACTION_DELAY_KEY = "igbot-like-action-delay"
+    AUTO_INCREMENT_KEYS = (
+        "igbot-like-auto-increment-enabled",
+        "igbot-like-auto-increment-by",
+        "igbot-like-auto-increment-maximum",
+    )
     INTERACTION_KEYS: ClassVar[dict[str, str]] = {
         "likes-count": "Likes per Profile",
         "likes-percentage": "Like Percentage",
@@ -58,6 +71,8 @@ class LikeConfigurationPage(QScrollArea):
     LIST_FILTERS: ClassVar[dict[str, str]] = {
         "mandatory_words": "Like only if profile contains these words",
         "blacklist_words": "Don't like if profile contains these words",
+        "specific_alphabet": "Allowed Alphabets",
+        "biography_language": "Biography Language",
     }
     WEEKDAYS = (
         "Monday",
@@ -99,10 +114,17 @@ class LikeConfigurationPage(QScrollArea):
         layout.addWidget(enable)
 
         self.sources = AudienceSourcesPage(
-            container, include_advanced=False, section_title="Like Method"
+            container,
+            include_advanced=False,
+            section_title="Like Method",
+            switch_style=False,
+            specific_list_filename="likespecific.txt",
+            source_list_filenames={
+                "blogger-followers": "like_sources_followers.txt"
+            },
         )
         self.sources.setVisible(include_sources)
-        self.sources.rows["blogger-followers"].name.setText("Like Source's Followers")
+        self.sources.rows["blogger-followers"].name.setText("Like Source Followers")
         self.sources.rows["blogger"].name.setText("Like Posts of Specific Users")
         self.sources.rows["blogger-following"].hide()
         layout.addWidget(self.sources)
@@ -137,11 +159,22 @@ class LikeConfigurationPage(QScrollArea):
             control.setFixedWidth(width)
         self._place_pair(self.action_grid, 0, self.user_amount)
         self._place_pair(self.action_grid, 1, self.delay)
-        self._place_field(self.action_grid, 2, self.limits, "total-likes-limit")
-        self._place_field(self.action_grid, 3, self.interaction, "likes-count")
-        self._place_field(self.action_grid, 4, self.media, "watch-photo-time")
-        self._place_field(self.action_grid, 5, self.media, "watch-video-time")
-        self._place_field(self.action_grid, 6, self.interaction, "likes-percentage")
+        self._place_field(self.action_grid, 2, self.interaction, "likes-count")
+        self._place_field(self.action_grid, 3, self.media, "watch-photo-time")
+        self._place_field(self.action_grid, 4, self.media, "watch-video-time")
+        self._place_field(self.action_grid, 5, self.interaction, "likes-percentage")
+        self._place_field(self.action_grid, 6, self.limits, "total-likes-limit")
+        self.automatic_daily_increment = AutomaticDailyIncrementSettings(
+            *self.AUTO_INCREMENT_KEYS, actions
+        )
+        self.action_grid.addWidget(self.automatic_daily_increment, 7, 0, 3, 4)
+        self.like_limit_help = QLabel(
+            "Daily hard limit. The bot will never exceed this number of likes per day.",
+            actions,
+        )
+        self.like_limit_help.setWordWrap(True)
+        self.like_limit_help.setObjectName("configurationHint")
+        self.action_grid.addWidget(self.like_limit_help, 10, 0, 1, 4)
         self.media.labels["carousel-count"].hide()
         self.media.controls["carousel-count"].hide()
         self.media.labels["carousel-percentage"].hide()
@@ -280,6 +313,9 @@ class LikeConfigurationPage(QScrollArea):
         self.files.changed.connect(self._changed)
         self.user_amount.changed.connect(self._runtime_extension_changed)
         self.delay.changed.connect(self._runtime_extension_changed)
+        self.automatic_daily_increment.changed.connect(
+            self._runtime_extension_changed
+        )
         self.schedule_days.changed.connect(self._runtime_extension_changed)
 
     @staticmethod
@@ -329,6 +365,7 @@ class LikeConfigurationPage(QScrollArea):
                 self.interaction.controls["likes-percentage"].setText("100")
             self.enabled.setChecked(percentage != "0")
             self.limits.set_values(configuration)
+            self.automatic_daily_increment.set_values(configuration)
             self.limit_behaviour.set_values(configuration)
             self.media.set_values(configuration)
             self.filters.set_values(configuration)
@@ -338,24 +375,31 @@ class LikeConfigurationPage(QScrollArea):
             self._set_filter_enabled(
                 self.post_filter_enabled,
                 self.post_filter,
-                any(key in configuration for key in ("min_posts",)),
+                any(configuration.get(key) is not None for key in ("min_posts",)),
             )
             self._set_filter_enabled(
                 self.followers_filter_enabled,
                 self.followers_filter,
-                any(key in configuration for key in ("min_followers", "max_followers")),
+                any(
+                    configuration.get(key) is not None
+                    for key in ("min_followers", "max_followers")
+                ),
             )
             self._set_filter_enabled(
                 self.followings_filter_enabled,
                 self.followings_filter,
                 any(
-                    key in configuration for key in ("min_followings", "max_followings")
+                    configuration.get(key) is not None
+                    for key in ("min_followings", "max_followings")
                 ),
             )
             self._set_filter_enabled(
                 self.likes_filter_enabled,
                 self.filters,
-                any(key in configuration for key in ("min_likers", "max_likers")),
+                any(
+                    configuration.get(key) is not None
+                    for key in ("min_likers", "max_likers")
+                ),
             )
             for key, row in self.word_filters.items():
                 value = configuration.get(key)
@@ -366,8 +410,12 @@ class LikeConfigurationPage(QScrollArea):
             )
             self.files.set_values(configuration)
             self.sources.set_configuration(configuration)
-            self.user_amount.set_value(None)
-            self.delay.set_value(None)
+            if "igbot-like-methods" in configuration:
+                selected_methods = set(configuration.get("igbot-like-methods") or ())
+                for key in ("blogger-followers", "blogger"):
+                    self.sources.rows[key].enabled.setChecked(key in selected_methods)
+            self.user_amount.set_value(configuration.get(self.USER_AMOUNT_KEY))
+            self.delay.set_value(configuration.get(self.ACTION_DELAY_KEY))
             self.schedule_days.set_values(
                 {day.casefold(): True for day in self.WEEKDAYS}
             )
@@ -377,6 +425,9 @@ class LikeConfigurationPage(QScrollArea):
 
     def values(self) -> dict:
         values = self.interaction.values()
+        likes_count = values.get("likes-count", "")
+        if likes_count.isdigit():
+            values["likes-count"] = f"{likes_count}-{likes_count}"
         values["likes-percentage"] = (
             self._enabled_percentage if self.enabled.isChecked() else "0"
         )
@@ -430,6 +481,24 @@ class LikeConfigurationPage(QScrollArea):
                 raise ValueError(f"Minimum {noun} cannot exceed maximum {noun}.")
         return result
 
+    def runtime_extension_values(self) -> dict[str, object]:
+        """Return account-local Like settings outside the engine YAML contract."""
+
+        return {
+            self.USER_AMOUNT_KEY: self.user_amount.value(),
+            self.ACTION_DELAY_KEY: self.delay.value(),
+            **self.automatic_daily_increment.values(),
+        }
+
+    def method_values(self) -> dict[str, list[str]]:
+        return {
+            "igbot-like-methods": [
+                key
+                for key in ("blogger-followers", "blogger")
+                if self.sources.rows[key].enabled.isChecked()
+            ]
+        }
+
     def _filter_values(self) -> dict:
         values = {}
         for toggle, editor in (
@@ -439,14 +508,14 @@ class LikeConfigurationPage(QScrollArea):
             (self.likes_filter_enabled, self.filters),
         ):
             for key, value in editor.values().items():
-                if key in self._edited_keys:
+                if key in self._present_keys or key in self._edited_keys:
                     values[key] = value if toggle.isChecked() else None
         return values
 
     def _word_filter_values(self) -> dict:
         values = {}
         for key, row in self.word_filters.items():
-            if key not in self._edited_keys:
+            if key not in self._present_keys and key not in self._edited_keys:
                 continue
             entries = row.entries()
             if row.enabled.isChecked():
@@ -473,9 +542,17 @@ class LikeConfigurationPage(QScrollArea):
 
     def _edit_word_filter(self, key: str) -> None:
         row = self.word_filters[key]
-        dialog = TargetEditorDialog(
-            row.name.text(), row.entries(), lambda entry: bool(entry.strip()), self
-        )
+        if key in {"specific_alphabet", "biography_language"}:
+            dialog = FilterSelectionDialog(
+                row.name.text(),
+                ALPHABETS if key == "specific_alphabet" else LANGUAGES,
+                row.entries(),
+                self,
+            )
+        else:
+            dialog = TargetEditorDialog(
+                row.name.text(), row.entries(), lambda entry: bool(entry.strip()), self
+            )
         if dialog.exec() == TargetEditorDialog.Accepted:
             entries = dialog.entries()
             row.set_entries(entries)

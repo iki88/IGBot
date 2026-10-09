@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from IGBot.core.device import AssignedAccount, DeviceFleetSnapshot, DeviceRecord
 from IGBot.core.session_engine import SessionState
@@ -191,8 +191,28 @@ def test_sidebar_contains_workspace_and_settings_navigation(application):
     assert [
         window.sidebar.navigation.item(index).text()
         for index in range(window.sidebar.navigation.count())
-    ] == ["Devices", "Accounts", "Archived", "Activity Log", "Templates"]
+    ] == [
+        "Devices",
+        "Accounts",
+        "Archived",
+        "Activity Log",
+        "Templates",
+        "Notifications (0)",
+    ]
     assert window.sidebar.settings_navigation.item(0).text() == "Global Settings"
+    window.close()
+
+
+def test_notifications_uses_workspace_navigation(application):
+    window = MainWindow(_DeviceService())
+
+    notifications_item = window.sidebar.navigation.item(5)
+    window.sidebar.navigation.itemClicked.emit(notifications_item)
+
+    assert window.pages.currentWidget() is window.notifications_page
+    assert window.notifications_page.page_header.title.text() == "Notifications"
+    assert window._workspace_context == "notifications"
+    assert window.toolbar.title.text() == "Notifications"
     window.close()
 
 
@@ -215,6 +235,31 @@ def test_global_accounts_workspace_excludes_archived_accounts(application):
     assert window.phone_accounts_page.model.rowCount() == 1
     assert window.phone_accounts_page.model.account_at(0) == account
     assert not window.toolbar.add_device_action.isVisible()
+    window.close()
+
+
+def test_statistics_uses_workspace_navigation_and_returns_to_accounts(application):
+    window = MainWindow(_DeviceService())
+    account = AssignedAccount(
+        "statistics_account",
+        "phone-a",
+        "com.instagram.android",
+        Path("accounts/statistics_account/config.yml"),
+    )
+    window._open_accounts()
+
+    window._show_statistics(account)
+
+    assert window.pages.currentWidget() is window.statistics_page
+    assert window.statistics_page.page_header.title.text() == (
+        "Statistics — statistics_account"
+    )
+    assert window._workspace_context == "statistics"
+
+    window.statistics_page.back_requested.emit()
+
+    assert window.pages.currentWidget() is window.phone_accounts_page
+    assert window._workspace_context == "accounts"
     window.close()
 
 
@@ -614,10 +659,12 @@ def test_archived_account_opens_shared_account_page(application):
     assert window.account_page.device.text() == "Archived"
     assert [
         action.text() for action in window.toolbar.options_button.menu().actions()
-    ] == [
-        "Restore Account",
-        "Open Account Folder",
-        "Delete Account",
+        ] == [
+            "Restore Account",
+            "Ignored Accounts List...",
+            "Open Account Folder",
+            "Enable Debug Logging",
+            "Delete Account",
     ]
     window.close()
 
@@ -638,4 +685,27 @@ def test_activity_log_and_global_settings_routes(application):
 
     assert window.pages.currentWidget() is window.global_settings_page
     assert window.toolbar.title.text() == "Global settings"
+    window.close()
+
+
+def test_debug_logging_change_displays_restart_information(application, mocker):
+    window = MainWindow(_DeviceService())
+    account = AssignedAccount(
+        "real_account",
+        "phone-a",
+        "com.instagram.android",
+        Path("accounts/real_account/config.yml"),
+    )
+    information = mocker.patch.object(QMessageBox, "information")
+
+    window._debug_logging_saved(account, True)
+
+    information.assert_called_once_with(
+        window,
+        "Debug Logging",
+        "Debug Logging changes will take effect the next time this account "
+        "starts.\n\nStop and start the account to begin a new Debug Logging "
+        "session.",
+        QMessageBox.Ok,
+    )
     window.close()

@@ -33,6 +33,7 @@ class AndroidFollowResult:
     profile: CandidateProfile | None = None
     contact_details: Mapping[str, str] = field(default_factory=dict)
     muted: bool = False
+    navigation_failed: bool = False
 
     @property
     def succeeded(self) -> bool:

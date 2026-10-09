@@ -6,6 +6,7 @@ from xml.etree import ElementTree
 from IGBot.runtime import RuntimeContext, SessionContext
 from IGBot.runtime.database import FollowRecord, RuntimeDatabase
 from IGBot.runtime.follow import AndroidContactScraper, AndroidFollowProvider
+from IGBot.runtime.ignore import IgnoreService
 from IGBot.runtime.scheduler import ModuleExecutionOutcome
 from IGBot.runtime.unfollow import (
     AndroidUnfollowProvider,
@@ -272,6 +273,21 @@ def test_unfollow_module_selects_delayed_record_and_updates_only_after_success(
         assert record.unfollow_date is not None
 
 
+def test_unfollow_delay_is_evaluated_during_candidate_selection(tmp_path):
+    now = datetime.now(timezone.utc)
+    with RuntimeDatabase(tmp_path) as database:
+        seed_follow(database, "recent_user", now - timedelta(days=1))
+    ctx = context(tmp_path)
+    android = StubAndroid(AndroidUnfollowStatus.SUCCESS)
+    module = UnfollowModule(ctx, UnfollowSettings(True, True, 1, 10, 10, 3), android)
+    module.start()
+
+    result = module.execute(ctx, None)
+
+    assert result.outcome is ModuleExecutionOutcome.NO_CANDIDATES
+    assert android.usernames == []
+
+
 def test_unfollow_module_does_not_persist_failed_verification(tmp_path):
     now = datetime.now(timezone.utc)
     with RuntimeDatabase(tmp_path) as database:
@@ -288,3 +304,22 @@ def test_unfollow_module_does_not_persist_failed_verification(tmp_path):
 
     with RuntimeDatabase(tmp_path) as database:
         assert not database.follow.get(user_id).unfollowed
+
+
+def test_unfollow_ignore_list_skips_without_android_or_history_update(tmp_path):
+    now = datetime.now(timezone.utc)
+    with RuntimeDatabase(tmp_path) as database:
+        ignored_id = seed_follow(database, "ignored_user", now - timedelta(days=10))
+        allowed_id = seed_follow(database, "allowed_user", now - timedelta(days=9))
+    ctx = context(tmp_path)
+    ctx.ignore_service = IgnoreService(frozenset({"ignored_user"}))
+    android = StubAndroid(AndroidUnfollowStatus.SUCCESS)
+    module = UnfollowModule(ctx, UnfollowSettings(True, True, 1, 10, 10, 0), android)
+    module.start()
+
+    module.execute(ctx, None)
+
+    assert android.usernames == ["allowed_user"]
+    with RuntimeDatabase(tmp_path) as database:
+        assert not database.follow.get(ignored_id).unfollowed
+        assert database.follow.get(allowed_id).unfollowed

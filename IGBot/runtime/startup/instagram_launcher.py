@@ -63,7 +63,16 @@ class InstagramLauncher:
 
         if delay:
             context.logger.info("Waiting after launching Instagram", seconds=delay)
-            self._sleeper(delay)
+            if context.cancellation_wait is not None:
+                context.cancellation_wait(delay)
+            else:
+                self._sleeper(delay)
+            if context.cancellation_checkpoint("Instagram launch wait"):
+                return StartupStageResult(
+                    StartupStageName.INSTAGRAM_LAUNCH,
+                    StartupStageStatus.SKIPPED,
+                    detail="Instagram launch wait cancelled.",
+                )
 
         try:
             foreground = self._provider.foreground(context)

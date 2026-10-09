@@ -2,7 +2,7 @@ import json
 
 import pytest
 import yaml
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QCheckBox
 
 from IGBot.core.device import AssignedAccount
 from IGBot.services.account_assignment_service import AccountAssignmentService
@@ -82,11 +82,11 @@ def test_unfollow_rejects_invalid_or_reversed_ranges():
     page = UnfollowConfigurationPage()
     page.set_configuration({})
 
-    page.modes.controls["unfollow"].setText("invalid")
-    with pytest.raises(ValueError, match="unfollow must be"):
+    page.modes.controls["unfollow-non-followers"].setText("invalid")
+    with pytest.raises(ValueError, match="unfollow-non-followers must be"):
         page.values()
 
-    page.modes.controls["unfollow"].setText("20-10")
+    page.modes.controls["unfollow-non-followers"].setText("20-10")
     with pytest.raises(ValueError, match="ascending range"):
         page.values()
 
@@ -119,7 +119,7 @@ def test_unfollow_child_edits_do_not_disable_module():
     page.search_method.setChecked(True)
     page.limits.controls["total-unfollows-limit"].setText("2-5")
     page.numeric.controls["unfollow-delay"].setValue(3)
-    page.mode_options.controls["unfollow"].setChecked(True)
+    page.mode_options.controls["unfollow-non-followers"].setChecked(True)
     page.behaviour.controls["delete-removed-followers"].setChecked(True)
 
     assert page.enabled.isChecked()
@@ -132,7 +132,7 @@ def test_unfollow_child_edits_do_not_enable_module():
     page.search_method.setChecked(True)
     page.limits.controls["total-unfollows-limit"].setText("2")
     page.numeric.controls["unfollow-delay"].setValue(3)
-    page.mode_options.controls["unfollow"].setChecked(True)
+    page.mode_options.controls["unfollow-non-followers"].setChecked(True)
 
     assert not page.enabled.isChecked()
 
@@ -195,7 +195,7 @@ def test_unfollow_uses_operator_layout_and_collapsed_schedule():
     assert page.schedule_section.toggle.text() == "Schedule"
     assert not page.schedule_section.body.isVisible()
     assert page.specific_users.name.text() == "Unfollow Specific Users"
-    assert page.modes.labels["unfollow"].text() == "Only Users Followed by IGBot"
+    assert "unfollow" not in page.modes.labels
     assert page.search_method.text() == "Unfollow Using Search"
     assert (
         page.following_list_search_method.text()
@@ -206,7 +206,6 @@ def test_unfollow_uses_operator_layout_and_collapsed_schedule():
     assert page.timing_section.title.text() == "Unfollow Timing"
     assert page.additional_section.title.text() == "Additional Unfollow Settings"
     assert set(page.mode_options.controls) == {
-        "unfollow",
         "unfollow-non-followers",
     }
 
@@ -229,7 +228,7 @@ def test_unfollow_methods_are_mutually_exclusive():
 def test_all_followings_disables_history_settings_and_shows_warning_and_sorting():
     page = UnfollowConfigurationPage()
     page.search_method.setChecked(True)
-    page.mode_options.controls["unfollow"].setChecked(True)
+    page.mode_options.controls["unfollow-non-followers"].setChecked(True)
 
     page.all_followings_method.setChecked(True)
 
@@ -247,28 +246,37 @@ def test_all_followings_disables_history_settings_and_shows_warning_and_sorting(
     assert page.sort_following_list.isHidden()
 
 
-def test_unfollow_history_options_are_mutually_exclusive():
+def test_specific_users_disables_non_follower_history_setting():
     page = UnfollowConfigurationPage()
     page.search_method.setChecked(True)
-    followed_by_igbot = page.mode_options.controls["unfollow"]
-    did_not_follow_back = page.mode_options.controls["unfollow-non-followers"]
+    option = page.mode_options.controls["unfollow-non-followers"]
+    option.setChecked(True)
 
-    followed_by_igbot.setChecked(True)
-    assert followed_by_igbot.isChecked()
-    assert not did_not_follow_back.isChecked()
+    page.specific_users.enabled.setChecked(True)
+
+    assert not option.isChecked()
+    assert not option.isEnabled()
+
+
+def test_only_non_followers_is_the_only_visible_history_option():
+    page = UnfollowConfigurationPage()
+    page.search_method.setChecked(True)
+    did_not_follow_back = page.mode_options.controls["unfollow-non-followers"]
 
     did_not_follow_back.setChecked(True)
     assert did_not_follow_back.isChecked()
-    assert not followed_by_igbot.isChecked()
+    assert all(
+        widget.text() != "Only Users Followed by IGBot"
+        for widget in page.findChildren(QCheckBox)
+    )
 
 
-@pytest.mark.parametrize("key", ("unfollow", "unfollow-non-followers"))
-def test_existing_unfollow_history_option_loads_and_saves(key):
+def test_existing_non_follower_option_loads_and_saves():
     page = UnfollowConfigurationPage()
-    page.set_configuration({key: "2-5"})
+    page.set_configuration({"unfollow-non-followers": "2-5"})
 
-    assert page.mode_options.controls[key].isChecked()
-    assert page.values()[key] == "2-5"
+    assert page.mode_options.controls["unfollow-non-followers"].isChecked()
+    assert page.values()["unfollow-non-followers"] == "2-5"
 
 
 def test_unfollow_ui_only_method_and_sort_persist_in_account_metadata(tmp_path):
@@ -296,6 +304,9 @@ def test_unfollow_ui_only_method_and_sort_persist_in_account_metadata(tmp_path):
         "sort": "default",
         "budget": "5-10",
         "action_delay": "0",
+        "auto_increment_enabled": False,
+        "auto_increment_by": "1",
+        "auto_increment_maximum": "",
     }
     loaded = service.load_configuration(account.config_path)
     assert loaded["igbot-unfollow-enabled"] is True
@@ -304,13 +315,16 @@ def test_unfollow_ui_only_method_and_sort_persist_in_account_metadata(tmp_path):
 
 def test_unfollow_action_range_updates_selected_engine_method_only():
     page = UnfollowConfigurationPage()
-    page.set_configuration({"unfollow": "5-10", "min-following": 125})
+    page.set_configuration(
+        {"unfollow-non-followers": "5-10", "min-following": 125}
+    )
 
     page.unfollow_amount.minimum.setValue(8)
     page.unfollow_amount.maximum.setValue(12)
     values = page.values()
 
-    assert values["unfollow"] == "8-12"
+    assert values["unfollow-non-followers"] == "8-12"
+    assert "unfollow" not in values
     assert values["min-following"] == 125
     assert "unfollow-any" not in values
 
@@ -340,13 +354,45 @@ def test_unfollow_action_fields_share_follow_alignment():
     assert grid.getItemPosition(grid.indexOf(action_delay_minimum))[:2] == (1, 1)
     assert grid.getItemPosition(grid.indexOf(action_delay_maximum))[:2] == (1, 3)
     assert grid.getItemPosition(grid.indexOf(limit))[:2] == (2, 1)
-    assert grid.getItemPosition(grid.indexOf(page.unfollow_limit_help))[0] == 3
+    assert grid.getItemPosition(grid.indexOf(page.unfollow_limit_help))[0] == 6
     assert "Daily hard limit" in page.unfollow_limit_help.text()
+    assert (
+        page.limits.labels["total-unfollows-limit"].text()
+        == "Daily Unfollow Limit"
+    )
+    assert page.unfollow_limit_help.text() == (
+        "Daily hard limit. The bot will never exceed this number of unfollows per day."
+    )
+    assert "\n" not in page.unfollow_limit_help.text()
     assert grid.indexOf(delay) == -1
     assert page.timing_grid.getItemPosition(page.timing_grid.indexOf(delay))[:2] == (
         0,
         1,
     )
+
+
+def test_unfollow_automatic_daily_increment_round_trip(tmp_path):
+    service, account = configuration(tmp_path)
+    page = AccountPage()
+    page.set_account(account)
+    page.set_configuration(service.load_configuration(account.config_path))
+    automatic = page.unfollow_page.automatic_daily_increment
+    automatic.enabled.setChecked(True)
+    automatic.increment.setText("3")
+    automatic.maximum.setText("40-50")
+
+    service.update_configuration(
+        account,
+        "account",
+        "secret",
+        "com.instagram.clone",
+        page.configuration_values(),
+    )
+    loaded = service.load_configuration(account.config_path)
+
+    assert loaded["igbot-unfollow-auto-increment-enabled"] is True
+    assert loaded["igbot-unfollow-auto-increment-by"] == "3"
+    assert loaded["igbot-unfollow-auto-increment-maximum"] == "40-50"
 
 
 def test_unfollow_action_delay_persists_as_account_metadata(tmp_path):

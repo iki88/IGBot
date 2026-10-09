@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+
+from IGBot.runtime.navigation import NavigationResult
 
 
 class AndroidUnfollowStatus(StrEnum):
@@ -14,6 +16,7 @@ class AndroidUnfollowStatus(StrEnum):
     NOT_FOLLOWING = "NOT_FOLLOWING"
     VERIFICATION_FAILED = "VERIFICATION_FAILED"
     NAVIGATION_FAILED = "NAVIGATION_FAILED"
+    IGNORED = "IGNORED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +24,7 @@ class AndroidUnfollowResult:
     status: AndroidUnfollowStatus
     detail: str | None = None
     username: str | None = None
+    navigation: NavigationResult = field(default_factory=NavigationResult)
 
 
 @dataclass(frozen=True, slots=True)

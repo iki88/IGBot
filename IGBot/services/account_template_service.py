@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from typing import ClassVar
 
 import yaml
 from atomicwrites import atomic_write
@@ -45,6 +46,8 @@ class AccountTemplateService:
             "min_followings",
             "max_followings",
             "min_posts",
+            "min_likers",
+            "max_likers",
             "mutual_friends",
             "min_potency_ratio",
             "max_potency_ratio",
@@ -56,6 +59,29 @@ class AccountTemplateService:
     )
     CONFIG_KEYS = frozenset(
         {
+            "igbot-template-follow-methods",
+            "igbot-template-like-methods",
+            "igbot-follow-mute-after-follow",
+            "igbot-follow-only-active-stories",
+            "igbot-follow-auto-increment-enabled",
+            "igbot-follow-auto-increment-by",
+            "igbot-follow-auto-increment-maximum",
+            "igbot-unfollow-enabled",
+            "igbot-unfollow-method",
+            "igbot-unfollow-sort",
+            "igbot-unfollow-budget",
+            "igbot-unfollow-action-delay",
+            "igbot-unfollow-auto-increment-enabled",
+            "igbot-unfollow-auto-increment-by",
+            "igbot-unfollow-auto-increment-maximum",
+            "igbot-like-budget",
+            "igbot-like-action-delay",
+            "igbot-like-auto-increment-enabled",
+            "igbot-like-auto-increment-by",
+            "igbot-like-auto-increment-maximum",
+            "igbot-dm-method",
+            "igbot-dm-budget",
+            "igbot-dm-action-delay",
             "follow-percentage",
             "follow-limit",
             "total-follows-limit",
@@ -92,6 +118,83 @@ class AccountTemplateService:
             "end-if-comments-limit-reached",
         }
     )
+    METHOD_CONFIG_KEYS = frozenset(
+        {
+            "igbot-template-follow-methods",
+            "igbot-template-like-methods",
+            "igbot-unfollow-method",
+            "igbot-dm-method",
+        }
+    )
+    RUNTIME_EXTENSION_KEYS: ClassVar[dict[str, tuple[str, str]]] = {
+        "igbot-follow-mute-after-follow": ("follow", "mute_after_follow"),
+        "igbot-follow-only-active-stories": ("follow", "only_active_stories"),
+        "igbot-follow-auto-increment-enabled": (
+            "follow",
+            "auto_increment_enabled",
+        ),
+        "igbot-follow-auto-increment-by": ("follow", "auto_increment_by"),
+        "igbot-follow-auto-increment-maximum": (
+            "follow",
+            "auto_increment_maximum",
+        ),
+        "igbot-unfollow-enabled": ("unfollow", "enabled"),
+        "igbot-unfollow-method": ("unfollow", "method"),
+        "igbot-unfollow-sort": ("unfollow", "sort"),
+        "igbot-unfollow-budget": ("unfollow", "budget"),
+        "igbot-unfollow-action-delay": ("unfollow", "action_delay"),
+        "igbot-unfollow-auto-increment-enabled": (
+            "unfollow",
+            "auto_increment_enabled",
+        ),
+        "igbot-unfollow-auto-increment-by": ("unfollow", "auto_increment_by"),
+        "igbot-unfollow-auto-increment-maximum": (
+            "unfollow",
+            "auto_increment_maximum",
+        ),
+        "igbot-like-budget": ("like", "budget"),
+        "igbot-like-action-delay": ("like", "action_delay"),
+        "igbot-like-auto-increment-enabled": (
+            "like",
+            "auto_increment_enabled",
+        ),
+        "igbot-like-auto-increment-by": ("like", "auto_increment_by"),
+        "igbot-like-auto-increment-maximum": (
+            "like",
+            "auto_increment_maximum",
+        ),
+        "igbot-dm-method": ("dm", "method"),
+        "igbot-dm-budget": ("dm", "budget"),
+        "igbot-dm-action-delay": ("dm", "action_delay"),
+    }
+    ALWAYS_PERSIST_CONFIG_KEYS = METHOD_CONFIG_KEYS | frozenset(RUNTIME_EXTENSION_KEYS)
+    RUNTIME_EXTENSION_DEFAULTS: ClassVar[dict[str, object]] = {
+        "igbot-follow-mute-after-follow": False,
+        "igbot-follow-only-active-stories": False,
+        "igbot-follow-auto-increment-enabled": False,
+        "igbot-follow-auto-increment-by": "1",
+        "igbot-follow-auto-increment-maximum": "",
+        "igbot-unfollow-enabled": False,
+        "igbot-unfollow-method": "",
+        "igbot-unfollow-sort": "default",
+        "igbot-unfollow-budget": "1",
+        "igbot-unfollow-action-delay": "0",
+        "igbot-unfollow-auto-increment-enabled": False,
+        "igbot-unfollow-auto-increment-by": "1",
+        "igbot-unfollow-auto-increment-maximum": "",
+        "igbot-like-budget": "0",
+        "igbot-like-action-delay": "0",
+        "igbot-like-auto-increment-enabled": False,
+        "igbot-like-auto-increment-by": "1",
+        "igbot-like-auto-increment-maximum": "",
+        "igbot-dm-method": "new-followers",
+        "igbot-dm-budget": "1",
+        "igbot-dm-action-delay": "0",
+    }
+    METHOD_DEFAULTS: ClassVar[dict[str, object]] = {
+        "igbot-template-follow-methods": [],
+        "igbot-template-like-methods": [],
+    }
 
     def __init__(self, templates_directory: Path) -> None:
         self.directory = templates_directory
@@ -140,16 +243,20 @@ class AccountTemplateService:
         unsupported = set(values) - self.CONFIG_KEYS - self.FILTER_KEYS
         if unsupported:
             raise ValueError("The template contains account-specific settings.")
+        self._validate_methods(values)
+        self._validate_runtime_extensions(values)
         config = {
-            key: value
-            for key, value in values.items()
-            if key in self.CONFIG_KEYS and value not in (None, "", [])
+            key: self._config_default(key)
+            for key in self.CONFIG_KEYS
+            if key not in self.METHOD_CONFIG_KEYS or key in values
         }
-        filters = {
-            key: value
-            for key, value in values.items()
-            if key in self.FILTER_KEYS and value not in (None, "", [])
-        }
+        config.update(
+            {key: value for key, value in values.items() if key in self.CONFIG_KEYS}
+        )
+        filters = {key: None for key in self.FILTER_KEYS}
+        filters.update(
+            {key: value for key, value in values.items() if key in self.FILTER_KEYS}
+        )
         config_path = template.directory / "config.yml"
         filters_path = template.directory / "filters.yml"
         originals = {
@@ -193,14 +300,38 @@ class AccountTemplateService:
 
     def apply(self, name: str, account_directory: Path) -> None:
         from IGBot.services.account_assignment_service import AccountAssignmentService
+        from IGBot.services.account_metadata_service import AccountMetadataService
+        from IGBot.services.specific_lists_service import SpecificListsService
 
         values = self.load(name)
-        config_values = {
-            key: value for key, value in values.items() if key in self.CONFIG_KEYS
+        has_source_methods = any(
+            key in values
+            for key in (
+                "igbot-template-follow-methods",
+                "igbot-template-like-methods",
+            )
+        )
+        follow_methods = set(values.pop("igbot-template-follow-methods", ()) or ())
+        like_methods = set(values.pop("igbot-template-like-methods", ()) or ())
+        runtime_extension_values = {
+            key: values.pop(key, default)
+            for key, default in self.RUNTIME_EXTENSION_DEFAULTS.items()
         }
-        filter_values = {
-            key: value for key, value in values.items() if key in self.FILTER_KEYS
-        }
+        runtime_extension_values["igbot-follow-methods"] = sorted(follow_methods)
+        runtime_extension_values["igbot-like-methods"] = sorted(like_methods)
+        account_config_keys = (
+            self.CONFIG_KEYS
+            - self.METHOD_CONFIG_KEYS
+            - frozenset(self.RUNTIME_EXTENSION_KEYS)
+        )
+        config_values = {key: None for key in account_config_keys}
+        config_values.update(
+            {key: value for key, value in values.items() if key in account_config_keys}
+        )
+        filter_values = {key: None for key in self.FILTER_KEYS}
+        filter_values.update(
+            {key: value for key, value in values.items() if key in self.FILTER_KEYS}
+        )
         targets = {
             account_directory / "config.yml": config_values,
             account_directory / "filters.yml": filter_values,
@@ -208,7 +339,35 @@ class AccountTemplateService:
         originals = {
             path: path.read_bytes() if path.is_file() else None for path in targets
         }
+        metadata_service = AccountMetadataService()
+        metadata_path = account_directory / metadata_service.FILE_NAME
+        original_metadata = (
+            metadata_path.read_bytes() if metadata_path.is_file() else None
+        )
         try:
+            current_config = self._read_yaml(account_directory / "config.yml")
+            selected_sources = follow_methods | like_methods
+            for source in ("blogger-followers", "blogger-following", "blogger"):
+                if has_source_methods and source not in selected_sources:
+                    config_values[source] = None
+            if (
+                has_source_methods
+                and "blogger" in selected_sources
+                and not current_config.get("blogger")
+            ):
+                lists = SpecificListsService(account_directory)
+                filenames = []
+                if "blogger" in follow_methods:
+                    filenames.append("followspecific.txt")
+                if "blogger" in like_methods:
+                    filenames.append("likespecific.txt")
+                usernames = []
+                for filename in filenames:
+                    usernames = lists.load(filename)
+                    if usernames:
+                        break
+                if usernames:
+                    config_values["blogger"] = usernames
             for path, additions in targets.items():
                 AccountAssignmentService._update_yaml_fields(path, additions)
                 verified = self._read_yaml(path)
@@ -216,6 +375,34 @@ class AccountTemplateService:
                     raise RuntimeError(
                         f"The applied {path.name} could not be verified."
                     )
+            metadata = metadata_service.load(account_directory)
+            extensions = dict(metadata.get("runtime_extensions") or {})
+            for key, value in runtime_extension_values.items():
+                if key == "igbot-follow-methods":
+                    module, field = "follow", "methods"
+                elif key == "igbot-like-methods":
+                    module, field = "like", "methods"
+                else:
+                    module, field = self.RUNTIME_EXTENSION_KEYS[key]
+                extension = dict(extensions.get(module) or {})
+                extension[field] = value
+                extensions[module] = extension
+            metadata_service.save(
+                account_directory,
+                str(
+                    metadata.get("username")
+                    or current_config.get("username")
+                    or account_directory.name
+                ),
+                str(metadata.get("password") or ""),
+                str(
+                    metadata.get("assigned_device_id")
+                    or current_config.get("device")
+                    or ""
+                ),
+                tag=str(metadata.get("tag") or ""),
+                runtime_extensions=extensions,
+            )
         except (OSError, RuntimeError, TypeError, yaml.YAMLError) as error:
             for path, content in originals.items():
                 if content is None:
@@ -223,9 +410,100 @@ class AccountTemplateService:
                         path.unlink()
                 else:
                     self._write_bytes(path, content)
+            AccountMetadataService.restore(metadata_path, original_metadata)
             raise RuntimeError(
                 "Template application failed; the account was restored."
             ) from error
+
+    @staticmethod
+    def _validate_methods(values: dict) -> None:
+        method_sets = {
+            "igbot-template-follow-methods": {
+                "blogger-followers",
+                "blogger-following",
+                "blogger",
+            },
+            "igbot-template-like-methods": {"blogger-followers", "blogger"},
+        }
+        for key, allowed in method_sets.items():
+            methods = values.get(key, [])
+            if not isinstance(methods, list) or any(method not in allowed for method in methods):
+                raise ValueError(f"{key} contains an unsupported method.")
+        if values.get("igbot-unfollow-method", "") not in {
+            "",
+            "search",
+            "following-list-search",
+            "specific-users",
+            "all-followings",
+        }:
+            raise ValueError("The template contains an unsupported Unfollow method.")
+        if values.get("igbot-dm-method", "new-followers") not in {
+            "new-followers",
+            "specific-users",
+        }:
+            raise ValueError("The template contains an unsupported DM method.")
+
+    @classmethod
+    def _config_default(cls, key: str) -> object:
+        if key in cls.METHOD_DEFAULTS:
+            return cls.METHOD_DEFAULTS[key]
+        if key in cls.RUNTIME_EXTENSION_DEFAULTS:
+            return cls.RUNTIME_EXTENSION_DEFAULTS[key]
+        return None
+
+    @staticmethod
+    def _validate_runtime_extensions(values: dict) -> None:
+        boolean_keys = {
+            "igbot-follow-mute-after-follow",
+            "igbot-follow-only-active-stories",
+            "igbot-follow-auto-increment-enabled",
+            "igbot-unfollow-enabled",
+            "igbot-unfollow-auto-increment-enabled",
+            "igbot-like-auto-increment-enabled",
+        }
+        for key in boolean_keys & values.keys():
+            if type(values[key]) is not bool:
+                raise ValueError(f"{key} must be a switch value.")
+        if values.get("igbot-unfollow-sort", "default") not in {
+            "default",
+            "latest",
+            "earliest",
+        }:
+            raise ValueError("The template contains an unsupported Unfollow sort.")
+        range_keys = {
+            "igbot-unfollow-budget",
+            "igbot-unfollow-action-delay",
+            "igbot-like-budget",
+            "igbot-like-action-delay",
+            "igbot-dm-budget",
+            "igbot-dm-action-delay",
+        }
+        for key in range_keys & values.keys():
+            value = str(values[key])
+            if not re.fullmatch(r"\d+(?:-\d+)?", value):
+                raise ValueError(f"{key} must be a number or ascending range.")
+            if "-" in value:
+                minimum, maximum = (int(part) for part in value.split("-", 1))
+                if minimum > maximum:
+                    raise ValueError(f"{key} must be an ascending range.")
+        for module in ("follow", "unfollow", "like"):
+            prefix = f"igbot-{module}-auto-increment"
+            increment_key = f"{prefix}-by"
+            maximum_key = f"{prefix}-maximum"
+            if increment_key in values and not re.fullmatch(
+                r"[1-9]\d*", str(values[increment_key])
+            ):
+                raise ValueError(f"{increment_key} must be a positive integer.")
+            if maximum_key in values:
+                maximum = str(values[maximum_key])
+                if maximum and not re.fullmatch(r"\d+(?:-\d+)?", maximum):
+                    raise ValueError(
+                        f"{maximum_key} must be a number or ascending range."
+                    )
+                if "-" in maximum:
+                    lower, upper = (int(part) for part in maximum.split("-", 1))
+                    if lower > upper:
+                        raise ValueError(f"{maximum_key} must be an ascending range.")
 
     def _find(self, name: str) -> AccountTemplate:
         identity = name.casefold()

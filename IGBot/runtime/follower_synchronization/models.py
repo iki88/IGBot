@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from IGBot.runtime.database import FollowRecord
 
@@ -15,6 +15,12 @@ class FollowerReadResult:
     usernames: tuple[str, ...] = ()
     limit_reached: bool = False
     detail: str | None = None
+    # Snapshot metadata is deliberately excluded from equality so extending the
+    # reader does not change the established synchronization-result contract.
+    username: str | None = field(default=None, compare=False)
+    posts: int | None = field(default=None, compare=False)
+    followers: int | None = field(default=None, compare=False)
+    following: int | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)

@@ -28,6 +28,7 @@ def test_visual_identity_covers_shared_interactive_controls():
         "QLineEdit:focus",
         "QCheckBox#configurationSwitch::indicator:checked",
         "QTableView#deviceTable::item:selected",
+        "QTableView#statisticsTable::item:selected",
         "QDialog#inputDialog",
         "QToolButton#configurationSectionHeader:hover",
     ):

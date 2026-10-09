@@ -38,6 +38,27 @@ def archive_icon(color: str = "#A1A1AA") -> QIcon:
     return QIcon(pixmap)
 
 
+def notification_icon(color: str = "#A1A1AA") -> QIcon:
+    """Return a notification bell for the primary workspace navigation."""
+    pixmap = _canvas()
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setBrush(Qt.NoBrush)
+    painter.setPen(QPen(QColor(color), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    path = QPainterPath()
+    path.moveTo(5, 14)
+    path.lineTo(6.5, 12)
+    path.lineTo(6.5, 8)
+    path.cubicTo(6.5, 3.5, 13.5, 3.5, 13.5, 8)
+    path.lineTo(13.5, 12)
+    path.lineTo(15, 14)
+    path.closeSubpath()
+    painter.drawPath(path)
+    painter.drawLine(8.5, 16, 11.5, 16)
+    painter.end()
+    return QIcon(pixmap)
+
+
 def eye_icon(color: str = "#A1A1AA") -> QIcon:
     """Return a compact eye glyph for the phone-view toolbar action."""
     pixmap = _canvas()

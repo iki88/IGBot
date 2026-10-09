@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from IGBot.logging_v2 import LiveLogLevelFilter, LoggingService
+
 
 class _LogEmitter(QObject):
     message_ready = Signal(str)
@@ -21,6 +23,8 @@ class QtLogHandler(logging.Handler):
 
     def __init__(self, emitter: _LogEmitter) -> None:
         super().__init__()
+        self.setLevel(logging.DEBUG)
+        self.addFilter(LiveLogLevelFilter())
         self._emitter = emitter
         self.setFormatter(
             logging.Formatter("%(asctime)s  %(levelname)-8s  %(message)s", "%H:%M:%S")
@@ -29,7 +33,7 @@ class QtLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             self._emitter.message_ready.emit(self.format(record))
-        except Exception:
+        except Exception:  # noqa: BLE001 - logging handlers must not escape emit
             self.handleError(record)
 
 
@@ -55,7 +59,11 @@ class LiveLogPanel(QWidget):
         self._emitter.message_ready.connect(self._append_message)
         self._handler = QtLogHandler(self._emitter)
         self._logging_attached = True
-        logging.getLogger().addHandler(self._handler)
+        self._logging_service = LoggingService.current()
+        if self._logging_service is None:
+            logging.getLogger().addHandler(self._handler)
+        else:
+            self._logging_service.subscribe(self._handler)
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
@@ -75,7 +83,10 @@ class LiveLogPanel(QWidget):
 
     def detach_logging(self) -> None:
         if self._logging_attached:
-            logging.getLogger().removeHandler(self._handler)
+            if self._logging_service is None:
+                logging.getLogger().removeHandler(self._handler)
+            else:
+                self._logging_service.unsubscribe(self._handler)
             self._logging_attached = False
 
     def _append_message(self, message: str) -> None:

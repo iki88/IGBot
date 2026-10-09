@@ -56,6 +56,19 @@ class FollowerSynchronization:
             read_result = self._reader.read(context, limit)
         except Exception as error:  # noqa: BLE001 - provider isolation boundary
             return self._failed(context, f"Follower list inspection failed: {error}")
+        if context.cancellation_checkpoint("Follower Synchronization result"):
+            context.logger.info("Follower Synchronization cancelled")
+            return StartupStageResult(
+                StartupStageName.FOLLOWER_SYNCHRONIZATION,
+                StartupStageStatus.SKIPPED,
+                detail="Follower Synchronization cancelled.",
+                follower_synchronization=FollowerSynchronizationResult(
+                    synchronization_completed=False,
+                    scanned_count=0,
+                    follow_back_updates=0,
+                    newly_discovered_organic_followers=(),
+                ),
+            )
         if not read_result.completed:
             return self._failed(
                 context,
@@ -80,6 +93,19 @@ class FollowerSynchronization:
                 )
         except Exception as error:  # noqa: BLE001 - transactional stage boundary
             return self._failed(context, f"Follower Synchronization failed: {error}")
+
+        if context.analytics is not None:
+            try:
+                context.analytics.update_profile_snapshot(
+                    read_result.username or context.session.account_username,
+                    posts=read_result.posts,
+                    followers=read_result.followers,
+                    following=read_result.following,
+                )
+            except Exception as error:  # noqa: BLE001 - analytics isolation boundary
+                context.logger.warning(
+                    "Analytics snapshot update failed", detail=str(error)
+                )
 
         result = FollowerSynchronizationResult(
             synchronization_completed=True,

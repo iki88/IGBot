@@ -129,7 +129,7 @@ def test_first_letter_waits_for_results_and_next_letter_survives_old_scroll_time
     discovery.session.next_letter = lambda a, b: original(
         a, b, lambda values: values[0]
     )
-    android.scroll_followers = lambda _: SimpleNamespace(
+    android.scroll_followers = lambda _, *, overlapping: SimpleNamespace(
         status=AndroidFollowStatus.SUCCESS
     )
     context = SimpleNamespace(
@@ -152,6 +152,32 @@ class Logger:
         pass
 
     warning = info
+
+
+@pytest.mark.parametrize(
+    ("start", "expected", "positions"),
+    (
+        (0, ("one", "two", "three", "four"), (1, 2, 3, 4)),
+        (1, ("two", "three", "four", "one"), (2, 3, 4, 1)),
+        (2, ("three", "four", "one", "two"), (3, 4, 1, 2)),
+        (3, ("four", "one", "two", "three"), (4, 1, 2, 3)),
+    ),
+)
+def test_random_start_preserves_one_complete_sequential_cycle(
+    start, expected, positions
+):
+    provider = FollowSourcesProvider(
+        ("one", "two", "three", "four"),
+        SimpleNamespace(session=SourceSession()),
+        object(),
+        object(),
+        object(),
+        start_selector=lambda _total: start,
+    )
+
+    assert provider._sources == expected
+    assert provider._configured_positions == positions
+    assert len(set(provider._sources)) == 4
 
 
 def test_source_summary_logging_repeats_after_rotation():
@@ -181,11 +207,12 @@ def test_source_summary_logging_repeats_after_rotation():
         SimpleNamespace(biography_required=False, accepts_visible=lambda *_: True),
         object(),
         FollowersDiscoverySettings(30),
+        start_selector=lambda _total: 0,
     )
     provider.next_candidate(context)
     assert messages == [
         "[Source] Available configured sources: 2",
-        "[Source] Randomly selected: first (1/2)",
+        "[Source] Random starting source: first (1/2)",
         "[Source] Followers detected: 6,532",
         "[Source] Strategy: Scroll",
     ]
@@ -194,18 +221,60 @@ def test_source_summary_logging_repeats_after_rotation():
     provider.next_candidate(context)
     assert messages[4:] == [
         "[Source] Source Session finished (evaluated_profiles=50)",
-        "[Source] Rotating to next source.",
         "[Source] Available configured sources: 2",
-        "[Source] Randomly selected: second (2/2)",
+        "[Source] Rotating to next source: second (2/2)",
         "[Source] Followers detected: 6,532",
         "[Source] Strategy: Scroll",
     ]
 
 
+def test_source_logging_identifies_authoritative_file_and_usernames(tmp_path):
+    messages = []
+    context = SimpleNamespace(
+        logger=SimpleNamespace(info=lambda message: messages.append(message))
+    )
+
+    class Discovery:
+        session = SourceSession()
+
+        def open_source(self, _context, _source):
+            self.session = SourceSession()
+            return True
+
+        def next_follower(self, _context, _source, _settings):
+            return DiscoveryResult(DiscoveryStatus.SOURCE_EXHAUSTED)
+
+    source_path = tmp_path / "Lists" / "follow_sources_followers.txt"
+    provider = FollowSourcesProvider(
+        ("newforestmoto", "beast_m235"),
+        Discovery(),
+        SimpleNamespace(biography_required=False, accepts_visible=lambda *_: True),
+        object(),
+        FollowersDiscoverySettings(30),
+        start_selector=lambda _total: 0,
+        source_label="Follow User's Followers",
+        source_path=source_path,
+    )
+
+    provider.next_candidate(context)
+
+    assert messages[0] == (
+        "[Source] Loaded Follow User's Followers sources "
+        f"(source={source_path}; loaded=newforestmoto, beast_m235)"
+    )
+
+
 @pytest.mark.parametrize("sources, next_index", ((["a", "b"], 1), (["a"], 0)))
 def test_rotation_only_after_exactly_50_evaluations(monkeypatch, sources, next_index):
     discovery = SimpleNamespace(session=SourceSession())
-    provider = FollowSourcesProvider(sources, discovery, object(), object(), object())
+    provider = FollowSourcesProvider(
+        sources,
+        discovery,
+        object(),
+        object(),
+        object(),
+        start_selector=lambda _total: 0,
+    )
     context = SimpleNamespace(logger=Logger())
     monkeypatch.setattr(
         "IGBot.runtime.candidates.providers.FollowersProvider.next_candidate",

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from IGBot.runtime import RuntimeContext, SessionContext
+from IGBot.runtime.analytics import AnalyticsDatabase, AnalyticsService
 from IGBot.runtime.database import FollowRecord, RuntimeDatabase
 from IGBot.runtime.follower_synchronization import (
     AndroidFollowerReader,
@@ -187,6 +188,31 @@ def test_synchronization_requires_a_positive_configured_limit(tmp_path):
     assert result.status is StartupStageStatus.FAILED
     assert "positive integer" in result.detail
     assert reader.calls == []
+
+
+def test_successful_synchronization_updates_daily_analytics_snapshot(tmp_path):
+    reader = StubReader(
+        FollowerReadResult(
+            True,
+            ("follower",),
+            username="renamed.account",
+            posts=115,
+            followers=3129,
+            following=97,
+        )
+    )
+    context = make_context(tmp_path)
+    context.analytics = AnalyticsService(tmp_path)
+    stage = FollowerSynchronization(
+        reader, RuntimeFollowerComparer(), RuntimeFollowerWriter()
+    )
+
+    assert stage.execute(context).status is StartupStageStatus.SUCCESS
+
+    with AnalyticsDatabase(tmp_path) as database:
+        summary = database.today_display().today
+    assert summary.username == "renamed.account"
+    assert (summary.posts, summary.followers, summary.following) == (115, 3129, 97)
 
 
 def test_android_reader_uses_resource_ids_and_respects_limit(tmp_path):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
-from IGBot.runtime.database import RuntimeDatabase
+from IGBot.runtime.database import DailyLimitResolver, ModuleUsageRepository
 
 
 def successful_follows_today(
@@ -16,12 +16,9 @@ def successful_follows_today(
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     start = datetime.combine(current.date(), time.min, tzinfo=timezone.utc)
     end = start + timedelta(days=1)
-    with RuntimeDatabase(account_directory) as database:
-        return database.follow.count_followed_between(
-            start.isoformat(), end.isoformat()
-        ) + database.specific_follow.count_successful_follows_between(
-            start.isoformat(), end.isoformat()
-        )
+    return ModuleUsageRepository(account_directory).successful_between(
+        "follow", start, end
+    )
 
 
 def remaining_daily_follows(
@@ -29,8 +26,6 @@ def remaining_daily_follows(
 ) -> int:
     """Return persisted Follow capacity for the current UTC day."""
 
-    try:
-        limit = max(0, int(str(configured_limit).split("-", 1)[-1]))
-    except (TypeError, ValueError):
-        limit = 100_000
-    return max(0, limit - successful_follows_today(account_directory))
+    return DailyLimitResolver(account_directory).capacity(
+        "follow", configured_limit
+    ).remaining

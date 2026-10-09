@@ -24,6 +24,7 @@ from IGBot.runtime.follow import (
     TextFilterSettings,
 )
 from IGBot.runtime.hooks import HookResult
+from IGBot.runtime.ignore import IgnoreService
 from IGBot.runtime.modules import InteractionModule
 from IGBot.runtime.scheduler import (
     BudgetCalculator,
@@ -233,6 +234,26 @@ def test_specific_user_without_profile_filters_skips_qualifier(tmp_path):
         "Follow candidate ready",
         {"username": "specific_user"},
     )
+
+
+def test_follow_ignore_list_skips_before_profile_opening(tmp_path):
+    context = make_context(tmp_path)
+    context.ignore_service = IgnoreService(frozenset({"target_user"}))
+    candidate = make_candidate()
+    module, _provider, profiles, qualifier, hooks = make_module(
+        context,
+        (
+            CandidateResult(CandidateResultStatus.CANDIDATE_FOUND, candidate),
+            CandidateResult(CandidateResultStatus.ALL_SOURCES_EXHAUSTED),
+        ),
+    )
+
+    result = module.execute(context, make_budget())
+
+    assert result.outcome is ModuleExecutionOutcome.NO_CANDIDATES
+    assert profiles.calls == []
+    assert qualifier.calls == []
+    assert hooks.events == []
 
 
 @pytest.mark.parametrize("timed_out", (False, True))

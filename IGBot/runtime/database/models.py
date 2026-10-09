@@ -36,11 +36,15 @@ class LikeRecord:
     """Like state for one target user."""
 
     user_id: int
-    source: str | None = None
+    username: str
+    source: str
+    status: str = "UNKNOWN"
     likes_count: int = 0
     last_like_date: str | None = None
+    processed_date: str | None = None
     follow_back: bool = False
     follow_back_date: str | None = None
+    last_session_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,3 +81,4 @@ class DMRecord:
     last_dm_date: str | None = None
     last_message: str | None = None
     last_reply: str | None = None
+    status: str = "UNKNOWN"

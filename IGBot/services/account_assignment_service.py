@@ -16,6 +16,7 @@ from IGBot.services.account_identity import (
     OrphanedAccount,
 )
 from IGBot.services.account_metadata_service import AccountMetadataService
+from IGBot.services.message_storage_service import MessageStorageService
 from IGBot.services.specific_lists_service import SpecificListsService
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ class AccountAssignmentService:
     )
     TEXT_RESOURCE_NAMES = frozenset(
         {
-            "pm_list.txt",
+            "welcome_dm.txt",
             "comments_list.txt",
             "unfollow_users.txt",
             "remove_followers_users.txt",
@@ -163,10 +164,13 @@ class AccountAssignmentService:
 
     def load_configuration(self, config_path: Path) -> dict:
         """Read an existing account configuration without changing its representation."""
-        SpecificListsService(config_path.parent).initialize()
+        lists = SpecificListsService(config_path.parent)
+        lists.initialize()
         configuration = yaml.safe_load(config_path.read_bytes())
         if not isinstance(configuration, dict):
             raise TypeError("The account configuration must contain a YAML mapping.")
+        configuration = dict(configuration)
+        configuration.update(lists.source_values())
         metadata = self.metadata.load(config_path.parent)
         if metadata:
             configuration = dict(configuration)
@@ -181,11 +185,24 @@ class AccountAssignmentService:
             if isinstance(runtime_extensions, dict):
                 follow_extensions = runtime_extensions.get("follow")
                 if isinstance(follow_extensions, dict):
+                    if "methods" in follow_extensions:
+                        configuration["igbot-follow-methods"] = list(
+                            follow_extensions.get("methods") or []
+                        )
                     configuration["igbot-follow-mute-after-follow"] = bool(
                         follow_extensions.get("mute_after_follow")
                     )
                     configuration["igbot-follow-only-active-stories"] = bool(
                         follow_extensions.get("only_active_stories")
+                    )
+                    configuration["igbot-follow-auto-increment-enabled"] = bool(
+                        follow_extensions.get("auto_increment_enabled")
+                    )
+                    configuration["igbot-follow-auto-increment-by"] = str(
+                        follow_extensions.get("auto_increment_by") or "1"
+                    )
+                    configuration["igbot-follow-auto-increment-maximum"] = str(
+                        follow_extensions.get("auto_increment_maximum") or ""
                     )
                 unfollow_extensions = runtime_extensions.get("unfollow")
                 if isinstance(unfollow_extensions, dict):
@@ -204,6 +221,47 @@ class AccountAssignmentService:
                     configuration["igbot-unfollow-action-delay"] = str(
                         unfollow_extensions.get("action_delay") or "0"
                     )
+                    configuration["igbot-unfollow-auto-increment-enabled"] = bool(
+                        unfollow_extensions.get("auto_increment_enabled")
+                    )
+                    configuration["igbot-unfollow-auto-increment-by"] = str(
+                        unfollow_extensions.get("auto_increment_by") or "1"
+                    )
+                    configuration["igbot-unfollow-auto-increment-maximum"] = str(
+                        unfollow_extensions.get("auto_increment_maximum") or ""
+                    )
+                like_extensions = runtime_extensions.get("like")
+                if isinstance(like_extensions, dict):
+                    if "methods" in like_extensions:
+                        configuration["igbot-like-methods"] = list(
+                            like_extensions.get("methods") or []
+                        )
+                    configuration["igbot-like-budget"] = str(
+                        like_extensions.get("budget") or "0"
+                    )
+                    configuration["igbot-like-action-delay"] = str(
+                        like_extensions.get("action_delay") or "0"
+                    )
+                    configuration["igbot-like-auto-increment-enabled"] = bool(
+                        like_extensions.get("auto_increment_enabled")
+                    )
+                    configuration["igbot-like-auto-increment-by"] = str(
+                        like_extensions.get("auto_increment_by") or "1"
+                    )
+                    configuration["igbot-like-auto-increment-maximum"] = str(
+                        like_extensions.get("auto_increment_maximum") or ""
+                    )
+                dm_extensions = runtime_extensions.get("dm")
+                if isinstance(dm_extensions, dict):
+                    configuration["igbot-dm-method"] = str(
+                        dm_extensions.get("method") or "new-followers"
+                    )
+                    configuration["igbot-dm-budget"] = str(
+                        dm_extensions.get("budget") or "1"
+                    )
+                    configuration["igbot-dm-action-delay"] = str(
+                        dm_extensions.get("action_delay") or "0"
+                    )
         filters_path = config_path.parent / "filters.yml"
         if filters_path.is_file():
             filters = yaml.safe_load(filters_path.read_bytes())
@@ -215,10 +273,14 @@ class AccountAssignmentService:
                         if key in filters
                     }
                 )
-        for resource_name in self.TEXT_RESOURCE_NAMES:
+        for resource_name in self.TEXT_RESOURCE_NAMES - {"welcome_dm.txt"}:
             resource_path = config_path.parent / resource_name
             if resource_path.is_file():
                 configuration[resource_name] = resource_path.read_text(encoding="utf-8")
+        messages = MessageStorageService(config_path.parent)
+        welcome = messages.load(messages.WELCOME_DM)
+        if welcome or messages.path(messages.WELCOME_DM).is_file():
+            configuration["welcome_dm.txt"] = welcome
         return configuration
 
     def update_configuration(
@@ -269,16 +331,40 @@ class AccountAssignmentService:
         if not isinstance(document, MappingNode):
             raise TypeError("The account configuration must contain a YAML mapping.")
         settings = dict(settings or {})
+        follow_methods = settings.pop("igbot-follow-methods", None)
+        like_methods = settings.pop("igbot-like-methods", None)
+        if follow_methods is not None:
+            self._validate_module_methods(
+                follow_methods,
+                {"blogger-followers", "blogger-following", "blogger"},
+                "Follow",
+            )
+        if like_methods is not None:
+            self._validate_module_methods(
+                like_methods, {"blogger-followers", "blogger"}, "Like"
+            )
         mute_after_follow = bool(settings.pop("igbot-follow-mute-after-follow", False))
         only_active_stories = bool(
             settings.pop("igbot-follow-only-active-stories", False)
         )
+        follow_auto_increment = self._pop_auto_increment(settings, "follow")
         unfollow_enabled = bool(settings.pop("igbot-unfollow-enabled", False))
         unfollow_method = str(settings.pop("igbot-unfollow-method", "") or "")
         unfollow_sort = str(settings.pop("igbot-unfollow-sort", "default") or "default")
         unfollow_budget = str(settings.pop("igbot-unfollow-budget", "1") or "1")
         unfollow_action_delay = str(
             settings.pop("igbot-unfollow-action-delay", "0") or "0"
+        )
+        unfollow_auto_increment = self._pop_auto_increment(settings, "unfollow")
+        like_budget = str(settings.pop("igbot-like-budget", "0") or "0")
+        like_action_delay = str(settings.pop("igbot-like-action-delay", "0") or "0")
+        like_auto_increment = self._pop_auto_increment(settings, "like")
+        dm_method = str(
+            settings.pop("igbot-dm-method", "new-followers") or "new-followers"
+        )
+        dm_budget = str(settings.pop("igbot-dm-budget", "1") or "1")
+        dm_action_delay = str(
+            settings.pop("igbot-dm-action-delay", "0") or "0"
         )
         if unfollow_method not in {
             "",
@@ -294,6 +380,16 @@ class AccountAssignmentService:
             raise ValueError("The Unfollow budget must be a number or range.")
         if not re.fullmatch(r"\d+(?:-\d+)?", unfollow_action_delay):
             raise ValueError("The Unfollow action delay must be a number or range.")
+        if not re.fullmatch(r"\d+(?:-\d+)?", like_budget):
+            raise ValueError("The Like budget must be a number or range.")
+        if not re.fullmatch(r"\d+(?:-\d+)?", like_action_delay):
+            raise ValueError("The Like action delay must be a number or range.")
+        if dm_method not in {"new-followers", "specific-users"}:
+            raise ValueError("The DM method is not supported.")
+        if not re.fullmatch(r"\d+(?:-\d+)?", dm_budget):
+            raise ValueError("The DM budget must be a number or range.")
+        if not re.fullmatch(r"\d+(?:-\d+)?", dm_action_delay):
+            raise ValueError("The DM action delay must be a number or range.")
         filter_settings = {
             key: settings.pop(key) for key in self.FILTER_SETTING_KEYS & settings.keys()
         }
@@ -615,7 +711,7 @@ class AccountAssignmentService:
             ):
                 raise ValueError(f"{key} must be a list of non-empty values.")
         resource_modules = {
-            "pm_list.txt": "dm",
+            "welcome_dm.txt": "dm",
             "comments_list.txt": "comment",
             "unfollow_users.txt": "unfollow",
             "remove_followers_users.txt": "unfollow",
@@ -723,8 +819,14 @@ class AccountAssignmentService:
                 "Account configuration verification failed; the original was restored."
             ) from error
         filters_path = config_path.parent / "filters.yml"
+        message_storage = MessageStorageService(config_path.parent)
         resource_paths = {
-            name: config_path.parent / name for name in self.TEXT_RESOURCE_NAMES
+            name: (
+                message_storage.path(message_storage.WELCOME_DM)
+                if name == "welcome_dm.txt"
+                else config_path.parent / name
+            )
+            for name in self.TEXT_RESOURCE_NAMES
         }
         original_resources = {
             filters_path: filters_path.read_bytes() if filters_path.is_file() else None,
@@ -742,7 +844,8 @@ class AccountAssignmentService:
                 self._update_yaml_fields(filters_path, cleaned_filter_settings)
             for name, resource_content in text_resources.items():
                 resource_path = resource_paths[name]
-                if resource_content:
+                if resource_content or name == "welcome_dm.txt":
+                    resource_path.parent.mkdir(parents=True, exist_ok=True)
                     self._write_configuration(resource_path, resource_content)
                     if resource_path.read_text(encoding="utf-8") != resource_content:
                         raise RuntimeError(
@@ -779,8 +882,11 @@ class AccountAssignmentService:
             if not isinstance(follow_extensions, dict):
                 follow_extensions = {}
             follow_extensions = dict(follow_extensions)
+            if follow_methods is not None:
+                follow_extensions["methods"] = list(follow_methods)
             follow_extensions["mute_after_follow"] = mute_after_follow
             follow_extensions["only_active_stories"] = only_active_stories
+            follow_extensions.update(follow_auto_increment)
             runtime_extensions["follow"] = follow_extensions
             unfollow_extensions = runtime_extensions.get("unfollow")
             if not isinstance(unfollow_extensions, dict):
@@ -791,7 +897,26 @@ class AccountAssignmentService:
             unfollow_extensions["sort"] = unfollow_sort
             unfollow_extensions["budget"] = unfollow_budget
             unfollow_extensions["action_delay"] = unfollow_action_delay
+            unfollow_extensions.update(unfollow_auto_increment)
             runtime_extensions["unfollow"] = unfollow_extensions
+            like_extensions = runtime_extensions.get("like")
+            if not isinstance(like_extensions, dict):
+                like_extensions = {}
+            like_extensions = dict(like_extensions)
+            if like_methods is not None:
+                like_extensions["methods"] = list(like_methods)
+            like_extensions["budget"] = like_budget
+            like_extensions["action_delay"] = like_action_delay
+            like_extensions.update(like_auto_increment)
+            runtime_extensions["like"] = like_extensions
+            dm_extensions = runtime_extensions.get("dm")
+            if not isinstance(dm_extensions, dict):
+                dm_extensions = {}
+            dm_extensions = dict(dm_extensions)
+            dm_extensions["method"] = dm_method
+            dm_extensions["budget"] = dm_budget
+            dm_extensions["action_delay"] = dm_action_delay
+            runtime_extensions["dm"] = dm_extensions
             self.metadata.save(
                 old_directory,
                 username,
@@ -821,6 +946,84 @@ class AccountAssignmentService:
                 "Account metadata update failed; the original account was restored."
             ) from error
 
+    def update_debug_logging(
+        self, account: AssignedAccount, enabled: bool
+    ) -> AssignedAccount:
+        """Update only the existing per-account ``debug`` YAML setting."""
+
+        if type(enabled) is not bool:
+            raise TypeError("Debug Logging must be a Boolean value.")
+        config_path = account.config_path
+        root = self._accounts_directory.resolve()
+        if config_path.resolve().parent.parent != root or not config_path.is_file():
+            raise ValueError(
+                "The account configuration is outside the managed accounts."
+            )
+        original = config_path.read_bytes()
+        content = original.decode("utf-8")
+        document = yaml.compose(content, Loader=yaml.SafeLoader)
+        if not isinstance(document, MappingNode):
+            raise TypeError("The account configuration must contain a YAML mapping.")
+
+        debug_nodes = [
+            value_node
+            for key_node, value_node in document.value
+            if key_node.value == "debug"
+        ]
+        if len(debug_nodes) > 1:
+            raise ValueError("The account configuration contains duplicate debug fields.")
+        replacement = "true" if enabled else "false"
+        if debug_nodes:
+            node = debug_nodes[0]
+            updated = content[: node.start_mark.index] + replacement + content[
+                node.end_mark.index :
+            ]
+        else:
+            newline = "\r\n" if "\r\n" in content else "\n"
+            prefix = "" if not content or content.endswith(("\n", "\r")) else newline
+            updated = f"{content}{prefix}debug: {replacement}{newline}"
+
+        if config_path.read_bytes() != original:
+            raise RuntimeError("The account configuration changed while editing.")
+        self._write_configuration(config_path, updated)
+        try:
+            verified = yaml.safe_load(config_path.read_bytes())
+            if not isinstance(verified, dict) or verified.get("debug") is not enabled:
+                raise RuntimeError("The Debug Logging setting could not be verified.")
+        except (OSError, RuntimeError, yaml.YAMLError) as error:
+            self._write_configuration(config_path, content)
+            raise RuntimeError(
+                "Debug Logging could not be saved; the original was restored."
+            ) from error
+        updated_account = self._load_account(config_path)
+        if updated_account is None:
+            raise RuntimeError("The account configuration could not be reloaded.")
+        return updated_account
+
+    @staticmethod
+    def _pop_auto_increment(settings: dict, module: str) -> dict[str, object]:
+        prefix = f"igbot-{module}-auto-increment"
+        enabled = bool(settings.pop(f"{prefix}-enabled", False))
+        increment = str(settings.pop(f"{prefix}-by", "1") or "").strip()
+        maximum = str(settings.pop(f"{prefix}-maximum", "") or "").strip()
+        if not re.fullmatch(r"[1-9]\d*", increment):
+            raise ValueError("Increase Daily Limit By must be a positive integer.")
+        maximum_valid = not maximum and not enabled
+        if maximum and re.fullmatch(r"\d+(?:-\d+)?", maximum):
+            maximum_valid = True
+            if "-" in maximum:
+                lower, upper = (int(part) for part in maximum.split("-", 1))
+                maximum_valid = lower <= upper
+        if not maximum_valid:
+            raise ValueError(
+                "Maximum Daily Limit must be a number or ascending range."
+            )
+        return {
+            "auto_increment_enabled": enabled,
+            "auto_increment_by": increment,
+            "auto_increment_maximum": maximum,
+        }
+
     @staticmethod
     def _is_enabled_value(value: object) -> bool:
         if value is None or value is False:
@@ -835,6 +1038,15 @@ class AccountAssignmentService:
     def _write_configuration(path: Path, content: str) -> None:
         with atomic_write(path, overwrite=True, encoding="utf-8", newline="") as output:
             output.write(content)
+
+    @staticmethod
+    def _validate_module_methods(
+        methods: object, allowed: set[str], module: str
+    ) -> None:
+        if not isinstance(methods, (list, tuple)) or any(
+            str(method) not in allowed for method in methods
+        ):
+            raise ValueError(f"The {module} methods are not supported.")
 
     @classmethod
     def _update_yaml_fields(cls, path: Path, values: dict[str, object]) -> None:
@@ -888,6 +1100,8 @@ class AccountAssignmentService:
             updated = updated[:start] + replacement + updated[end:]
         cls._write_configuration(path, updated)
         verified = yaml.safe_load(path.read_bytes())
+        if verified is None:
+            verified = {}
         if not isinstance(verified, dict) or any(
             (key in verified if value is None else verified.get(key) != value)
             for key, value in values.items()
@@ -1057,7 +1271,7 @@ class AccountAssignmentService:
                     "The new account configuration could not be verified."
                 )
             self.metadata.save(account_directory, username, password, device_id)
-            SpecificListsService(account_directory).initialize()
+            SpecificListsService(account_directory).initialize(migrate_legacy=False)
 
             account = self._load_account(config_path)
             if account is None:

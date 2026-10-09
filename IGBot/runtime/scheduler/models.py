@@ -26,6 +26,7 @@ class ModuleExecutionOutcome(StrEnum):
     SCROLL_BLOCK = "SCROLL_BLOCK"
     DAILY_LIMIT_REACHED = "DAILY_LIMIT_REACHED"
     ACTION_BLOCK = "ACTION_BLOCK"
+    NAVIGATION_FAILED = "NAVIGATION_FAILED"
 
 
 class ModuleDomainResult(Protocol):
@@ -77,6 +78,48 @@ class ModuleExecutionResult:
     detail: str | None = None
     outcome: ModuleExecutionOutcome = ModuleExecutionOutcome.SUCCESS
     module_result: ModuleDomainResult | None = None
+    verified_successes: int = 0
+
+    def __post_init__(self) -> None:
+        if self.verified_successes < 0:
+            raise ValueError("verified_successes cannot be negative")
+
+
+@dataclass(slots=True)
+class ModuleOperation:
+    """One scheduler-owned module lease with one immutable resolved target."""
+
+    module: InteractionModule
+    budget: ExecutionBudget
+    verified_successes: int = 0
+
+    @property
+    def target(self) -> int:
+        return self.budget.final
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.target - self.verified_successes)
+
+    @property
+    def completed(self) -> bool:
+        return self.remaining == 0
+
+    def record(self, count: int) -> None:
+        if count < 0:
+            raise ValueError("Verified operation progress cannot be negative")
+        if count > self.remaining:
+            raise ValueError("Verified operation progress exceeded its target")
+        self.verified_successes += count
+
+    def remaining_budget(self, daily_remaining: int) -> ExecutionBudget:
+        return ExecutionBudget(
+            module=self.budget.module,
+            configured=self.budget.configured,
+            resolved=self.budget.resolved,
+            daily_remaining=daily_remaining,
+            final=min(self.remaining, daily_remaining),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +134,7 @@ class SchedulerResult:
     detail: str | None = None
     outcome: ModuleExecutionOutcome | None = None
     module_result: ModuleDomainResult | None = None
+    verified_successes: int = 0
 
 
 @dataclass(frozen=True, slots=True)

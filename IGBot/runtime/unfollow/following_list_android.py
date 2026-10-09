@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from IGBot.runtime.context import RuntimeContext
 from IGBot.runtime.follow import AndroidFollowProvider, AndroidFollowStatus
+from IGBot.runtime.ignore import log_ignored
 from IGBot.runtime.unfollow.models import AndroidUnfollowResult, AndroidUnfollowStatus
 from IGBot.runtime.unfollow.profile_navigation import FollowingListProfileRestorer
 
@@ -80,6 +81,10 @@ class AndroidFollowingListUnfollowProvider:
     def execute_next(
         self, context: RuntimeContext, processed: frozenset[str]
     ) -> AndroidUnfollowResult:
+        if context.cancellation_checkpoint("Following-list preparation"):
+            return AndroidUnfollowResult(
+                AndroidUnfollowStatus.NAVIGATION_FAILED, "Unfollow cancelled."
+            )
         device = self._android._device(context)
         if not self._opened:
             opened = self._open_following_list(context, device)
@@ -88,12 +93,20 @@ class AndroidFollowingListUnfollowProvider:
             self._opened = True
 
         while True:
+            if context.cancellation_checkpoint("Following-list candidate scan"):
+                return AndroidUnfollowResult(
+                    AndroidUnfollowStatus.NAVIGATION_FAILED, "Unfollow cancelled."
+                )
             hierarchy = device.dump_hierarchy(compressed=False)
             rows = self._rows(hierarchy)
             visible = tuple(row.username.casefold() for row in rows)
             for row in rows:
                 key = row.username.casefold()
                 if key in processed or key in self._seen:
+                    continue
+                if context.ignore_service.is_ignored(row.username):
+                    log_ignored(context, row.username)
+                    self._seen.add(key)
                     continue
                 if row.action_state == self._COMPLETED_STATE:
                     self._seen.add(key)
@@ -191,6 +204,8 @@ class AndroidFollowingListUnfollowProvider:
         )
         context.logger.info(f"[Following List] Applying sorting: {label}")
         for attempt in range(2):
+            if context.cancellation_checkpoint("Following-list sorting"):
+                return
             button = self._wait_for_node(
                 device,
                 lambda nodes: self._android._find_by_id(nodes, self._SORT_BUTTON_IDS),
@@ -236,6 +251,12 @@ class AndroidFollowingListUnfollowProvider:
         context.logger.info("[Unfollow] Opening menu...")
         menu_open = False
         for attempt in range(2):
+            if context.cancellation_checkpoint("Following-list menu"):
+                return AndroidUnfollowResult(
+                    AndroidUnfollowStatus.NAVIGATION_FAILED,
+                    "Unfollow cancelled.",
+                    row.username,
+                )
             self._android._tap(device, row.menu)
             menu_open = (
                 self._wait_for_node(
@@ -269,6 +290,12 @@ class AndroidFollowingListUnfollowProvider:
         confirmation_tapped = False
         deadline = self._clock() + self._timeout
         while self._clock() < deadline:
+            if context.cancellation_checkpoint("Following-list verification"):
+                return AndroidUnfollowResult(
+                    AndroidUnfollowStatus.NAVIGATION_FAILED,
+                    "Unfollow cancelled.",
+                    row.username,
+                )
             hierarchy = device.dump_hierarchy(compressed=False)
             nodes = self._android._nodes(hierarchy)
             if not confirmation_tapped and self._android._find_by_id(

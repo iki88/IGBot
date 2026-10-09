@@ -39,7 +39,9 @@ class DMConfigurationPage(QScrollArea):
     FILTER_KEYS: ClassVar[dict[str, str]] = {
         "pm_to_private_or_empty": "Message Private or Empty Profiles",
     }
-    MESSAGE_RESOURCE = "pm_list.txt"
+    MESSAGE_RESOURCE = "welcome_dm.txt"
+    USER_AMOUNT_KEY = "igbot-dm-budget"
+    ACTION_DELAY_KEY = "igbot-dm-action-delay"
     WEEKDAYS = (
         "Monday",
         "Tuesday",
@@ -77,7 +79,10 @@ class DMConfigurationPage(QScrollArea):
         layout.addWidget(enable)
 
         self.sources = AudienceSourcesPage(
-            container, include_advanced=False, section_title="DM Method"
+            container,
+            include_advanced=False,
+            section_title="DM Method",
+            specific_list_filename="dmspecific.txt",
         )
         self.sources.setVisible(include_sources)
         self.sources.rows["blogger-followers"].hide()
@@ -127,8 +132,8 @@ class DMConfigurationPage(QScrollArea):
             "Minimum users to message", "Maximum users to message", action_fields
         )
         self.delay = RangePairSettings(
-            "Minimum delay after sending DM",
-            "Maximum delay after sending DM",
+            "Minimum delay between sent messages",
+            "Maximum delay between sent messages",
             action_fields,
         )
         self.check_interval = NumericSettings(
@@ -207,6 +212,7 @@ class DMConfigurationPage(QScrollArea):
         self.messages.changed.connect(self._changed)
         self.sources.changed.connect(self._changed)
         self.new_followers.toggled.connect(self._new_followers_changed)
+        self.specific_accounts.enabled.toggled.connect(self._specific_method_changed)
         self.message_amount.changed.connect(self._runtime_extension_changed)
         self.delay.changed.connect(self._runtime_extension_changed)
         self.check_interval.changed.connect(self._runtime_extension_changed)
@@ -258,10 +264,17 @@ class DMConfigurationPage(QScrollArea):
             self.limit_behaviour.set_values(configuration)
             self.recipients.set_values(configuration)
             self.messages.set_text(str(configuration.get(self.MESSAGE_RESOURCE) or ""))
-            self.sources.set_configuration(configuration)
-            self.new_followers.setChecked(True)
-            self.message_amount.set_value(None)
-            self.delay.set_value(None)
+            method = str(configuration.get("igbot-dm-method") or "new-followers")
+            source_configuration = dict(configuration)
+            source_configuration["blogger"] = None
+            specific_lists = self.sources._specific_lists
+            if method == "specific-users" and specific_lists is not None:
+                source_configuration["blogger"] = specific_lists.load("dmspecific.txt")
+            self.sources.set_configuration(source_configuration)
+            self.new_followers.setChecked(method != "specific-users")
+            self.specific_accounts.enabled.setChecked(method == "specific-users")
+            self.message_amount.set_value(configuration.get(self.USER_AMOUNT_KEY) or "1")
+            self.delay.set_value(configuration.get(self.ACTION_DELAY_KEY) or "0")
             self.check_interval.set_values({"check-new-followers-every": 60})
             self.dm_all_new_followers.setChecked(False)
             self.reply_to_incoming.setChecked(False)
@@ -288,10 +301,6 @@ class DMConfigurationPage(QScrollArea):
         if percentage and max(int(part) for part in percentage.split("-")) > 100:
             raise ValueError("Direct Message Percentage cannot exceed 100.")
         messages = self.messages.text()
-        if self.include_messages and self.enabled.isChecked() and not messages.strip():
-            self.edit_messages_button.setStyleSheet("border: 1px solid #EF4444;")
-            self.edit_messages_button.setFocus()
-            raise ValueError("Add at least one direct message before enabling DM.")
         self.edit_messages_button.setStyleSheet("")
 
         result = {}
@@ -307,15 +316,15 @@ class DMConfigurationPage(QScrollArea):
         dialog = DMMessageEditorDialog(self._message_for_editor(), self)
         if dialog.exec() == DMMessageEditorDialog.Accepted:
             self.messages.set_text(self._message_for_engine(dialog.message()))
+            self._message_file_present = True
             self._update_message_button()
 
     def _message_for_editor(self) -> str:
-        return self.messages.text().replace("\\n", "\n")
+        return self.messages.text()
 
     @staticmethod
     def _message_for_engine(message: str) -> str:
-        normalized = message.replace("\r\n", "\n").replace("\r", "\n")
-        return normalized.replace("\n", "\\n")
+        return message.replace("\r\n", "\n").replace("\r", "\n")
 
     def _enabled_changed(self, enabled: bool) -> None:
         if self._syncing_enabled:
@@ -352,6 +361,22 @@ class DMConfigurationPage(QScrollArea):
             self.changed.emit()
 
     def _new_followers_changed(self, _enabled: bool) -> None:
+        if _enabled and not self._syncing_enabled:
+            self._syncing_enabled = True
+            try:
+                self.specific_accounts.enabled.setChecked(False)
+            finally:
+                self._syncing_enabled = False
+        self._update_new_follower_interval()
+        self._runtime_extension_changed()
+
+    def _specific_method_changed(self, enabled: bool) -> None:
+        if enabled and not self._syncing_enabled:
+            self._syncing_enabled = True
+            try:
+                self.new_followers.setChecked(False)
+            finally:
+                self._syncing_enabled = False
         self._update_new_follower_interval()
         self._runtime_extension_changed()
 
@@ -381,3 +406,14 @@ class DMConfigurationPage(QScrollArea):
         enabled = self.enabled.isChecked()
         self.status.setText("● Enabled" if enabled else "● Disabled")
         self.status.setStyleSheet(f"color: {'#22C55E' if enabled else '#A1A1AA'}")
+
+    def runtime_extension_values(self) -> dict[str, object]:
+        return {
+            "igbot-dm-method": (
+                "specific-users"
+                if self.specific_accounts.enabled.isChecked()
+                else "new-followers"
+            ),
+            self.USER_AMOUNT_KEY: self.message_amount.value(),
+            self.ACTION_DELAY_KEY: self.delay.value(),
+        }

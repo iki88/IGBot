@@ -63,6 +63,7 @@ class DeviceController(QObject):
     account_configuration_ready = Signal(object, object)
     account_configuration_saved = Signal(object, object)
     account_configuration_failed = Signal(str)
+    debug_logging_saved = Signal(object, bool)
     installed_packages_ready = Signal(list)
     installed_packages_failed = Signal(str)
     foreground_package_ready = Signal(str)
@@ -271,6 +272,18 @@ class DeviceController(QObject):
         )
         task.signals.completed.connect(
             lambda updated: self._on_account_configuration_saved(account, updated)
+        )
+        task.signals.failed.connect(self.account_configuration_failed)
+        self._start_task(task)
+
+    def set_account_debug_logging(
+        self, account: AssignedAccount, enabled: bool
+    ) -> None:
+        task = _ServiceTask(
+            lambda: self._service.update_account_debug_logging(account, enabled)
+        )
+        task.signals.completed.connect(
+            lambda updated: self.debug_logging_saved.emit(updated, enabled)
         )
         task.signals.failed.connect(self.account_configuration_failed)
         self._start_task(task)

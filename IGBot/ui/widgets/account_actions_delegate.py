@@ -19,7 +19,7 @@ class AccountActionsDelegate(QStyledItemDelegate):
 
     action_requested = Signal(str, object)
     ACTIONS = (
-        _AccountAction("analytics", "Analytics"),
+        _AccountAction("analytics", "Statistics"),
         _AccountAction("edit", "Edit Account"),
     )
     ARCHIVE_ACTION = _AccountAction("archive", "Archive Account")
@@ -78,7 +78,7 @@ class AccountActionsDelegate(QStyledItemDelegate):
 
     @staticmethod
     def _is_enabled(action: str, account) -> bool:
-        return action != "analytics"
+        return True
 
     @staticmethod
     def _foreground(action: str, enabled: bool) -> str:

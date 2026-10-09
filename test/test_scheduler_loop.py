@@ -97,12 +97,17 @@ class SequenceExecutor:
 
     def execute(self, context, module, budget):
         self.calls.append((context, module, budget))
-        outcome = self.outcomes.pop(0)
+        configured = self.outcomes.pop(0)
+        if isinstance(configured, tuple):
+            outcome, verified_successes = configured
+        else:
+            outcome, verified_successes = configured, 0
         return ModuleExecutionResult(
             execution_started=True,
             execution_finished=True,
             next_module_state=module.state,
             outcome=outcome,
+            verified_successes=verified_successes,
         )
 
 
@@ -139,11 +144,20 @@ def make_context(tmp_path, *, new_followers=0):
     return context
 
 
-def make_loop(modules, executor, activity, *, chooser=None, now=None, sleeps=None):
+def make_loop(
+    modules,
+    executor,
+    activity,
+    *,
+    chooser=None,
+    now=None,
+    sleeps=None,
+    budget_calculator=None,
+):
     scheduler = Scheduler(
         ModulePoolBuilder(),
         ModuleSelector(chooser=chooser) if chooser else ModuleSelector(),
-        BudgetCalculator(),
+        budget_calculator or BudgetCalculator(),
         ExecutionCoordinator(executor),
     )
     return SchedulerLoop(
@@ -186,13 +200,53 @@ def test_aborted_follow_does_not_stop_other_modules(tmp_path):
     assert executor.calls[0][1] is like
 
 
+def test_dm_no_candidates_relinquishes_to_enabled_unfollow(tmp_path):
+    context = make_context(tmp_path)
+    dm = StubModule(context, InteractionModule.DM)
+    unfollow = StubModule(context, InteractionModule.UNFOLLOW)
+
+    class DMThenUnfollowExecutor:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, _context, module, _budget):
+            self.calls.append(module.module)
+            if module is dm:
+                module.session_complete = True
+                outcome = ModuleExecutionOutcome.NO_CANDIDATES
+                verified = 0
+            else:
+                outcome = ModuleExecutionOutcome.SUCCESS
+                verified = 5
+            return ModuleExecutionResult(
+                execution_started=True,
+                execution_finished=True,
+                next_module_state=module.state,
+                outcome=outcome,
+                verified_successes=verified,
+            )
+
+    executor = DMThenUnfollowExecutor()
+    make_loop(
+        (dm, unfollow),
+        executor,
+        CountedActivity(2),
+        chooser=lambda pool: pool[0],
+    ).start(context)
+
+    assert executor.calls == [InteractionModule.DM, InteractionModule.UNFOLLOW]
+
+
 def test_loop_repeats_cycles_and_stops_at_session_boundary(tmp_path):
     context = make_context(tmp_path)
     follow = StubModule(context, InteractionModule.FOLLOW)
     like = StubModule(context, InteractionModule.LIKE)
     selected = iter((follow, like))
     executor = SequenceExecutor(
-        (ModuleExecutionOutcome.SUCCESS, ModuleExecutionOutcome.SUCCESS)
+        (
+            (ModuleExecutionOutcome.SUCCESS, 5),
+            (ModuleExecutionOutcome.SUCCESS, 5),
+        )
     )
     loop = make_loop(
         (follow, like),
@@ -213,12 +267,87 @@ def test_loop_repeats_cycles_and_stops_at_session_boundary(tmp_path):
     assert len(result.cycles) == 2
 
 
+def test_selected_module_owns_operation_until_verified_target_is_reached(tmp_path):
+    context = make_context(tmp_path)
+    follow = StubModule(context, InteractionModule.FOLLOW)
+    follow.budget_configuration = "3-5"
+    selections = []
+    resolutions = []
+    executor = SequenceExecutor(
+        (
+            (ModuleExecutionOutcome.SUCCESS, 0),
+            (ModuleExecutionOutcome.SUCCESS, 1),
+            (ModuleExecutionOutcome.SUCCESS, 1),
+            (ModuleExecutionOutcome.SUCCESS, 1),
+        )
+    )
+    loop = make_loop(
+        (follow,),
+        executor,
+        CountedActivity(4),
+        chooser=lambda pool: selections.append(tuple(pool)) or pool[0],
+        budget_calculator=BudgetCalculator(
+            randint=lambda minimum, maximum: resolutions.append((minimum, maximum))
+            or 3
+        ),
+    )
+
+    result = loop.start(context)
+
+    assert len(selections) == 1
+    assert resolutions == [(3, 5)]
+    assert [call[2].final for call in executor.calls] == [3, 3, 2, 1]
+    assert [cycle.verified_successes for cycle in result.cycles] == [0, 1, 1, 1]
+    assert any(
+        message == "ModuleOperation created" and fields["target"] == 3
+        for _level, message, fields in context.logger.messages
+    )
+    assert any(
+        message == "ModuleOperation completed" and fields["verified"] == 3
+        for _level, message, fields in context.logger.messages
+    )
+
+
+def test_navigation_failure_relinquishes_operation_without_continuing(tmp_path):
+    context = make_context(tmp_path)
+    like = StubModule(context, InteractionModule.LIKE)
+    like.budget_configuration = 3
+    follow = StubModule(context, InteractionModule.FOLLOW)
+    executor = SequenceExecutor(((ModuleExecutionOutcome.NAVIGATION_FAILED, 1),))
+    loop = make_loop(
+        (like, follow),
+        executor,
+        CountedActivity(3),
+        chooser=lambda pool: next(
+            module for module in pool if module.module is InteractionModule.LIKE
+        ),
+    )
+
+    result = loop.start(context)
+
+    assert len(executor.calls) == 1
+    assert result.cycles[0].outcome is ModuleExecutionOutcome.NAVIGATION_FAILED
+    assert result.cycles[0].verified_successes == 1
+    assert any(
+        message == "ModuleOperation relinquished"
+        and fields["reason"] == "NAVIGATION_FAILED"
+        for _level, message, fields in context.logger.messages
+    )
+    assert any(
+        message == "Scheduler session ending after failed navigation handoff."
+        for _level, message, _fields in context.logger.messages
+    )
+
+
 def test_startup_new_followers_prioritize_one_initial_dm_cycle(tmp_path):
     context = make_context(tmp_path, new_followers=3)
     follow = StubModule(context, InteractionModule.FOLLOW)
     dm = StubModule(context, InteractionModule.DM)
     executor = SequenceExecutor(
-        (ModuleExecutionOutcome.SUCCESS, ModuleExecutionOutcome.SUCCESS)
+        (
+            (ModuleExecutionOutcome.SUCCESS, 5),
+            (ModuleExecutionOutcome.SUCCESS, 5),
+        )
     )
     loop = make_loop(
         (follow, dm),

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import yaml
 from PySide6.QtCore import QSortFilterProxyModel, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -23,6 +24,7 @@ from IGBot.ui.widgets.account_actions_delegate import AccountActionsDelegate
 from IGBot.ui.widgets.empty_state import EmptyState
 from IGBot.ui.widgets.page_header import PageHeader
 from IGBot.ui.widgets.text_input_dialog import TextInputDialog
+from IGBot.ui.widgets.trend_indicator_delegate import TrendIndicatorDelegate
 
 
 class PhoneAccountsPage(QWidget):
@@ -39,7 +41,10 @@ class PhoneAccountsPage(QWidget):
     account_delete_requested = Signal(str)
     account_folder_requested = Signal(str)
     apply_template_requested = Signal(object)
+    ignore_list_requested = Signal(object)
+    debug_logging_requested = Signal(object, bool)
     account_open_requested = Signal(object)
+    statistics_requested = Signal(object)
     active_account_changed = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -112,6 +117,13 @@ class PhoneAccountsPage(QWidget):
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.actions_delegate = AccountActionsDelegate(self.table)
+        self.trend_delegate = TrendIndicatorDelegate(self.table)
+        for column in (
+            PhoneAccountsModel.HEADERS.index("Followers"),
+            PhoneAccountsModel.HEADERS.index("Following"),
+            PhoneAccountsModel.HEADERS.index("Posts"),
+        ):
+            self.table.setItemDelegateForColumn(column, self.trend_delegate)
         self.table.setItemDelegateForColumn(
             PhoneAccountsModel.ACTIONS, self.actions_delegate
         )
@@ -135,12 +147,15 @@ class PhoneAccountsPage(QWidget):
         header.setMinimumSectionSize(55)
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.setSectionResizeMode(PhoneAccountsModel.USERNAME, QHeaderView.Stretch)
+        header.setSectionResizeMode(PhoneAccountsModel.TAG, QHeaderView.Interactive)
         header.setSectionResizeMode(PhoneAccountsModel.ACTIONS, QHeaderView.Fixed)
         widths = {
             "Start Hour": 84,
             "End Hour": 78,
+            "Tag": 110,
             "Followers": 82,
             "Following": 84,
+            "Posts": 68,
             "Followed": 80,
             "Unfollowed": 90,
             "Story": 65,
@@ -261,8 +276,8 @@ class PhoneAccountsPage(QWidget):
 
     def set_all_accounts(self, accounts: list[AssignedAccount]) -> None:
         self._serial = ""
-        self.actions_delegate.set_archive_visible(False)
-        self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 78)
+        self.actions_delegate.set_archive_visible(True)
+        self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 112)
         self.search.clear()
         self.search.show()
         self.options_button.hide()
@@ -310,7 +325,9 @@ class PhoneAccountsPage(QWidget):
             self.account_open_requested.emit(account)
 
     def _handle_account_action(self, action: str, account: AssignedAccount) -> None:
-        if action == "edit":
+        if action == "analytics":
+            self.statistics_requested.emit(account)
+        elif action == "edit":
             self.account_open_requested.emit(account)
         elif action == "archive":
             self.archive_requested.emit(account.username, account.device_id)
@@ -352,8 +369,18 @@ class PhoneAccountsPage(QWidget):
             )
 
         menu.addAction(
+            "Ignored Accounts List...",
+            lambda: self.ignore_list_requested.emit(account),
+        )
+        menu.addAction(
             "Open Account Folder",
             lambda: self.account_folder_requested.emit(str(Path(config_path).parent)),
+        )
+        debug_action = menu.addAction("Enable Debug Logging")
+        debug_action.setCheckable(True)
+        debug_action.setChecked(self._debug_logging_enabled(config_path))
+        debug_action.triggered.connect(
+            lambda enabled: self.debug_logging_requested.emit(account, enabled)
         )
 
         if archived:
@@ -362,3 +389,15 @@ class PhoneAccountsPage(QWidget):
             )
 
         return menu
+
+    @staticmethod
+    def _debug_logging_enabled(config_path: Path) -> bool:
+        try:
+            configuration = yaml.safe_load(config_path.read_bytes())
+        except (OSError, yaml.YAMLError):
+            return False
+        return (
+            configuration.get("debug") is True
+            if isinstance(configuration, dict)
+            else False
+        )

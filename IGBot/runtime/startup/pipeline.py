@@ -59,6 +59,8 @@ class StartupPipeline:
         """Execute stages sequentially and stop at the first failure."""
         results: list[StartupStageResult] = []
         for stage in self._stages:
+            if context.cancellation_checkpoint("Startup Pipeline"):
+                break
             stage_name = type(stage).__name__
             context.logger.info("Startup stage started", stage=stage_name)
             result = stage.execute(context)

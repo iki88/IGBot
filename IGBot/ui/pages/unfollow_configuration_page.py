@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from IGBot.services.specific_lists_service import SpecificListsService
 from IGBot.ui.widgets.configuration_widgets import (
+    AutomaticDailyIncrementSettings,
     CheckboxGroup,
     CollapsibleSection,
     ConfigurationSection,
@@ -33,15 +34,14 @@ class UnfollowConfigurationPage(QScrollArea):
 
     changed = Signal()
     RANGE_KEYS: ClassVar[dict[str, str]] = {
-        "unfollow": "Only Users Followed by IGBot",
         "unfollow-non-followers": "Only Users Followed by IGBot Who Didn't Follow Back",
         "unfollow-any-non-followers": "Any Non-Follower",
         "unfollow-any-followers": "Any Follower",
         "unfollow-any": "Using Own Following List",
     }
-    SEARCH_KEYS = ("unfollow", "unfollow-non-followers")
+    LEGACY_SEARCH_KEY = "unfollow"
+    SEARCH_KEYS = ("unfollow-non-followers",)
     BEHAVIOUR_LABELS: ClassVar[dict[str, str]] = {
-        "unfollow": "Only Users Followed by IGBot",
         "unfollow-non-followers": "Only Users Followed by IGBot Who Didn't Follow Back",
     }
     METHOD_KEY = "igbot-unfollow-method"
@@ -49,6 +49,11 @@ class UnfollowConfigurationPage(QScrollArea):
     ENABLED_KEY = "igbot-unfollow-enabled"
     BUDGET_KEY = "igbot-unfollow-budget"
     ACTION_DELAY_KEY = "igbot-unfollow-action-delay"
+    AUTO_INCREMENT_KEYS = (
+        "igbot-unfollow-auto-increment-enabled",
+        "igbot-unfollow-auto-increment-by",
+        "igbot-unfollow-auto-increment-maximum",
+    )
     WEEKDAYS = (
         "Monday",
         "Tuesday",
@@ -69,6 +74,7 @@ class UnfollowConfigurationPage(QScrollArea):
         self._present_keys: set[str] = set()
         self._edited_keys: set[str] = set()
         self._external_file_values: dict[str, object] = {}
+        self._legacy_search_value: object = None
         self._specific_lists: SpecificListsService | None = None
         self.setWidgetResizable(True)
         container = QWidget(self)
@@ -168,7 +174,7 @@ class UnfollowConfigurationPage(QScrollArea):
             action_fields,
         )
         self.limits = RangeSettings(
-            {"total-unfollows-limit": "Unfollow Limit"}, action_fields
+            {"total-unfollows-limit": "Daily Unfollow Limit"}, action_fields
         )
         action_field_width = 180
         for control in (
@@ -184,14 +190,17 @@ class UnfollowConfigurationPage(QScrollArea):
         self._place_single_field(
             self.action_grid, 2, self.limits, "total-unfollows-limit"
         )
+        self.automatic_daily_increment = AutomaticDailyIncrementSettings(
+            *self.AUTO_INCREMENT_KEYS, actions
+        )
+        self.action_grid.addWidget(self.automatic_daily_increment, 3, 0, 3, 4)
         self.unfollow_limit_help = QLabel(
-            "Daily hard limit.\n"
-            "The bot will never exceed this number of unfollows per day.",
+            "Daily hard limit. The bot will never exceed this number of unfollows per day.",
             actions,
         )
         self.unfollow_limit_help.setWordWrap(True)
         self.unfollow_limit_help.setObjectName("configurationHint")
-        self.action_grid.addWidget(self.unfollow_limit_help, 3, 0, 1, 4)
+        self.action_grid.addWidget(self.unfollow_limit_help, 6, 0, 1, 4)
         self.action_grid.setColumnStretch(4, 1)
         actions.body_layout.addWidget(action_fields)
         layout.addWidget(actions)
@@ -270,6 +279,9 @@ class UnfollowConfigurationPage(QScrollArea):
         self.all_followings_method.toggled.connect(self._method_changed)
         self.unfollow_amount.changed.connect(self._amount_changed)
         self.unfollow_action_delay.changed.connect(self._runtime_extension_changed)
+        self.automatic_daily_increment.changed.connect(
+            self._runtime_extension_changed
+        )
         for key, control in self.limits.controls.items():
             control.textChanged.connect(lambda _text, key=key: self._field_changed(key))
         for key, control in self.numeric.controls.items():
@@ -280,14 +292,6 @@ class UnfollowConfigurationPage(QScrollArea):
             control.toggled.connect(
                 lambda checked, key=key: self._mode_option_changed(key, checked)
             )
-        followed_by_igbot = self.mode_options.controls["unfollow"]
-        did_not_follow_back = self.mode_options.controls["unfollow-non-followers"]
-        followed_by_igbot.toggled.connect(
-            lambda checked: self._enforce_exclusive_option(checked, did_not_follow_back)
-        )
-        did_not_follow_back.toggled.connect(
-            lambda checked: self._enforce_exclusive_option(checked, followed_by_igbot)
-        )
         for key, control in self.behaviour.controls.items():
             control.toggled.connect(lambda _checked, key=key: self._field_changed(key))
         for control in (self.sort_default, self.sort_latest, self.sort_earliest):
@@ -337,6 +341,7 @@ class UnfollowConfigurationPage(QScrollArea):
 
     def set_configuration(self, configuration: dict) -> None:
         engine_keys = set(self.RANGE_KEYS) | {
+            self.LEGACY_SEARCH_KEY,
             "total-unfollows-limit",
             "min-following",
             "unfollow-delay",
@@ -348,10 +353,12 @@ class UnfollowConfigurationPage(QScrollArea):
         self._loading = True
         try:
             self._present_keys = engine_keys & set(configuration)
+            self._legacy_search_value = configuration.get(self.LEGACY_SEARCH_KEY)
             self._edited_keys.clear()
             self._amount_edited = False
             self.modes.set_values(configuration)
             self.limits.set_values(configuration)
+            self.automatic_daily_increment.set_values(configuration)
             self.numeric.set_values(configuration)
             self.filters.set_values(configuration)
             self.behaviour.set_values(configuration)
@@ -360,7 +367,9 @@ class UnfollowConfigurationPage(QScrollArea):
             )
             self._set_sort_from_configuration(configuration)
             self.unfollow_amount.set_value(
-                configuration.get(self.BUDGET_KEY) or self._first_mode_value()
+                configuration.get(self.BUDGET_KEY)
+                or self._legacy_search_value
+                or self._first_mode_value()
             )
             self.unfollow_action_delay.set_value(
                 configuration.get(self.ACTION_DELAY_KEY)
@@ -405,7 +414,7 @@ class UnfollowConfigurationPage(QScrollArea):
         values = {
             key: control.text().strip() for key, control in self.modes.controls.items()
         }
-        implemented_value = values["unfollow"]
+        implemented_value = values["unfollow-non-followers"]
         if implemented_value:
             valid = bool(re.fullmatch(r"\d+(?:-\d+)?", implemented_value))
             if valid and "-" in implemented_value:
@@ -414,10 +423,12 @@ class UnfollowConfigurationPage(QScrollArea):
                 )
                 valid = minimum <= maximum
             if not valid:
-                control = self.modes.controls["unfollow"]
+                control = self.modes.controls["unfollow-non-followers"]
                 control.setStyleSheet("border: 1px solid #EF4444;")
                 control.setFocus()
-                raise ValueError("unfollow must be a number or ascending range.")
+                raise ValueError(
+                    "unfollow-non-followers must be a number or ascending range."
+                )
         if self._amount_edited:
             amount = self.unfollow_amount.value()
             for key in self.RANGE_KEYS:
@@ -457,7 +468,7 @@ class UnfollowConfigurationPage(QScrollArea):
         ):
             entries = row.entries()
             if row.enabled.isChecked():
-                if not entries:
+                if self.enabled.isChecked() and not entries:
                     row.name.setFocus()
                     raise ValueError(
                         f"Add at least one username for {row.name.text()}."
@@ -481,7 +492,13 @@ class UnfollowConfigurationPage(QScrollArea):
 
     def _edit_resource(self, row: TargetSourceRow, key: str) -> None:
         validator = lambda entry: bool(re.fullmatch(r"[A-Za-z0-9._]{1,30}", entry))
-        dialog = TargetEditorDialog(row.name.text(), row.entries(), validator, self)
+        dialog = TargetEditorDialog(
+            row.name.text(),
+            row.entries(),
+            validator,
+            self,
+            specific_users=row is self.specific_users,
+        )
         if dialog.exec() == TargetEditorDialog.Accepted:
             entries = dialog.entries()
             row.set_entries(entries)
@@ -520,11 +537,6 @@ class UnfollowConfigurationPage(QScrollArea):
             return
         self._set_mode_value(key, checked)
         self._notify_changed()
-
-    @staticmethod
-    def _enforce_exclusive_option(checked: bool, opposite: QCheckBox) -> None:
-        if checked:
-            opposite.setChecked(False)
 
     def _set_mode_value(self, key: str, enabled: bool) -> None:
         control = self.modes.controls[key]
@@ -575,6 +587,7 @@ class UnfollowConfigurationPage(QScrollArea):
             self.SORT_KEY: self._selected_sort(),
             self.BUDGET_KEY: self.unfollow_amount.value(),
             self.ACTION_DELAY_KEY: self.unfollow_action_delay.value(),
+            **self.automatic_daily_increment.values(),
         }
 
     def _selected_method(self) -> str:
@@ -595,7 +608,9 @@ class UnfollowConfigurationPage(QScrollArea):
                 method = "specific-users"
             elif self._mode_enabled("unfollow-any"):
                 method = "all-followings"
-            elif any(self._mode_enabled(key) for key in self.SEARCH_KEYS):
+            elif self._enabled_value(self._legacy_search_value) or any(
+                self._mode_enabled(key) for key in self.SEARCH_KEYS
+            ):
                 method = "search"
         controls = {
             "search": self.search_method,
@@ -630,6 +645,10 @@ class UnfollowConfigurationPage(QScrollArea):
             self.search_method.isChecked()
             or self.following_list_search_method.isChecked()
         )
+
+    @staticmethod
+    def _enabled_value(value: object) -> bool:
+        return value not in (None, False, 0, "", "0")
 
     def _update_method_availability(self) -> None:
         available = self._history_settings_available()

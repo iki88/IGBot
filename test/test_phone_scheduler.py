@@ -9,6 +9,7 @@ from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.core.phone_scheduler import PhoneScheduler, RuntimeMode
 from IGBot.core.session_engine import SessionState
 from IGBot.runtime.database import FollowRecord, RuntimeDatabase
+from IGBot.services.specific_lists_service import SpecificListsService
 
 
 def account(tmp_path, username, window):
@@ -104,6 +105,37 @@ def test_native_readiness_accepts_every_supported_follow_provider(tmp_path, prov
     assert decision.selected == current
 
 
+def test_scheduler_runtime_configuration_prefers_account_source_file(tmp_path):
+    current = account(tmp_path, "file_sources", "09.00-11.00")
+    lists = SpecificListsService(current.config_path.parent)
+    lists.initialize()
+    lists.save("follow_sources_followers.txt", ["configured.source"])
+    configuration = current.config_path.read_text(encoding="utf-8").replace(
+        'blogger-followers: ["source"]',
+        'blogger-followers: ["username1", "username2"]',
+    )
+    current.config_path.write_text(configuration, encoding="utf-8")
+    observed = {}
+
+    def eligible(_account, loaded):
+        observed.update(loaded)
+        return True
+
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        device_validator=lambda _: True,
+        runtime_eligibility=eligible,
+    )
+
+    decision = scheduler.evaluate(
+        (current,), datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+    )
+
+    assert decision.selected == current
+    assert observed["igbot-follow-sources-followers"] == ["configured.source"]
+
+
 def test_native_readiness_rejects_follow_without_a_configured_provider(tmp_path):
     current = account(tmp_path, "missing_provider", "09.00-11.00")
     configuration = current.config_path.read_text(encoding="utf-8")
@@ -130,9 +162,22 @@ def test_native_readiness_accepts_search_based_unfollow_without_follow(tmp_path)
     configuration = configuration.replace('follow-percentage: "100"\n', "")
     configuration = configuration.replace('blogger-followers: ["source"]\n', "")
     current.config_path.write_text(
-        configuration
-        + 'unfollow: "1"\ntotal-unfollows-limit: "10"\nunfollow-delay: "3"\n',
+        configuration + 'total-unfollows-limit: "10"\nunfollow-delay: "3"\n',
         encoding="utf-8",
+    )
+    metadata = json.loads(
+        (current.config_path.parent / "account.json").read_text(encoding="utf-8")
+    )
+    metadata["runtime_extensions"] = {
+        "unfollow": {
+            "enabled": True,
+            "method": "search",
+            "sort": "default",
+            "budget": "1",
+        }
+    }
+    (current.config_path.parent / "account.json").write_text(
+        json.dumps(metadata), encoding="utf-8"
     )
     scheduler = PhoneScheduler(
         DeviceRecord("PHONE", "T1", True, (current,)),
@@ -274,25 +319,20 @@ def test_schedule_decision_excludes_account_without_current_runtime_capacity(
     assert decision.selected is None
 
 
-def test_schedule_decision_excludes_account_without_onboarding_evidence(
-    tmp_path, caplog
-):
-    testing_only = account(tmp_path, "testing_only", "09.00-11.00")
-    (testing_only.config_path.parent / "sessions.json").unlink()
-    ready = account(tmp_path, "ready", "09.00-11.00")
+def test_schedule_decision_admits_brand_new_account_without_runtime_history(tmp_path):
+    brand_new = account(tmp_path, "brand_new", "09.00-11.00")
+    (brand_new.config_path.parent / "sessions.json").unlink()
     scheduler = PhoneScheduler(
-        DeviceRecord("PHONE", "T1", True, (testing_only, ready)),
+        DeviceRecord("PHONE", "T1", True, (brand_new,)),
         tmp_path,
         device_validator=lambda _: True,
     )
 
-    with caplog.at_level(logging.INFO):
-        decision = scheduler.evaluate(
-            (testing_only, ready), datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
-        )
+    decision = scheduler.evaluate(
+        (brand_new,), datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+    )
 
-    assert decision.selected == ready
-    assert "no completed onboarding/session history is available" in caplog.text
+    assert decision.selected == brand_new
 
 
 def test_active_account_is_deferred_without_future_session_message(tmp_path, caplog):

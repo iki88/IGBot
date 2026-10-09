@@ -4,6 +4,7 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
+from IGBot.logging_v2 import configure_logging, shutdown_logging
 from IGBot.ui.main_window import MainWindow
 
 
@@ -16,10 +17,16 @@ def run_app():
     QCoreApplication.setApplicationName("IGBot")
     QCoreApplication.setOrganizationName("IGBot")
 
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    app.setStyleSheet(_load_stylesheet())
+    configure_logging(Path.cwd())
+    exit_code = 1
+    try:
+        app = QApplication(sys.argv)
+        app.setStyle("Fusion")
+        app.setStyleSheet(_load_stylesheet())
 
-    win = MainWindow()
-    win.show()
-    sys.exit(app.exec())
+        win = MainWindow()
+        win.show()
+        exit_code = app.exec()
+    finally:
+        shutdown_logging()
+    sys.exit(exit_code)

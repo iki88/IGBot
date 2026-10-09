@@ -6,6 +6,7 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import product
+from pathlib import Path
 
 from IGBot.runtime.candidates.models import CandidateResult, CandidateResultStatus
 from IGBot.runtime.candidates.providers import FollowersProvider
@@ -40,22 +41,56 @@ class SourceSession:
 class FollowSourcesProvider(FollowersProvider):
     """Rotate source sessions without changing generic provider behavior."""
 
+    def __init__(
+        self,
+        *args,
+        start_selector: Callable[[int], int] = random.randrange,
+        source_label: str | None = None,
+        source_path: str | Path | None = None,
+    ):
+        super().__init__(*args)
+        total = len(self._sources)
+        start = start_selector(total) if total else 0
+        if total and not 0 <= start < total:
+            raise ValueError("Source start selector returned an invalid index")
+        positions = tuple(range(1, total + 1))
+        self._sources = self._sources[start:] + self._sources[:start]
+        self._configured_positions = positions[start:] + positions[:start]
+        self._initial_source_pending = True
+        self._source_origin_pending = True
+        self._source_label = source_label
+        self._source_path = Path(source_path) if source_path is not None else None
+
     def record_evaluated(self, context: RuntimeContext) -> None:
         self._discovery.session.evaluated += 1
 
     def _source_selected(self, context: RuntimeContext, source: str) -> None:
         total = len(self._sources)
+        if self._source_origin_pending and self._source_path is not None:
+            label = self._source_label or "discovery"
+            loaded = ", ".join(self._sources)
+            context.logger.info(
+                f"[Source] Loaded {label} sources "
+                f"(source={self._source_path}; loaded={loaded})"
+            )
+            self._source_origin_pending = False
         context.logger.info(f"[Source] Available configured sources: {total}")
-        context.logger.info(
-            f"[Source] Randomly selected: {source} ({self._source_index + 1}/{total})"
-        )
+        position = self._configured_positions[self._source_index]
+        if self._initial_source_pending:
+            context.logger.info(
+                f"[Source] Random starting source: {source} ({position}/{total})"
+            )
+            self._initial_source_pending = False
+        else:
+            context.logger.info(
+                f"[Source] Rotating to next source: {source} ({position}/{total})"
+            )
 
     def next_candidate(self, context: RuntimeContext) -> CandidateResult:
         if self._sources and self._discovery.session.evaluated >= 50:
             context.logger.info(
                 f"[Source] Source Session finished (evaluated_profiles={self._discovery.session.evaluated})"
             )
-            context.logger.info("[Source] Rotating to next source.")
             self._source_index = (self._source_index + 1) % len(self._sources)
             self._source_open = False
             self._discovery.session = SourceSession()

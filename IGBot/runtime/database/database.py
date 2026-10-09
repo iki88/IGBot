@@ -7,6 +7,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
+from IGBot.runtime.database.daily_limits import DailyLimitsRepository
 from IGBot.runtime.database.migrations import migrate_runtime_schema
 from IGBot.runtime.database.repositories import (
     CommentRepository,
@@ -45,6 +46,7 @@ class RuntimeDatabase:
         self.specific_dm = self.specific["specific_dm"]
         self.specific_comment = self.specific["specific_comment"]
         self.specific_progress = SpecificProgressRepository(self._connection)
+        self.daily_limits = DailyLimitsRepository(self._connection)
 
         try:
             self._initialize_schema()
@@ -63,6 +65,7 @@ class RuntimeDatabase:
             self.dm,
             *self.specific.values(),
             self.specific_progress,
+            self.daily_limits,
         )
         migrate_runtime_schema(self._connection, repositories)
         with self._connection:

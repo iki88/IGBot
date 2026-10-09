@@ -9,7 +9,11 @@ from IGBot.runtime.context import RuntimeContext
 from IGBot.runtime.scheduler.budget import BudgetCalculator
 from IGBot.runtime.scheduler.contracts import BudgetedRuntimeModule
 from IGBot.runtime.scheduler.execution import ExecutionCoordinator
-from IGBot.runtime.scheduler.models import ModuleExecutionOutcome, SchedulerResult
+from IGBot.runtime.scheduler.models import (
+    ExecutionBudget,
+    ModuleExecutionOutcome,
+    SchedulerResult,
+)
 from IGBot.runtime.scheduler.pool import ModulePoolBuilder
 from IGBot.runtime.scheduler.selector import ModuleSelector
 
@@ -78,7 +82,35 @@ class Scheduler:
                 next_module_state=selected.state,
                 detail="Selected module is not eligible.",
             )
-        budget = self._budget_calculator.calculate(selected)
+        budget = self.resolve_budget(selected)
+        return self.evaluate_with_budget(
+            context, selected, budget, start_module=start_module
+        )
+
+    def resolve_budget(self, selected: BudgetedRuntimeModule) -> ExecutionBudget:
+        """Resolve one immutable target for a newly selected operation."""
+
+        return self._budget_calculator.calculate(selected)
+
+    def evaluate_with_budget(
+        self,
+        context: RuntimeContext,
+        selected: BudgetedRuntimeModule,
+        budget: ExecutionBudget,
+        *,
+        start_module: bool = False,
+    ) -> SchedulerResult:
+        """Execute one step of an existing operation without rerandomizing it."""
+
+        if not selected.is_eligible():
+            return SchedulerResult(
+                selected_module=None,
+                budget=budget,
+                execution_started=False,
+                execution_finished=False,
+                next_module_state=selected.state,
+                detail="Selected module is not eligible.",
+            )
         if budget.final == 0:
             return SchedulerResult(
                 selected_module=selected.module,
@@ -102,4 +134,5 @@ class Scheduler:
             detail=execution.detail,
             outcome=execution.outcome,
             module_result=execution.module_result,
+            verified_successes=execution.verified_successes,
         )

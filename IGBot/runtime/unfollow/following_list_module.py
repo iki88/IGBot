@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from IGBot.runtime.analytics import increment_analytics
 from IGBot.runtime.context import RuntimeContext
 from IGBot.runtime.database.timestamps import utc_timestamp
 from IGBot.runtime.modules import InteractionModule, ModuleStateMachine
@@ -74,13 +75,17 @@ class AllFollowingsUnfollowModule:
         return self._state.mark_daily_limit_reached()
 
     def execute(self, context: RuntimeContext, _budget) -> ModuleExecutionResult:
+        if context.cancellation_checkpoint("Following-list Unfollow preparation"):
+            return self._result(
+                ModuleExecutionOutcome.SUCCESS, "Unfollow execution cancelled."
+            )
         with FollowingListDatabase(context.session.account_directory) as database:
             processed = database.processed_usernames()
         result = self._android.execute_next(context, processed)
         if result.status is AndroidUnfollowStatus.NO_CANDIDATES:
             return self._result(ModuleExecutionOutcome.NO_CANDIDATES, result.detail)
         if result.status is AndroidUnfollowStatus.NAVIGATION_FAILED:
-            return self._result(ModuleExecutionOutcome.SCROLL_BLOCK, result.detail)
+            return self._result(ModuleExecutionOutcome.NAVIGATION_FAILED, result.detail)
         if result.status is not AndroidUnfollowStatus.SUCCESS or not result.username:
             return self._result(ModuleExecutionOutcome.SUCCESS, result.detail)
 
@@ -92,20 +97,32 @@ class AllFollowingsUnfollowModule:
                 str(context.session.session_id),
             )
         context.logger.info("Runtime updated.", username=result.username)
+        increment_analytics(context, "unfollowed")
         self.daily_remaining -= 1
         self.hourly_remaining -= 1
+        if context.cancellation_checkpoint("Following-list result persisted"):
+            return self._result(
+                ModuleExecutionOutcome.SUCCESS, "Unfollow execution cancelled."
+            )
         outcome = (
             ModuleExecutionOutcome.DAILY_LIMIT_REACHED
             if self.daily_remaining == 0
             else ModuleExecutionOutcome.SUCCESS
         )
-        return self._result(outcome)
+        return self._result(outcome, verified_successes=1)
 
-    def _result(self, outcome: ModuleExecutionOutcome, detail: str | None = None):
+    def _result(
+        self,
+        outcome: ModuleExecutionOutcome,
+        detail: str | None = None,
+        *,
+        verified_successes: int = 0,
+    ):
         return ModuleExecutionResult(
             execution_started=True,
             execution_finished=True,
             next_module_state=self.state,
             detail=detail,
             outcome=outcome,
+            verified_successes=verified_successes,
         )
