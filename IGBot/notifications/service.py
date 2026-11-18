@@ -125,6 +125,25 @@ class NotificationService:
             database.connection.commit()
             return cursor.rowcount
 
+    def purge_account(self, username: str, account_directory: str | Path) -> tuple[int, int]:
+        """Permanently remove notification state owned by one deleted account."""
+
+        normalized_username = username.strip()
+        account_key = str(Path(account_directory).resolve()).casefold()
+        with (
+            NotificationsDatabase(self.workspace) as database,
+            database.connection,
+        ):
+            notifications = database.connection.execute(
+                "DELETE FROM notifications WHERE username = ?",
+                (normalized_username,),
+            ).rowcount
+            lifecycle = database.connection.execute(
+                "DELETE FROM account_lifecycle WHERE account_key = ?",
+                (account_key,),
+            ).rowcount
+        return notifications, lifecycle
+
     def blocking_detected_on_local_date(
         self, username: str, local_date: date, *, timezone=None
     ) -> bool:

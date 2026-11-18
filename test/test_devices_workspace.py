@@ -12,6 +12,7 @@ from IGBot.ui.controllers.device_controller import DeviceController
 from IGBot.ui.main_window import MainWindow
 from IGBot.ui.models.device_table_model import DeviceTableModel
 from IGBot.ui.pages.devices_page import DevicesPage
+from IGBot.ui.widgets.confirmation_dialog import ConfirmationDialog
 from IGBot.ui.widgets.device_actions_delegate import DeviceActionsDelegate
 from IGBot.ui.widgets.error_dialog import ErrorDialog
 
@@ -767,3 +768,30 @@ def test_archive_warning_uses_application_styled_dialog(application):
     assert dialog.findChild(type(dialog.close_button), "secondaryButton").text() == "OK"
     assert dialog.findChild(type(dialog.close_button), "secondaryButton").isDefault() is False
     dialog.close()
+
+
+@pytest.mark.parametrize("confirmed", (False, True))
+def test_permanent_delete_uses_one_shared_confirmation(application, mocker, confirmed):
+    window = MainWindow(_DeviceService())
+    confirmation = mocker.patch.object(
+        ConfirmationDialog, "confirm", return_value=confirmed
+    )
+    delete = mocker.patch.object(
+        window.device_controller, "delete_archived_account"
+    )
+
+    window._show_delete_account_dialog("selected.account")
+
+    confirmation.assert_called_once_with(
+        "Permanently Delete Account?",
+        "Are you sure you want to permanently delete selected.account?",
+        "This will permanently delete the account and its stored data from IGBot. "
+        "This action cannot be undone.",
+        window,
+        confirm_text="Delete Permanently",
+    )
+    if confirmed:
+        delete.assert_called_once_with("selected.account")
+    else:
+        delete.assert_not_called()
+    window.close()

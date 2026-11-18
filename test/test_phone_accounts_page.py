@@ -158,6 +158,56 @@ def test_archived_account_options_include_restore_open_folder_and_delete():
     assert application is not None
 
 
+def test_archived_actions_show_delete_and_emit_existing_signal():
+    application = QApplication.instance() or QApplication([])
+    page = PhoneAccountsPage()
+    account = AssignedAccount(
+        username="archived_account",
+        device_id="ARCHIVED_ACCOUNTS",
+        app_id="com.instagram.android",
+        config_path=Path("accounts/archived_account/config.yml"),
+    )
+    requests = []
+    page.account_delete_requested.connect(requests.append)
+
+    page.set_archived([account])
+
+    assert [action.name for action in page.actions_delegate.visible_actions()] == [
+        "analytics",
+        "edit",
+        "delete",
+    ]
+    assert page.actions_delegate._foreground("delete", True) == "#EF4444"
+    assert page.table.columnWidth(page.model.ACTIONS) == 112
+
+    page._handle_account_action("delete", account)
+
+    assert requests == ["archived_account"]
+    assert application is not None
+
+
+def test_active_actions_never_expose_delete():
+    application = QApplication.instance() or QApplication([])
+    page = PhoneAccountsPage()
+    account = AssignedAccount(
+        username="active_account",
+        device_id="phone-a",
+        app_id="com.instagram.android",
+        config_path=Path("accounts/active_account/config.yml"),
+    )
+    requests = []
+    page.account_delete_requested.connect(requests.append)
+
+    page.set_phone(DeviceRecord("phone-a", "Rack One", True), [account])
+    page._handle_account_action("delete", account)
+
+    assert "delete" not in {
+        action.name for action in page.actions_delegate.visible_actions()
+    }
+    assert requests == []
+    assert application is not None
+
+
 def test_account_options_reflect_and_emit_existing_debug_setting(tmp_path):
     application = QApplication.instance() or QApplication([])
     directory = tmp_path / "accounts" / "real_account"

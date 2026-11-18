@@ -140,6 +140,13 @@ class InProcessBlockingRetryRegistry:
         with cls._lock:
             return cls._dates.get(username.strip().casefold()) == local_date
 
+    @classmethod
+    def discard(cls, username: str) -> None:
+        """Forget process-local retry state for exactly one account username."""
+
+        with cls._lock:
+            cls._dates.pop(username.strip().casefold(), None)
+
 
 class BlockingScreenMonitor:
     """Coordinate detection, persistence, logging, and account-session blocking."""
@@ -243,6 +250,10 @@ class BlockingScreenMonitor:
                 context.logger.warning(
                     "Notification UI refresh request failed", detail=str(error)
                 )
+        username = context.session.account_username
+        today = datetime.now().astimezone().date()
+        if not InProcessBlockingRetryRegistry.blocked_on(username, today):
+            InProcessBlockingRetryRegistry.discard(username)
 
     @staticmethod
     def _connect(serial: str) -> object:

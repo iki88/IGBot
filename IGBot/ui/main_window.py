@@ -248,6 +248,9 @@ class MainWindow(QMainWindow):
         self.device_controller.archived_account_deleted.connect(
             self._return_after_account_action
         )
+        self.device_controller.archived_account_deleted.connect(
+            lambda _result: self._refresh_notifications()
+        )
         self.device_controller.account_creation_failed.connect(
             self._show_add_account_error
         )
@@ -908,11 +911,12 @@ class MainWindow(QMainWindow):
 
     def _show_delete_account_dialog(self, username: str) -> None:
         confirmed = ConfirmationDialog.confirm(
-            "Delete Account",
-            username,
-            "This account will be permanently deleted. This action cannot be undone.",
+            "Permanently Delete Account?",
+            f"Are you sure you want to permanently delete {username}?",
+            "This will permanently delete the account and its stored data from "
+            "IGBot. This action cannot be undone.",
             self,
-            confirm_text="Delete",
+            confirm_text="Delete Permanently",
         )
         if confirmed:
             self.device_controller.delete_archived_account(username)

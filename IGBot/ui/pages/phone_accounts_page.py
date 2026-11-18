@@ -216,6 +216,7 @@ class PhoneAccountsPage(QWidget):
         )
         self._serial = device.serial
         self.actions_delegate.set_archive_visible(True)
+        self.actions_delegate.set_delete_visible(False)
         self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 112)
         self.device_context.show()
         self.search.clear()
@@ -254,7 +255,8 @@ class PhoneAccountsPage(QWidget):
     def set_archived(self, accounts: list[AssignedAccount]) -> None:
         self._serial = ""
         self.actions_delegate.set_archive_visible(False)
-        self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 78)
+        self.actions_delegate.set_delete_visible(True)
+        self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 112)
         self.device_context.show()
         self.search.clear()
         self.search.show()
@@ -277,6 +279,7 @@ class PhoneAccountsPage(QWidget):
     def set_all_accounts(self, accounts: list[AssignedAccount]) -> None:
         self._serial = ""
         self.actions_delegate.set_archive_visible(True)
+        self.actions_delegate.set_delete_visible(False)
         self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 112)
         self.search.clear()
         self.search.show()
@@ -331,6 +334,8 @@ class PhoneAccountsPage(QWidget):
             self.account_open_requested.emit(account)
         elif action == "archive":
             self.archive_requested.emit(account.username, account.device_id)
+        elif action == "delete" and account.device_id == ARCHIVED_ACCOUNTS:
+            self.account_delete_requested.emit(account.username)
 
     def selected_account(self) -> AssignedAccount | None:
         rows = self.table.selectionModel().selectedRows()

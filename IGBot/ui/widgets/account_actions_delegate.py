@@ -23,15 +23,22 @@ class AccountActionsDelegate(QStyledItemDelegate):
         _AccountAction("edit", "Edit Account"),
     )
     ARCHIVE_ACTION = _AccountAction("archive", "Archive Account")
+    DELETE_ACTION = _AccountAction("delete", "Permanently Delete Account")
     BUTTON_SIZE = 28
     GAP = 5
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._archive_visible = False
+        self._delete_visible = False
 
     def set_archive_visible(self, visible: bool) -> None:
         self._archive_visible = visible
+        if self.parent() is not None:
+            self.parent().viewport().update()
+
+    def set_delete_visible(self, visible: bool) -> None:
+        self._delete_visible = visible
         if self.parent() is not None:
             self.parent().viewport().update()
 
@@ -86,13 +93,15 @@ class AccountActionsDelegate(QStyledItemDelegate):
             return "#52525B"
         if action == "edit":
             return "#F59E0B"
-        if action == "archive":
+        if action in {"archive", "delete"}:
             return "#EF4444"
         return "#3B82F6"
 
     def visible_actions(self) -> tuple[_AccountAction, ...]:
         if self._archive_visible:
             return (*self.ACTIONS, self.ARCHIVE_ACTION)
+        if self._delete_visible:
+            return (*self.ACTIONS, self.DELETE_ACTION)
         return self.ACTIONS
 
     def _action_rects(self, cell_rect: QRect):

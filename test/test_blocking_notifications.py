@@ -7,6 +7,7 @@ import pytest
 from IGBot.notifications import (
     AndroidBlockingScreenDetector,
     BlockingScreenMonitor,
+    InProcessBlockingRetryRegistry,
     NotificationService,
     NotificationSeverity,
     NotificationType,
@@ -205,3 +206,56 @@ def test_automatic_resolution_emits_one_refresh_callback(tmp_path):
 
     assert refreshed == [True]
     assert service.active() == ()
+
+
+def test_registry_discard_removes_only_selected_username():
+    InProcessBlockingRetryRegistry.record_today("deleted.account")
+    InProcessBlockingRetryRegistry.record_today("other.account")
+    today = datetime.now().astimezone().date()
+
+    InProcessBlockingRetryRegistry.discard("DELETED.ACCOUNT")
+
+    assert not InProcessBlockingRetryRegistry.blocked_on("deleted.account", today)
+    assert InProcessBlockingRetryRegistry.blocked_on("other.account", today)
+    InProcessBlockingRetryRegistry.discard("other.account")
+
+
+def test_verified_recovery_discards_expired_registry_entry(tmp_path):
+    service = NotificationService(tmp_path)
+    monitor = BlockingScreenMonitor(
+        service,
+        device_factory=lambda _serial: type(
+            "Device", (), {"dump_hierarchy": lambda self, **_kwargs: "<hierarchy />"}
+        )(),
+    )
+    context = _context(tmp_path, "com.instagram.androio")
+    username = context.session.account_username
+    with InProcessBlockingRetryRegistry._lock:
+        InProcessBlockingRetryRegistry._dates[username.casefold()] = (
+            datetime.now().astimezone().date() - timedelta(days=1)
+        )
+
+    monitor.resolve_after_verified_startup(context)
+
+    with InProcessBlockingRetryRegistry._lock:
+        assert username.casefold() not in InProcessBlockingRetryRegistry._dates
+
+
+def test_verified_recovery_preserves_same_day_registry_entry(tmp_path):
+    service = NotificationService(tmp_path)
+    monitor = BlockingScreenMonitor(
+        service,
+        device_factory=lambda _serial: type(
+            "Device", (), {"dump_hierarchy": lambda self, **_kwargs: "<hierarchy />"}
+        )(),
+    )
+    context = _context(tmp_path, "com.instagram.androio")
+    username = context.session.account_username
+    InProcessBlockingRetryRegistry.record_today(username)
+
+    monitor.resolve_after_verified_startup(context)
+
+    assert InProcessBlockingRetryRegistry.blocked_on(
+        username, datetime.now().astimezone().date()
+    )
+    InProcessBlockingRetryRegistry.discard(username)

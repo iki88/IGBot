@@ -1,11 +1,15 @@
 import logging
+import os
 import shutil
+import stat
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from IGBot.notifications import NotificationService
+from IGBot.notifications.blocking import InProcessBlockingRetryRegistry
 from IGBot.services.account_assignment_service import AccountAssignmentService
 from IGBot.services.transfer_service import TransferService, TransferValidationResult
 
@@ -41,6 +45,7 @@ class ArchiveService:
         self._transfer_validation = TransferService(account_assignments)
         self._phone_is_active = phone_is_active
         self._notification_service = notification_service
+        self._account_operation_lock = threading.RLock()
 
     def set_phone_is_active(self, phone_is_active: Callable[[str], bool]) -> None:
         """Install the authoritative phone-runtime guard used at archive time."""
@@ -138,6 +143,12 @@ class ArchiveService:
         self, username: str, destination_serial: str, managed_serials: set[str]
     ) -> TransferValidationResult:
         """Restore an archived account using the existing verified assignment writer."""
+        with self._account_operation_lock:
+            return self._restore_locked(username, destination_serial, managed_serials)
+
+    def _restore_locked(
+        self, username: str, destination_serial: str, managed_serials: set[str]
+    ) -> TransferValidationResult:
         result = self._transfer_validation.validate_transfer(
             username,
             ARCHIVED_ACCOUNTS,
@@ -162,6 +173,10 @@ class ArchiveService:
 
     def delete_archived(self, username: str) -> ArchiveValidationResult:
         """Permanently delete one verified archived account with recovery protection."""
+        with self._account_operation_lock:
+            return self._delete_archived_locked(username)
+
+    def _delete_archived_locked(self, username: str) -> ArchiveValidationResult:
         username = username.strip()
 
         def invalid(message: str) -> ArchiveValidationResult:
@@ -196,10 +211,15 @@ class ArchiveService:
         directory = account.config_path.parent
         if not directory.is_dir():
             return invalid("The archived account directory does not exist.")
-        if directory.is_symlink() or (
-            hasattr(directory, "is_junction") and directory.is_junction()
-        ):
-            return invalid("The archived account directory cannot be a linked folder.")
+        try:
+            unsafe_path = self._unsafe_link_or_reparse_point(directory)
+        except OSError as error:
+            return invalid(f"The archived account directory could not be inspected: {error}")
+        if unsafe_path is not None:
+            return invalid(
+                "The archived account directory contains an unsafe linked or "
+                f"reparse-point path: {unsafe_path}"
+            )
 
         accounts_root = self._account_assignments.accounts_directory.resolve()
         if directory.resolve().parent != accounts_root:
@@ -225,19 +245,70 @@ class ArchiveService:
                 try:
                     shutil.rmtree(directory)
                 except OSError as error:
-                    try:
-                        shutil.copytree(backup, directory, dirs_exist_ok=True)
-                    except OSError as restore_error:
-                        raise RuntimeError(
-                            "Account deletion failed and the original account "
-                            f"could not be restored: {restore_error}"
-                        ) from error
+                    self._restore_deleted_account(backup, directory, error)
                     return invalid(
                         f"Account deletion failed; the original was restored: {error}"
+                    )
+                try:
+                    notification_service = self._notification_service or NotificationService(
+                        accounts_root.parent
+                    )
+                    notification_service.purge_account(username, directory)
+                except Exception as error:  # noqa: BLE001 - cross-store recovery boundary
+                    self._restore_deleted_account(backup, directory, error)
+                    return invalid(
+                        "Account notification cleanup failed; the original account "
+                        f"was restored: {error}"
                     )
         except (OSError, RuntimeError) as error:
             return invalid(str(error))
 
+        InProcessBlockingRetryRegistry.discard(username)
         return ArchiveValidationResult(
             True, username, ARCHIVED_ACCOUNTS, config_path=account.config_path
         )
+
+    @staticmethod
+    def _restore_deleted_account(
+        backup: Path, directory: Path, deletion_error: BaseException
+    ) -> None:
+        try:
+            shutil.copytree(backup, directory, dirs_exist_ok=True)
+        except OSError as restore_error:
+            raise RuntimeError(
+                "Account deletion failed and the original account could not be "
+                f"restored: {restore_error}"
+            ) from deletion_error
+
+    @staticmethod
+    def _unsafe_link_or_reparse_point(root: Path) -> Path | None:
+        """Return the first unsafe link/reparse point without following it."""
+
+        pending = [root]
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        while pending:
+            current = pending.pop()
+            current_stat = current.stat(follow_symlinks=False)
+            if current.is_symlink() or (
+                hasattr(current, "is_junction") and current.is_junction()
+            ) or (
+                reparse_flag
+                and getattr(current_stat, "st_file_attributes", 0) & reparse_flag
+            ):
+                return current
+            if not current.is_dir():
+                continue
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    path = Path(entry.path)
+                    entry_stat = entry.stat(follow_symlinks=False)
+                    if entry.is_symlink() or (
+                        hasattr(path, "is_junction") and path.is_junction()
+                    ) or (
+                        reparse_flag
+                        and getattr(entry_stat, "st_file_attributes", 0) & reparse_flag
+                    ):
+                        return path
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(path)
+        return None

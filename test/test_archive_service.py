@@ -1,12 +1,16 @@
+import threading
+
 import pytest
 
 from IGBot.core.device import DeviceRecord
 from IGBot.core.session_engine import SessionState
 from IGBot.notifications import (
+    InProcessBlockingRetryRegistry,
     NotificationService,
     NotificationSeverity,
     NotificationType,
 )
+from IGBot.notifications.database import NotificationsDatabase
 from IGBot.services.account_assignment_service import AccountAssignmentService
 from IGBot.services.archive_service import (
     ARCHIVE_REQUIRES_STOPPED_DEVICE,
@@ -474,6 +478,258 @@ def test_delete_archived_restores_original_after_partial_failure(tmp_path, monke
     assert "original was restored" in result.error
     assert extra.read_text(encoding="utf-8") == "preserve me"
     assert (directory / "config.yml").is_file()
+
+
+def test_delete_archived_purges_only_owned_notification_state(tmp_path):
+    service = _service(tmp_path, [("folder", "real_account", ARCHIVED_ACCOUNTS)])
+    notifications = NotificationService(tmp_path)
+    service._notification_service = notifications
+    directory = tmp_path / "accounts" / "folder"
+    notifications.create(
+        "real_account",
+        NotificationType.ACCOUNT_DISABLED,
+        NotificationSeverity.CRITICAL,
+    )
+    notifications.create(
+        "other_account",
+        NotificationType.ZERO_INTERACTIONS,
+        NotificationSeverity.WARNING,
+    )
+    with NotificationsDatabase(tmp_path) as database:
+        database.connection.executemany(
+            """INSERT INTO account_lifecycle
+               (account_key, username, device, tag, first_successful_session_at,
+                consecutive_zero_interaction_sessions, updated_at)
+               VALUES (?, ?, '', '', NULL, 0, 'now')""",
+            (
+                (str(directory.resolve()).casefold(), "real_account"),
+                (str((tmp_path / "accounts" / "other").resolve()).casefold(), "other_account"),
+            ),
+        )
+        database.connection.commit()
+
+    result = service.delete_archived("real_account")
+
+    assert result.valid
+    assert tuple(item.username for item in notifications.all()) == ("other_account",)
+    with NotificationsDatabase(tmp_path) as database:
+        lifecycle = database.connection.execute(
+            "SELECT username FROM account_lifecycle ORDER BY username"
+        ).fetchall()
+    assert [row["username"] for row in lifecycle] == ["other_account"]
+
+
+def test_notification_cleanup_failure_restores_account_directory(tmp_path, mocker):
+    service = _service(tmp_path, [("folder", "real_account", ARCHIVED_ACCOUNTS)])
+    directory = tmp_path / "accounts" / "folder"
+    important = directory / "important.txt"
+    important.write_text("keep", encoding="utf-8")
+    service._notification_service = mocker.Mock()
+    service._notification_service.purge_account.side_effect = OSError("database locked")
+
+    result = service.delete_archived("real_account")
+
+    assert not result.valid
+    assert "notification cleanup failed" in result.error
+    assert important.read_text(encoding="utf-8") == "keep"
+    assert (directory / "config.yml").is_file()
+
+
+def test_delete_rejects_account_directory_symlink(tmp_path):
+    accounts = tmp_path / "accounts"
+    accounts.mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    (external / "config.yml").write_text(
+        f"username: real_account\ndevice: {ARCHIVED_ACCOUNTS}\n", encoding="utf-8"
+    )
+    link = accounts / "linked"
+    try:
+        link.symlink_to(external, target_is_directory=True)
+    except OSError:
+        pytest.skip("Directory symlinks require additional privileges on this platform")
+    assignment = AccountAssignmentService(accounts)
+    account = assignment._load_account(link / "config.yml")
+    assert account is not None
+    service = ArchiveService(assignment)
+    service._account_assignments.load_by_device = lambda: {
+        ARCHIVED_ACCOUNTS: (account,)
+    }
+
+    result = service.delete_archived("real_account")
+
+    assert not result.valid
+    assert "unsafe linked or reparse-point" in result.error
+    assert (external / "config.yml").is_file()
+
+
+def test_delete_rejects_nested_link_without_touching_external_data(tmp_path):
+    service = _service(tmp_path, [("folder", "real_account", ARCHIVED_ACCOUNTS)])
+    directory = tmp_path / "accounts" / "folder"
+    external = tmp_path / "external"
+    external.mkdir()
+    protected = external / "protected.txt"
+    protected.write_text("untouched", encoding="utf-8")
+    try:
+        (directory / "external-link").symlink_to(external, target_is_directory=True)
+    except OSError:
+        pytest.skip("Directory symlinks require additional privileges on this platform")
+
+    result = service.delete_archived("real_account")
+
+    assert not result.valid
+    assert "unsafe linked or reparse-point" in result.error
+    assert protected.read_text(encoding="utf-8") == "untouched"
+    assert directory.is_dir()
+
+
+def test_delete_rejects_nested_windows_junction_marker(tmp_path, monkeypatch):
+    service = _service(tmp_path, [("folder", "real_account", ARCHIVED_ACCOUNTS)])
+    directory = tmp_path / "accounts" / "folder"
+    junction = directory / "nested-junction"
+    junction.mkdir()
+    original_is_junction = getattr(type(junction), "is_junction", None)
+    if original_is_junction is None:
+        pytest.skip("Path.is_junction is unavailable on this Python version")
+
+    monkeypatch.setattr(
+        type(junction),
+        "is_junction",
+        lambda path: path.name == "nested-junction" or original_is_junction(path),
+    )
+
+    result = service.delete_archived("real_account")
+
+    assert not result.valid
+    assert "unsafe linked or reparse-point" in result.error
+    assert directory.is_dir()
+
+
+def test_restore_and_delete_are_serialized_by_account_operation_lock(tmp_path, mocker):
+    service = _service(tmp_path, [("folder", "real_account", ARCHIVED_ACCOUNTS)])
+    restore_entered = threading.Event()
+    release_restore = threading.Event()
+    delete_entered = threading.Event()
+
+    def restore_locked(*_args):
+        restore_entered.set()
+        assert release_restore.wait(timeout=2)
+        return mocker.Mock(valid=True)
+
+    def delete_locked(*_args):
+        delete_entered.set()
+        return mocker.Mock(valid=True)
+
+    mocker.patch.object(service, "_restore_locked", side_effect=restore_locked)
+    mocker.patch.object(service, "_delete_archived_locked", side_effect=delete_locked)
+    restore_thread = threading.Thread(
+        target=service.restore, args=("real_account", "phone-a", {"phone-a"})
+    )
+    delete_thread = threading.Thread(
+        target=service.delete_archived, args=("real_account",)
+    )
+
+    restore_thread.start()
+    assert restore_entered.wait(timeout=2)
+    delete_thread.start()
+    assert not delete_entered.wait(timeout=0.1)
+    release_restore.set()
+    restore_thread.join(timeout=2)
+    delete_thread.join(timeout=2)
+
+    assert delete_entered.is_set()
+
+
+def test_deletion_preserves_shared_and_other_account_data(tmp_path):
+    service = _service(
+        tmp_path,
+        [
+            ("deleted", "real_account", ARCHIVED_ACCOUNTS),
+            ("other", "other_account", ARCHIVED_ACCOUNTS),
+        ],
+    )
+    deleted = tmp_path / "accounts" / "deleted"
+    other = tmp_path / "accounts" / "other"
+    (other / "runtime.db").write_bytes(b"other runtime")
+    global_profiles = tmp_path / "global_profiles.db"
+    global_profiles.write_bytes(b"shared profiles")
+    application_log = tmp_path / "Logs" / "application.log"
+    application_log.parent.mkdir()
+    application_log.write_bytes(b"shared log")
+    before_profiles = global_profiles.read_bytes()
+    before_log = application_log.read_bytes()
+
+    result = service.delete_archived("real_account")
+
+    assert result.valid
+    assert not deleted.exists()
+    assert (other / "runtime.db").read_bytes() == b"other runtime"
+    assert global_profiles.read_bytes() == before_profiles
+    assert application_log.read_bytes() == before_log
+
+
+def test_delete_clears_only_deleted_username_blocking_state(tmp_path):
+    service = _service(tmp_path, [("folder", "real_account", ARCHIVED_ACCOUNTS)])
+    today = __import__("datetime").datetime.now().astimezone().date()
+    InProcessBlockingRetryRegistry.record_today("real_account")
+    InProcessBlockingRetryRegistry.record_today("other_account")
+
+    result = service.delete_archived("real_account")
+
+    assert result.valid
+    assert not InProcessBlockingRetryRegistry.blocked_on("real_account", today)
+    assert InProcessBlockingRetryRegistry.blocked_on("other_account", today)
+    InProcessBlockingRetryRegistry.discard("other_account")
+
+
+def test_archive_and_restore_do_not_clear_blocking_state(tmp_path):
+    service = _service(tmp_path, [("folder", "real_account", "phone-a")])
+    today = __import__("datetime").datetime.now().astimezone().date()
+    InProcessBlockingRetryRegistry.record_today("real_account")
+
+    archived = service.archive("real_account", "phone-a")
+    restored = service.restore("real_account", "phone-a", {"phone-a"})
+
+    assert archived.valid
+    assert restored.valid
+    assert InProcessBlockingRetryRegistry.blocked_on("real_account", today)
+    InProcessBlockingRetryRegistry.discard("real_account")
+
+
+def test_deleted_username_can_be_created_again_with_fresh_account_data(tmp_path):
+    service = _service(
+        tmp_path, [("same_user", "same_user", ARCHIVED_ACCOUNTS)]
+    )
+    directory = tmp_path / "accounts" / "same_user"
+    (directory / "runtime.db").write_bytes(b"old runtime")
+    (directory / "analytics.db").write_bytes(b"old analytics")
+    notifications = NotificationService(tmp_path)
+    service._notification_service = notifications
+    notifications.create(
+        "same_user",
+        NotificationType.HUMAN_CAPTCHA,
+        NotificationSeverity.CRITICAL,
+    )
+    InProcessBlockingRetryRegistry.record_today("same_user")
+    templates = tmp_path / "config-examples"
+    templates.mkdir()
+    (templates / "config.yml").write_text(
+        'username: ""\ndevice: ""\napp-id: ""\n', encoding="utf-8"
+    )
+
+    deleted = service.delete_archived("same_user")
+    recreated = service._account_assignments.create_account(
+        "same_user", "new password", "phone-a", templates
+    )
+
+    assert deleted.valid
+    assert recreated.username == "same_user"
+    assert not (directory / "runtime.db").exists()
+    assert not (directory / "analytics.db").exists()
+    assert notifications.all() == ()
+    assert not InProcessBlockingRetryRegistry.blocked_on(
+        "same_user", __import__("datetime").datetime.now().astimezone().date()
+    )
 
 
 def test_successful_archived_deletion_refreshes_and_generates_audit_log(mocker, caplog):
