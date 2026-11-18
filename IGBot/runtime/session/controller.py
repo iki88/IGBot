@@ -15,6 +15,7 @@ from IGBot.runtime.session.models import (
     SessionHandle,
     SessionStartResult,
 )
+from IGBot.runtime.startup.models import StartupResult
 from IGBot.runtime.startup.pipeline import StartupPipeline
 from IGBot.runtime.state import SessionState
 
@@ -31,6 +32,7 @@ class SessionController:
         runtime_settings: Mapping[str, object] | None = None,
         ignore_service: IgnoreService | None = None,
         analytics: AnalyticsService | None = None,
+        blocking_screen_monitor=None,
         cancellation_requested: Callable[[], bool] = lambda: False,
         cancellation_wait: Callable[[float], bool] | None = None,
     ) -> None:
@@ -40,6 +42,7 @@ class SessionController:
         self._runtime_settings = dict(runtime_settings or {})
         self._ignore_service = ignore_service or IgnoreService()
         self._analytics = analytics
+        self._blocking_screen_monitor = blocking_screen_monitor
         self._cancellation_requested = cancellation_requested
         self._cancellation_wait = cancellation_wait
         self._contexts: dict[UUID, RuntimeContext] = {}
@@ -56,6 +59,7 @@ class SessionController:
             runtime_settings=dict(self._runtime_settings),
             ignore_service=self._ignore_service,
             analytics=self._analytics,
+            blocking_screen_monitor=self._blocking_screen_monitor,
             cancellation_requested=self._cancellation_requested,
             cancellation_wait=self._cancellation_wait,
         )
@@ -65,6 +69,20 @@ class SessionController:
             self._logger.info("Running StartupPipeline")
             startup_result = self._startup_pipeline.execute(runtime_context)
         except Exception:
+            if runtime_context.session_state is SessionState.WAITING_FOR_OPERATOR:
+                startup_result = StartupResult(
+                    startup_completed=False,
+                    internet_available=None,
+                    account_verified=None,
+                    new_followers_found=0,
+                    startup_failed=True,
+                    stage_results=(),
+                    failure_reason="Instagram requires operator action.",
+                )
+                runtime_context.startup_result = startup_result
+                return SessionStartResult(
+                    handle, runtime_context, startup_result, False
+                )
             runtime_context.session_state = SessionState.FAILED
             raise
         runtime_context.startup_result = startup_result
@@ -73,14 +91,28 @@ class SessionController:
                 runtime_context.session_state = SessionState.FAILED
             return SessionStartResult(handle, runtime_context, startup_result, False)
 
+        if self._blocking_screen_monitor is not None:
+            self._blocking_screen_monitor.resolve_after_verified_startup(
+                runtime_context
+            )
+            if runtime_context.session_state is SessionState.WAITING_FOR_OPERATOR:
+                return SessionStartResult(
+                    handle, runtime_context, startup_result, False
+                )
+
         runtime_context.session_state = SessionState.RUNNING
         try:
             self._logger.info("Running SchedulerLoop")
             self._scheduler.start(runtime_context)
         except Exception:
+            if runtime_context.session_state is SessionState.WAITING_FOR_OPERATOR:
+                return SessionStartResult(
+                    handle, runtime_context, startup_result, True
+                )
             runtime_context.session_state = SessionState.FAILED
             raise
-        runtime_context.session_state = SessionState.COMPLETED
+        if runtime_context.session_state is SessionState.RUNNING:
+            runtime_context.session_state = SessionState.COMPLETED
         return SessionStartResult(handle, runtime_context, startup_result, True)
 
     def state_for(self, session_id: UUID) -> SessionState:

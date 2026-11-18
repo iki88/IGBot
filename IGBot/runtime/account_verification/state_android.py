@@ -53,7 +53,11 @@ class AndroidInstagramStateProvider:
         self._navigation_wait = navigation_wait
 
     def recover(self, context: RuntimeContext) -> bool:
-        device = self._device_factory(context.session.phone_id)
+        from IGBot.notifications import BlockingAwareDevice
+
+        device = BlockingAwareDevice(
+            self._device_factory(context.session.phone_id), context
+        )
         for attempt in range(1, self._attempts + 1):
             context.logger.debug("Inspecting Instagram startup state", attempt=attempt)
             nodes = self._nodes(device.dump_hierarchy(compressed=False))

@@ -17,7 +17,11 @@ import yaml
 
 from IGBot.core.device import AssignedAccount
 from IGBot.core.session_engine import SessionState as UiSessionState
-from IGBot.notifications import NotificationService, ZeroInteractionsDetector
+from IGBot.notifications import (
+    BlockingScreenMonitor,
+    NotificationService,
+    ZeroInteractionsDetector,
+)
 from IGBot.runtime.account_verification import (
     AndroidInstagramProfileProvider,
     AndroidInstagramStateProvider,
@@ -109,12 +113,14 @@ from IGBot.runtime.session.controller import (
 from IGBot.runtime.startup import (
     AccountVerifier,
     AirplaneModeController,
+    BlockingScreenCheck,
     CloseRecentApps,
     InstagramLauncher,
     InstagramStateRecovery,
     InternetChecker,
     StartupPipeline,
 )
+from IGBot.runtime.state import SessionState as RuntimeSessionState
 from IGBot.runtime.unfollow import (
     AllFollowingsUnfollowModule,
     AndroidFollowingListSearchUnfollowProvider,
@@ -1384,12 +1390,14 @@ class NativeAccountRuntime:
         workspace: Path,
         *,
         controller: NativeSessionController | None = None,
+        notifications_changed: Callable[[], None] | None = None,
     ) -> None:
         self.account = account
         self.workspace = workspace
         self.state = UiSessionState.IDLE
         self._stop_event = threading.Event()
         self._session_id = uuid4()
+        self._notifications_changed = notifications_changed or (lambda: None)
         configuration = self._mapping(self.account.config_path)
         self._runtime_logger = PythonRuntimeLogger(
             account_directory=self.account.config_path.parent,
@@ -1399,10 +1407,12 @@ class NativeAccountRuntime:
             developer_mode=bool(configuration.get("debug", False)),
         )
         self._notification_detector: ZeroInteractionsDetector | None = None
+        self._notification_service: NotificationService | None = None
         try:
             metadata = self._mapping(self.account.config_path.parent / "account.json")
+            self._notification_service = NotificationService(self.workspace)
             self._notification_detector = ZeroInteractionsDetector(
-                NotificationService(self.workspace)
+                self._notification_service
             )
             self._notification_detector.register_account(
                 account_directory=self.account.config_path.parent,
@@ -1434,11 +1444,22 @@ class NativeAccountRuntime:
         try:
             result = self._controller.start(context)
             if result.startup_result.startup_failed:
+                if result.context.session_state is RuntimeSessionState.WAITING_FOR_OPERATOR:
+                    self.state = UiSessionState.WAITING
+                    state_changed(self.state)
+                    return
                 raise RuntimeError(
                     result.startup_result.failure_reason or "Native startup failed."
                 )
             runtime_context = getattr(result, "context", None)
             if isinstance(runtime_context, RuntimeContext):
+                if (
+                    runtime_context.session_state
+                    is RuntimeSessionState.WAITING_FOR_OPERATOR
+                ):
+                    self.state = UiSessionState.WAITING
+                    state_changed(self.state)
+                    return
                 self._record_notification_lifecycle(runtime_context)
             if self._stop_event.is_set():
                 self._runtime_logger.info("Session stopping")
@@ -1496,6 +1517,16 @@ class NativeAccountRuntime:
         state_changed(self.state)
         self._stop_event.set()
 
+    def set_notifications_changed_callback(
+        self, callback: Callable[[], None] | None
+    ) -> None:
+        """Install the UI-safe notification refresh callback before startup."""
+
+        self._notifications_changed = callback or (lambda: None)
+        monitor = getattr(self, "_blocking_monitor", None)
+        if monitor is not None:
+            monitor.set_notifications_changed_callback(callback)
+
     def _compose(self) -> NativeSessionController:
         configuration = self._mapping(self.account.config_path)
         account_metadata = self._mapping(
@@ -1510,6 +1541,12 @@ class NativeAccountRuntime:
         )
         runtime_settings.setdefault("follower_synchronization_limit", 200)
         runtime_logger = self._runtime_logger
+        blocking_monitor = BlockingScreenMonitor(
+            self._notification_service,
+            tag=str(account_metadata.get("tag") or ""),
+            notifications_changed=self._notifications_changed,
+        )
+        self._blocking_monitor = blocking_monitor
         ignore_service = IgnoreService.load(self.account.config_path.parent)
         self._global_profile_writer = GlobalDatabaseWriter(
             self.workspace,
@@ -1595,6 +1632,7 @@ class NativeAccountRuntime:
             instagram_launcher,
             AccountVerifier(AndroidInstagramProfileProvider(), _LoggingNotifier()),
             close_recent_apps=CloseRecentApps(AndroidRecentAppsProvider()),
+            blocking_screen_check=BlockingScreenCheck(),
             instagram_state_recovery=InstagramStateRecovery(
                 AndroidInstagramStateProvider(),
                 application_provider,
@@ -1613,6 +1651,7 @@ class NativeAccountRuntime:
             runtime_settings=runtime_settings,
             ignore_service=ignore_service,
             analytics=AnalyticsService(self.account.config_path.parent),
+            blocking_screen_monitor=blocking_monitor,
             cancellation_requested=self._stop_event.is_set,
             cancellation_wait=self._stop_event.wait,
         )
@@ -1625,7 +1664,14 @@ class NativeAccountRuntime:
         return value if isinstance(value, dict) else {}
 
 
-def create_native_runtime(account: AssignedAccount, workspace: Path):
+def create_native_runtime(
+    account: AssignedAccount,
+    workspace: Path,
+    *,
+    notifications_changed: Callable[[], None] | None = None,
+):
     """Create the default account runtime without a legacy fallback."""
 
-    return NativeAccountRuntime(account, workspace)
+    return NativeAccountRuntime(
+        account, workspace, notifications_changed=notifications_changed
+    )

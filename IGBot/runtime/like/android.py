@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from IGBot.notifications import BlockingAwareDevice, BlockingScreenActive
 from IGBot.runtime.candidates import Candidate, CandidateProviderType
 from IGBot.runtime.context import RuntimeContext
 from IGBot.runtime.follow import (
@@ -213,7 +214,9 @@ class AndroidLikeProvider:
                 None if restored.succeeded else restored.detail,
             )
 
-        device = self._device_factory(context.session.phone_id)
+        device = BlockingAwareDevice(
+            self._device_factory(context.session.phone_id), context
+        )
         completed = 0
         try:
             target = self._likes_per_profile()
@@ -534,6 +537,14 @@ class AndroidLikeProvider:
                 likes_completed=completed,
                 navigation=NavigationResult(NavigationStatus.SUCCESS),
             )
+        except BlockingScreenActive:
+            if completed:
+                return AndroidLikeResult(
+                    AndroidLikeStatus.SUCCESS,
+                    "Like interaction completed before operator action was required.",
+                    likes_completed=completed,
+                )
+            raise
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             return AndroidLikeResult(
                 (

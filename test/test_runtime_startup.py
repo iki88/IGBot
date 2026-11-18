@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pytest
 
+from IGBot.notifications import BlockingScreenActive
 from IGBot.runtime.context import RuntimeContext
 from IGBot.runtime.session import SessionContext, SessionController
 from IGBot.runtime.startup import (
@@ -31,6 +32,12 @@ class RecordingScheduler:
 
     def start(self, context):
         self.calls.append(context)
+
+
+class BlockingScheduler:
+    def start(self, context):
+        context.session_state = SessionState.WAITING_FOR_OPERATOR
+        raise BlockingScreenActive("operator action required")
 
 
 class RecordingLogger:
@@ -172,6 +179,46 @@ def test_session_controller_transfers_completed_startup_to_scheduler(session_con
     assert scheduler.calls == [result.context]
     assert result.context.startup_result is result.startup_result
     assert controller.state_for(session_context.session_id) is SessionState.COMPLETED
+
+
+def test_session_controller_preserves_waiting_when_scheduler_detects_blocker(
+    session_context,
+):
+    stage = RecordingStage(
+        StartupStageResult(
+            StartupStageName.ACCOUNT_VERIFICATION,
+            StartupStageStatus.SUCCESS,
+            account_verified=True,
+        ),
+        [],
+    )
+    controller = SessionController(
+        StartupPipeline((stage,)), BlockingScheduler(), RecordingLogger()
+    )
+
+    result = controller.start(session_context)
+
+    assert result.scheduler_started is True
+    assert result.context.session_state is SessionState.WAITING_FOR_OPERATOR
+
+
+def test_session_controller_preserves_waiting_during_startup(session_context):
+    class BlockingStage:
+        def execute(self, context):
+            context.session_state = SessionState.WAITING_FOR_OPERATOR
+            raise BlockingScreenActive("operator action required")
+
+    controller = SessionController(
+        StartupPipeline((BlockingStage(),)),
+        RecordingScheduler(),
+        RecordingLogger(),
+    )
+
+    result = controller.start(session_context)
+
+    assert result.scheduler_started is False
+    assert result.startup_result.startup_failed is True
+    assert result.context.session_state is SessionState.WAITING_FOR_OPERATOR
 
 
 def test_session_controller_injects_persisted_runtime_settings(session_context):

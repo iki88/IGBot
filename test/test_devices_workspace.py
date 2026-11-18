@@ -13,6 +13,7 @@ from IGBot.ui.main_window import MainWindow
 from IGBot.ui.models.device_table_model import DeviceTableModel
 from IGBot.ui.pages.devices_page import DevicesPage
 from IGBot.ui.widgets.device_actions_delegate import DeviceActionsDelegate
+from IGBot.ui.widgets.error_dialog import ErrorDialog
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -709,3 +710,60 @@ def test_debug_logging_change_displays_restart_information(application, mocker):
         QMessageBox.Ok,
     )
     window.close()
+
+
+@pytest.mark.parametrize("state", (SessionState.RUNNING, SessionState.STOPPING))
+def test_archive_warns_instead_of_confirming_for_active_phone(
+    application, mocker, state
+):
+    window = MainWindow(_DeviceService())
+    mocker.patch.object(window.session_controller, "state_for", return_value=state)
+    warning = mocker.patch("IGBot.ui.main_window.ErrorDialog")
+    confirmation = mocker.patch(
+        "IGBot.ui.main_window.ConfirmationDialog.confirm"
+    )
+
+    window._show_archive_dialog("real_account", "phone-a")
+
+    warning.assert_called_once_with(
+        "Stop Device First",
+        "Please stop the device before archiving an account.",
+        window,
+        button_text="OK",
+    )
+    warning.return_value.exec.assert_called_once_with()
+    confirmation.assert_not_called()
+    window.close()
+
+
+def test_archive_uses_existing_confirmation_when_phone_is_stopped(
+    application, mocker
+):
+    window = MainWindow(_DeviceService())
+    mocker.patch.object(
+        window.session_controller, "state_for", return_value=SessionState.STOPPED
+    )
+    warning = mocker.patch("IGBot.ui.main_window.ErrorDialog")
+    confirmation = mocker.patch(
+        "IGBot.ui.main_window.ConfirmationDialog.confirm", return_value=False
+    )
+
+    window._show_archive_dialog("real_account", "phone-a")
+
+    warning.assert_not_called()
+    confirmation.assert_called_once()
+    window.close()
+
+
+def test_archive_warning_uses_application_styled_dialog(application):
+    dialog = ErrorDialog(
+        "Stop Device First",
+        "Please stop the device before archiving an account.",
+        button_text="OK",
+    )
+
+    assert dialog.objectName() == "confirmationDialog"
+    assert dialog.windowTitle() == "Stop Device First"
+    assert dialog.findChild(type(dialog.close_button), "secondaryButton").text() == "OK"
+    assert dialog.findChild(type(dialog.close_button), "secondaryButton").isDefault() is False
+    dialog.close()

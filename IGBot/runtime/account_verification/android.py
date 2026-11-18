@@ -63,8 +63,12 @@ class AndroidInstagramProfileProvider:
 
     def open_profile(self, context: RuntimeContext) -> ProfileObservation:
         """Open Profile and read a complete or explicitly truncated header."""
+        from IGBot.notifications import BlockingAwareDevice, BlockingScreenActive
+
         try:
-            device = self._device_factory(context.session.phone_id)
+            device = BlockingAwareDevice(
+                self._device_factory(context.session.phone_id), context
+            )
             nodes = self._nodes(device.dump_hierarchy(compressed=False))
             profile = self._profile_tab(nodes)
             if profile is None:
@@ -93,6 +97,8 @@ class AndroidInstagramProfileProvider:
                 ProfileObservationState.USERNAME_VISIBLE,
                 username=username,
             )
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - platform isolation boundary
             return ProfileObservation(
                 ProfileObservationState.PROFILE_NOT_LOADED,
@@ -103,13 +109,17 @@ class AndroidInstagramProfileProvider:
         self, context: RuntimeContext
     ) -> UsernameDetectionResult:
         """Open Account Switcher, read its selected account, and always close it."""
+        from IGBot.notifications import BlockingAwareDevice, BlockingScreenActive
+
         header = self._profile_headers.get(context.session.phone_id)
         if header is None:
             return UsernameDetectionResult(
                 detail="The truncated Profile username is no longer available."
             )
         try:
-            device = self._device_factory(context.session.phone_id)
+            device = BlockingAwareDevice(
+                self._device_factory(context.session.phone_id), context
+            )
             device.click(*header.center)
             self._sleeper(self._navigation_wait)
             try:
@@ -122,6 +132,8 @@ class AndroidInstagramProfileProvider:
                 return UsernameDetectionResult(username=username)
             finally:
                 device.press("back")
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - platform isolation boundary
             return UsernameDetectionResult(
                 detail=f"Account Switcher inspection failed: {error}"

@@ -6,6 +6,7 @@ from tempfile import NamedTemporaryFile
 
 from IGBot.core.device import DeviceFleetSnapshot, DeviceRecord
 from IGBot.core.phone_manager import PhoneManager
+from IGBot.notifications import NotificationService
 from IGBot.services.account_assignment_service import AccountAssignmentService
 from IGBot.services.account_template_service import AccountTemplateService
 from IGBot.services.archive_service import ARCHIVED_ACCOUNTS, ArchiveService
@@ -23,9 +24,12 @@ class DeviceInventoryService:
     ) -> None:
         self._inventory_path = inventory_path
         self._account_assignments = account_assignments
-        self.transfer_service = TransferService(account_assignments)
-        self.archive_service = ArchiveService(account_assignments)
         self._workspace_root = workspace_root or inventory_path.parent.parent
+        self.transfer_service = TransferService(account_assignments)
+        self.archive_service = ArchiveService(
+            account_assignments,
+            notification_service=NotificationService(self._workspace_root),
+        )
         self.template_service = AccountTemplateService(
             self._workspace_root / "templates"
         )

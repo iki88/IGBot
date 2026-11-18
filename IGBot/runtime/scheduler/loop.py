@@ -70,6 +70,8 @@ class SchedulerLoop:
         context.logger.info("Smart Scheduler Loop started", modules=len(modules))
 
         while self._session_activity.is_active(context):
+            if context.blocking_screen_checkpoint("Scheduler module handoff"):
+                break
             enabled_modules = tuple(module for module in modules if module.enabled)
             if enabled_modules and all(
                 self._session_work_complete(module) for module in enabled_modules
@@ -164,9 +166,19 @@ class SchedulerLoop:
                 budget,
                 start_module=True,
             )
+            blocking_screen_active = context.blocking_screen_checkpoint(
+                f"{module.module.value} navigation handoff"
+            )
             updated = self._apply_outcome(context, module, result)
             results.append(updated)
             operation.record(updated.verified_successes)
+            if blocking_screen_active:
+                context.logger.warning(
+                    "ModuleOperation stopped by blocking account screen",
+                    module=module.module.value,
+                    verified=operation.verified_successes,
+                )
+                break
             if updated.verified_successes:
                 context.logger.info(
                     f"Verified {module.module.value}",

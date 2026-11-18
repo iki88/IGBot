@@ -112,6 +112,15 @@ class DeviceController(QObject):
         self._scrcpy_cleanup_timer.timeout.connect(self._scrcpy.cleanup)
         self._scrcpy_cleanup_timer.start()
 
+    def set_archive_runtime_state_provider(
+        self, phone_is_active: Callable[[str], bool]
+    ) -> None:
+        """Share the existing phone runtime state with the archive boundary."""
+
+        archive_service = getattr(self._service, "archive_service", None)
+        if archive_service is not None:
+            archive_service.set_phone_is_active(phone_is_active)
+
     @Slot()
     def refresh(self) -> None:
         if self._refreshing:

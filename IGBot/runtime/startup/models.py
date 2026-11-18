@@ -19,6 +19,7 @@ class StartupStageName(StrEnum):
     AIRPLANE_MODE = "AirplaneMode"
     CLOSE_RECENT_APPS = "CloseRecentApps"
     INSTAGRAM_LAUNCH = "InstagramLaunch"
+    BLOCKING_SCREEN_CHECK = "BlockingScreenCheck"
     INSTAGRAM_STATE_RECOVERY = "InstagramStateRecovery"
     WAIT_AFTER_LAUNCH = "WaitAfterLaunch"
     ACCOUNT_VERIFICATION = "AccountVerification"

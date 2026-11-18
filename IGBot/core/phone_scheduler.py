@@ -17,6 +17,10 @@ import yaml
 from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.core.phone_manager import PhoneManager
 from IGBot.core.session_engine import SessionEngine, SessionState
+from IGBot.notifications import (
+    InProcessBlockingRetryRegistry,
+    NotificationService,
+)
 from IGBot.services.specific_lists_service import SpecificListsService
 
 logger = logging.getLogger(__name__)
@@ -56,10 +60,13 @@ class PhoneScheduler:
         ) = None,
         clock: Callable[[], datetime] = datetime.now,
         decision_interval: float = 30.0,
+        notification_service: NotificationService | None = None,
+        notifications_changed: Callable[[], None] | None = None,
     ) -> None:
         self.device = device
         self.workspace_root = workspace_root
         self._runtime_mode = runtime_mode
+        self._notifications_changed = notifications_changed or (lambda: None)
         if runtime_factory is not None:
             self._runtime_factory = runtime_factory
         elif runtime_mode is RuntimeMode.LEGACY:
@@ -86,6 +93,16 @@ class PhoneScheduler:
         )
         self._clock = clock
         self._decision_interval = decision_interval
+        self._notification_service = notification_service
+        if self._notification_service is None:
+            try:
+                self._notification_service = NotificationService(workspace_root)
+            except Exception as error:  # noqa: BLE001 - scheduler safety fallback
+                self._logger.warning(
+                    "Notification persistence unavailable; using process-local "
+                    "blocking retry state: %s",
+                    error,
+                )
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
         self._runtime: object | None = None
@@ -162,6 +179,11 @@ class PhoneScheduler:
                 )
                 self._set_state(SessionState.RUNNING, state_changed)
                 self._runtime = self._runtime_factory(account, self.workspace_root)
+                notification_callback = getattr(
+                    self._runtime, "set_notifications_changed_callback", None
+                )
+                if notification_callback is not None:
+                    notification_callback(self._notifications_changed)
                 try:
                     self._runtime.start(
                         lambda state, username=account.username: account_state_changed(
@@ -234,6 +256,17 @@ class PhoneScheduler:
             windows = self._load_windows(account, configuration)
             if not windows or all(start == end == 0 for start, end in windows):
                 logger.info("Skipping account %s (disabled)", account.username)
+                continue
+            if self._blocked_for_local_day(account.username, now):
+                logger.info(
+                    "Skipping account %s (blocking notification detected today)",
+                    account.username,
+                )
+                upcoming = min(
+                    self._start_on_next_day(start, now) for start, _ in windows
+                )
+                if next_session is None or upcoming < next_session:
+                    next_session = upcoming
                 continue
             if not self._runtime_eligibility(account, configuration):
                 logger.info(
@@ -473,6 +506,38 @@ class PhoneScheduler:
         day = now.date() + (
             timedelta(days=1) if start <= now.hour * 60 + now.minute else timedelta()
         )
+        if start == 24 * 60:
+            day += timedelta(days=1)
+            start = 0
+        return datetime.combine(day, datetime.min.time()).replace(
+            hour=start // 60, minute=start % 60
+        )
+
+    def _blocked_for_local_day(self, username: str, now: datetime) -> bool:
+        if InProcessBlockingRetryRegistry.blocked_on(username, now.date()):
+            return True
+        timezone = (
+            now.astimezone().tzinfo
+            if now.tzinfo is not None and now.utcoffset() is not None
+            else datetime.now().astimezone().tzinfo
+        )
+        if self._notification_service is None:
+            return False
+        try:
+            return self._notification_service.blocking_detected_on_local_date(
+                username, now.date(), timezone=timezone
+            )
+        except Exception as error:  # noqa: BLE001 - scheduler safety boundary
+            logger.error(
+                "Blocking notification admission check failed for %s: %s",
+                username,
+                error,
+            )
+            return InProcessBlockingRetryRegistry.blocked_on(username, now.date())
+
+    @staticmethod
+    def _start_on_next_day(start: int, now: datetime) -> datetime:
+        day = now.date() + timedelta(days=1)
         if start == 24 * 60:
             day += timedelta(days=1)
             start = 0

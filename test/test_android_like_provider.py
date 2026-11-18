@@ -4,6 +4,12 @@ from uuid import uuid4
 
 import pytest
 
+from IGBot.notifications import (
+    BlockingScreenActive,
+    BlockingScreenMonitor,
+    NotificationService,
+    NotificationType,
+)
 from IGBot.runtime import RuntimeContext, SessionContext
 from IGBot.runtime.candidates import (
     Candidate,
@@ -48,13 +54,13 @@ class Logger:
         return lambda *_args, **_kwargs: None
 
 
-def context(tmp_path):
+def context(tmp_path, package="com.instagram.androie"):
     return RuntimeContext(
         SessionContext(
             uuid4(),
             "account",
             "phone",
-            "com.instagram.androie",
+            package,
             tmp_path,
             datetime.now(timezone.utc),
         ),
@@ -147,6 +153,45 @@ class ProfileNavigation:
             if self.followers_restore_succeeds
             else AndroidFollowStatus.FOLLOW_FAILED
         )
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "package", "notification_type"),
+    (
+        (
+            "2026-10-02_16-56-09.xml",
+            "com.instagram.androio",
+            NotificationType.HUMAN_CAPTCHA,
+        ),
+        (
+            "2026-10-13_14-07-23.xml",
+            "com.instagram.androiq",
+            NotificationType.ACCOUNT_DISABLED,
+        ),
+    ),
+)
+def test_like_media_device_detects_blocking_screens(
+    tmp_path, snapshot, package, notification_type
+):
+    device = Device([(SNAPSHOTS / snapshot).read_text(encoding="utf-8")])
+    runtime_context = context(tmp_path, package)
+    service = NotificationService(tmp_path)
+    runtime_context.blocking_screen_monitor = BlockingScreenMonitor(service)
+    provider = AndroidLikeProvider(
+        ProfileNavigation(),
+        device_factory=lambda _serial: device,
+        natural_delay=lambda: 0,
+    )
+
+    with pytest.raises(BlockingScreenActive):
+        provider.execute(
+            runtime_context,
+            Candidate("target", "source", CandidateProviderType.FOLLOWERS),
+        )
+
+    assert runtime_context.session_state.value == "WaitingForOperator"
+    assert service.active()[0].type is notification_type
+    assert device.clicks == []
 
 
 @pytest.mark.parametrize(
@@ -631,6 +676,51 @@ def test_verified_like_remains_success_when_profile_restoration_fails(tmp_path):
     assert result.likes_completed == 1
     assert result.navigation.status is NavigationStatus.FAILED
     assert result.navigation.detail == "Profile did not return after the Like."
+
+
+def test_verified_like_remains_success_when_blocker_appears_after_verification(
+    tmp_path,
+):
+    grid = hierarchy(
+        node("image_button", description="media", bounds="[0,1000][356,1450]")
+    )
+    post = hierarchy(
+        node("row_feed_profile_header"),
+        node("row_feed_button_like", description="Like"),
+    )
+    liked = hierarchy(
+        node("row_feed_profile_header"),
+        node("row_feed_button_like", description="Liked"),
+    )
+    blocker = (SNAPSHOTS / "2026-10-02_16-56-09.xml").read_text(
+        encoding="utf-8"
+    )
+    device = Device([grid, grid, grid, post, liked, liked, liked, liked, blocker])
+    clock = Clock()
+    runtime_context = context(tmp_path, "com.instagram.androio")
+    service = NotificationService(tmp_path)
+    runtime_context.blocking_screen_monitor = BlockingScreenMonitor(service)
+    provider = AndroidLikeProvider(
+        ProfileNavigation(),
+        device_factory=lambda _serial: device,
+        sleeper=clock.sleep,
+        clock=clock,
+        choice=lambda posts: posts[0],
+        natural_delay=lambda: 0,
+        poll_interval=0.25,
+        stability_window=0.75,
+        load_timeout=0.5,
+    )
+
+    result = provider.execute(
+        runtime_context,
+        Candidate("target", "source", CandidateProviderType.FOLLOWERS),
+    )
+
+    assert result.status is AndroidLikeStatus.SUCCESS
+    assert result.likes_completed == 1
+    assert runtime_context.session_state.value == "WaitingForOperator"
+    assert service.active()[0].type is NotificationType.HUMAN_CAPTCHA
 
 
 def test_verified_like_remains_success_when_followers_restoration_fails(tmp_path):

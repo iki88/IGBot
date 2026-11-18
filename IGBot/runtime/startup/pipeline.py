@@ -32,6 +32,7 @@ class StartupPipeline:
         *,
         close_recent_apps: StartupStage | None = None,
         instagram_state_recovery: StartupStage | None = None,
+        blocking_screen_check: StartupStage | None = None,
         follower_synchronization: StartupStage | None = None,
     ) -> StartupPipeline:
         """Fix the implemented startup stages in authoritative order."""
@@ -42,6 +43,8 @@ class StartupPipeline:
         if close_recent_apps is not None:
             ordered.append(close_recent_apps)
         ordered.append(instagram_launcher)
+        if blocking_screen_check is not None:
+            ordered.append(blocking_screen_check)
         if instagram_state_recovery is not None:
             ordered.append(instagram_state_recovery)
         ordered.append(account_verifier)

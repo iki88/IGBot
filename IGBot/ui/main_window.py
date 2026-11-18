@@ -15,7 +15,10 @@ from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.core.session_engine import SessionState
 from IGBot.notifications import NotificationService
 from IGBot.runtime.ignore import IgnoreService
-from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
+from IGBot.services.archive_service import (
+    ARCHIVE_REQUIRES_STOPPED_DEVICE,
+    ARCHIVED_ACCOUNTS,
+)
 from IGBot.services.device_inventory_service import DeviceInventoryService
 from IGBot.services.global_settings_service import GlobalSettingsService
 from IGBot.ui.controllers.device_controller import DeviceController
@@ -67,6 +70,9 @@ class MainWindow(QMainWindow):
         self.global_settings_service = GlobalSettingsService(workspace_root)
         self.device_controller = DeviceController(service, self)
         self.session_controller = SessionController(workspace_root, self)
+        self.device_controller.set_archive_runtime_state_provider(
+            self._phone_runtime_is_active
+        )
         self.sidebar = NavigationSidebar(self)
         self.toolbar = TopToolbar(self)
         self.pages = QStackedWidget(self)
@@ -144,6 +150,9 @@ class MainWindow(QMainWindow):
         self.session_controller.state_changed.connect(self._runtime_state_changed)
         self.session_controller.account_state_changed.connect(
             self._account_runtime_state_changed
+        )
+        self.session_controller.notifications_changed.connect(
+            self._refresh_notifications
         )
         self.session_controller.operation_failed.connect(self._show_runtime_error)
         self.device_controller.refresh_started.connect(
@@ -225,6 +234,9 @@ class MainWindow(QMainWindow):
         self.device_controller.archive_failed.connect(self._show_archive_error)
         self.device_controller.archive_completed.connect(
             self._return_after_account_action
+        )
+        self.device_controller.archive_completed.connect(
+            lambda _result: self._refresh_notifications()
         )
         self.device_controller.restore_failed.connect(self._show_restore_error)
         self.device_controller.restore_completed.connect(
@@ -811,6 +823,9 @@ class MainWindow(QMainWindow):
         ErrorDialog("Account Transfer Failed", message, self).exec()
 
     def _show_archive_dialog(self, username: str, source_serial: str) -> None:
+        if self._phone_runtime_is_active(source_serial):
+            self._show_archive_device_running_warning()
+            return
         source = next(
             (
                 device
@@ -832,7 +847,26 @@ class MainWindow(QMainWindow):
 
     def _show_archive_error(self, result) -> None:
         message = result.error if hasattr(result, "error") else str(result)
+        if message == ARCHIVE_REQUIRES_STOPPED_DEVICE:
+            self._show_archive_device_running_warning()
+            return
         ErrorDialog("Account Archive Failed", message, self).exec()
+
+    def _show_archive_device_running_warning(self) -> None:
+        ErrorDialog(
+            "Stop Device First",
+            ARCHIVE_REQUIRES_STOPPED_DEVICE,
+            self,
+            button_text="OK",
+        ).exec()
+
+    def _phone_runtime_is_active(self, serial: str) -> bool:
+        return self.session_controller.state_for(serial) in {
+            SessionState.STARTING,
+            SessionState.RUNNING,
+            SessionState.WAITING,
+            SessionState.STOPPING,
+        }
 
     def _show_restore_dialog(self, username: str) -> None:
         dialog = TransferAccountDialog(

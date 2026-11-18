@@ -1,6 +1,14 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+
+from IGBot.notifications import (
+    BlockingScreenActive,
+    BlockingScreenMonitor,
+    NotificationService,
+    NotificationType,
+)
 from IGBot.runtime import RuntimeContext, SessionContext
 from IGBot.runtime.account_verification import (
     AndroidInstagramProfileProvider,
@@ -136,6 +144,31 @@ def test_profile_provider_exposes_only_profile_and_switcher_operations():
     }
 
     assert methods == {"open_profile", "complete_username_from_switcher"}
+
+
+def test_account_verification_detects_blocker_before_profile_navigation(tmp_path):
+    blocking_hierarchy = """<hierarchy>
+      <node package="com.instagram.clone"
+       text="Confirm you're human to use your account, expected_user"
+       bounds="[0,0][100,100]" />
+      <node package="com.instagram.clone" class="android.widget.Button"
+       clickable="true" text="Continue" bounds="[0,100][100,200]" />
+    </hierarchy>"""
+    runtime_context = make_context(tmp_path)
+    service = NotificationService(tmp_path)
+    runtime_context.blocking_screen_monitor = BlockingScreenMonitor(service)
+    device = FakeDevice([blocking_hierarchy])
+    provider = AndroidInstagramProfileProvider(
+        device_factory=lambda _serial: device,
+        sleeper=lambda _seconds: None,
+    )
+
+    with pytest.raises(BlockingScreenActive):
+        provider.open_profile(runtime_context)
+
+    assert device.clicks == []
+    assert runtime_context.session_state is SessionState.WAITING_FOR_OPERATOR
+    assert service.active()[0].type is NotificationType.HUMAN_CAPTCHA
 
 
 def test_visible_username_is_verified_without_opening_switcher(tmp_path):

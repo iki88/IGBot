@@ -36,6 +36,8 @@ class InstagramStateRecovery:
         self._relauncher = relauncher
 
     def execute(self, context: RuntimeContext) -> StartupStageResult:
+        if context.blocking_screen_checkpoint("Instagram startup recovery"):
+            return self._failed(context, "Instagram requires operator action.")
         package = context.session.application_id.strip()
         context.logger.info("Recovering Instagram startup state")
         try:
@@ -46,6 +48,8 @@ class InstagramStateRecovery:
             context.logger.warning(
                 "Instagram startup state recovery exhausted; restarting application"
             )
+            if context.blocking_screen_checkpoint("Instagram startup relaunch"):
+                return self._failed(context, "Instagram requires operator action.")
             stopped = self._application_provider.force_stop(context, package)
             if not stopped.succeeded:
                 return self._failed(

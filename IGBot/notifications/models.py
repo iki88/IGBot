@@ -13,6 +13,8 @@ class NotificationSeverity(StrEnum):
 
 
 class NotificationType(StrEnum):
+    HUMAN_CAPTCHA = "HUMAN_CAPTCHA"
+    ACCOUNT_DISABLED = "ACCOUNT_DISABLED"
     ZERO_INTERACTIONS = "ZERO_INTERACTIONS"
 
 

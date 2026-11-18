@@ -2,6 +2,7 @@
 
 from IGBot.runtime.startup.account_verifier import AccountVerifier
 from IGBot.runtime.startup.airplane_mode_controller import AirplaneModeController
+from IGBot.runtime.startup.blocking_screen import BlockingScreenCheck
 from IGBot.runtime.startup.close_recent_apps import CloseRecentApps
 from IGBot.runtime.startup.contracts import StartupStage
 from IGBot.runtime.startup.instagram_launcher import InstagramLauncher
@@ -23,6 +24,7 @@ __all__ = [
     "AccountVerificationState",
     "AccountVerifier",
     "AirplaneModeController",
+    "BlockingScreenCheck",
     "CloseRecentApps",
     "InstagramLauncher",
     "InstagramStateProvider",

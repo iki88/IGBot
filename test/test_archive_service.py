@@ -1,6 +1,18 @@
+import pytest
+
 from IGBot.core.device import DeviceRecord
+from IGBot.core.session_engine import SessionState
+from IGBot.notifications import (
+    NotificationService,
+    NotificationSeverity,
+    NotificationType,
+)
 from IGBot.services.account_assignment_service import AccountAssignmentService
-from IGBot.services.archive_service import ARCHIVED_ACCOUNTS, ArchiveService
+from IGBot.services.archive_service import (
+    ARCHIVE_REQUIRES_STOPPED_DEVICE,
+    ARCHIVED_ACCOUNTS,
+    ArchiveService,
+)
 from IGBot.ui.controllers.device_controller import DeviceController
 
 
@@ -82,6 +94,114 @@ def test_archive_updates_only_existing_device_assignment(tmp_path):
         "device: ARCHIVED_ACCOUNTS # assigned\n"
         "app-id: com.instagram.android\n"
     )
+
+
+@pytest.mark.parametrize("state", (SessionState.RUNNING, SessionState.STOPPING))
+def test_archive_rejects_active_phone_at_operation_boundary(tmp_path, state):
+    accounts_directory = tmp_path / "accounts"
+    accounts_directory.mkdir()
+    directory = accounts_directory / "folder"
+    directory.mkdir()
+    config_path = directory / "config.yml"
+    config_path.write_text(
+        "username: real_account\ndevice: phone-a\n", encoding="utf-8"
+    )
+    service = ArchiveService(
+        AccountAssignmentService(accounts_directory),
+        phone_is_active=lambda serial: (
+            serial == "phone-a"
+            and state in {
+                SessionState.STARTING,
+                SessionState.RUNNING,
+                SessionState.WAITING,
+                SessionState.STOPPING,
+            }
+        ),
+    )
+
+    result = service.archive("real_account", "phone-a")
+
+    assert not result.valid
+    assert result.error == ARCHIVE_REQUIRES_STOPPED_DEVICE
+    assert "device: phone-a" in config_path.read_text(encoding="utf-8")
+
+
+def test_archive_allows_fully_stopped_phone(tmp_path):
+    accounts_directory = tmp_path / "accounts"
+    accounts_directory.mkdir()
+    directory = accounts_directory / "folder"
+    directory.mkdir()
+    config_path = directory / "config.yml"
+    config_path.write_text(
+        "username: real_account\ndevice: phone-a\n", encoding="utf-8"
+    )
+    state = SessionState.STOPPED
+    service = ArchiveService(
+        AccountAssignmentService(accounts_directory),
+        phone_is_active=lambda _serial: state
+        in {
+            SessionState.STARTING,
+            SessionState.RUNNING,
+            SessionState.WAITING,
+            SessionState.STOPPING,
+        },
+    )
+
+    result = service.archive("real_account", "phone-a")
+
+    assert result.valid
+    assert "device: ARCHIVED_ACCOUNTS" in config_path.read_text(encoding="utf-8")
+
+
+def test_successful_archive_resolves_only_that_accounts_notifications(tmp_path):
+    accounts_directory = tmp_path / "accounts"
+    accounts_directory.mkdir()
+    assignment_service = AccountAssignmentService(accounts_directory)
+    for username in ("archived", "other"):
+        directory = accounts_directory / username
+        directory.mkdir()
+        (directory / "config.yml").write_text(
+            f"username: {username}\ndevice: phone-a\n", encoding="utf-8"
+        )
+    notifications = NotificationService(tmp_path)
+    notifications.create(
+        "archived",
+        NotificationType.HUMAN_CAPTCHA,
+        NotificationSeverity.CRITICAL,
+    )
+    notifications.create(
+        "other",
+        NotificationType.ZERO_INTERACTIONS,
+        NotificationSeverity.WARNING,
+    )
+    service = ArchiveService(
+        assignment_service, notification_service=notifications
+    )
+
+    result = service.archive("archived", "phone-a")
+
+    assert result.valid
+    assert tuple(item.username for item in notifications.active()) == ("other",)
+
+
+def test_failed_archive_does_not_resolve_notifications(tmp_path):
+    accounts_directory = tmp_path / "accounts"
+    accounts_directory.mkdir()
+    notifications = NotificationService(tmp_path)
+    notifications.create(
+        "missing",
+        NotificationType.ACCOUNT_DISABLED,
+        NotificationSeverity.CRITICAL,
+    )
+    service = ArchiveService(
+        AccountAssignmentService(accounts_directory),
+        notification_service=notifications,
+    )
+
+    result = service.archive("missing", "phone-a")
+
+    assert not result.valid
+    assert notifications.active()[0].username == "missing"
 
 
 def test_archive_returns_failure_for_already_archived_account_without_changes(tmp_path):

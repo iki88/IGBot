@@ -72,12 +72,16 @@ class AndroidFollowerReader:
     def read(self, context: RuntimeContext, limit: int) -> FollowerReadResult:
         """Open Followers and return at most the configured number of usernames."""
 
+        from IGBot.notifications import BlockingAwareDevice, BlockingScreenActive
+
         if limit <= 0:
             raise ValueError("Follower synchronization limit must be positive")
         if context.cancellation_checkpoint("Follower Synchronization start"):
             return FollowerReadResult(False, detail="Synchronization cancelled.")
         try:
-            device = self._device_factory(context.session.phone_id)
+            device = BlockingAwareDevice(
+                self._device_factory(context.session.phone_id), context
+            )
             nodes = self._nodes(device.dump_hierarchy(compressed=False))
             profile = self._find(nodes, self._PROFILE_IDS)
             if profile is None:
@@ -110,6 +114,8 @@ class AndroidFollowerReader:
             if context.cancellation_checkpoint("Follower Synchronization list"):
                 return FollowerReadResult(False, detail="Synchronization cancelled.")
             return replace(self._read_list(context, device, limit), **snapshot)
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - platform isolation boundary
             return FollowerReadResult(
                 False, detail=f"Follower list inspection failed: {error}"

@@ -10,6 +10,7 @@ from IGBot.runtime.ignore import IgnoreService
 from IGBot.runtime.state import SessionState
 
 if TYPE_CHECKING:
+    from IGBot.notifications.blocking import BlockingScreenMonitor
     from IGBot.runtime.analytics import AnalyticsService
     from IGBot.runtime.logging import RuntimeLogger
     from IGBot.runtime.session.models import SessionContext
@@ -32,6 +33,7 @@ class RuntimeContext:
     startup_result: StartupResult | None = None
     ignore_service: IgnoreService = field(default_factory=IgnoreService)
     analytics: AnalyticsService | None = None
+    blocking_screen_monitor: BlockingScreenMonitor | None = None
     verified_interactions: int = 0
     cancellation_requested: Callable[[], bool] = field(default=lambda: False)
     cancellation_wait: Callable[[float], bool] | None = None
@@ -48,3 +50,14 @@ class RuntimeContext:
             )
             self.cancellation_logged = True
         return cancelled
+
+    def blocking_screen_checkpoint(
+        self, stage: str, *, hierarchy: str | None = None
+    ) -> bool:
+        """Stop this session when a confirmed Instagram blocker is visible."""
+
+        monitor = self.blocking_screen_monitor
+        return bool(
+            monitor is not None
+            and monitor.check(self, stage=stage, hierarchy=hierarchy)
+        )

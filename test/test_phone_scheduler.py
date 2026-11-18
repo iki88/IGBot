@@ -8,6 +8,12 @@ import pytest
 from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.core.phone_scheduler import PhoneScheduler, RuntimeMode
 from IGBot.core.session_engine import SessionState
+from IGBot.notifications import (
+    NotificationService,
+    NotificationSeverity,
+    NotificationType,
+)
+from IGBot.notifications.database import NotificationsDatabase
 from IGBot.runtime.database import FollowRecord, RuntimeDatabase
 from IGBot.services.specific_lists_service import SpecificListsService
 
@@ -56,6 +62,74 @@ def test_schedule_decision_skips_disabled_and_selects_current_account(tmp_path, 
     assert decision.next_session == datetime(2026, 8, 26, 17, 30)  # noqa: DTZ001
     assert "Skipping account disabled (disabled)" in caplog.text
     assert "Skipping account future (next session 17:30)" in caplog.text
+
+
+def test_blocking_detection_suppresses_all_same_day_windows_and_survives_resolution(
+    tmp_path,
+):
+    current = account(tmp_path, "blocked", "09.00-11.00")
+    configuration = current.config_path.read_text(encoding="utf-8").replace(
+        "working-hours: [09.00-11.00]",
+        "working-hours: [09.00-11.00, 14.00-16.00]",
+    )
+    current.config_path.write_text(configuration, encoding="utf-8")
+    notifications = NotificationService(tmp_path)
+    item = notifications.create(
+        current.username,
+        NotificationType.HUMAN_CAPTCHA,
+        NotificationSeverity.CRITICAL,
+    )
+    with NotificationsDatabase(tmp_path) as database:
+        database.connection.execute(
+            "UPDATE notifications SET last_detected_at = ? WHERE id = ?",
+            ("2026-08-26T08:00:00+00:00", item.id),
+        )
+        database.connection.commit()
+    notifications.resolve(current.username, NotificationType.HUMAN_CAPTCHA)
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        device_validator=lambda _: True,
+        notification_service=notifications,
+    )
+
+    morning = scheduler.evaluate(
+        (current,), datetime(2026, 8, 26, 10, 0)  # noqa: DTZ001
+    )
+    afternoon = scheduler.evaluate(
+        (current,), datetime(2026, 8, 26, 15, 0)  # noqa: DTZ001
+    )
+    next_day = scheduler.evaluate(
+        (current,), datetime(2026, 8, 27, 10, 0)  # noqa: DTZ001
+    )
+
+    assert morning.selected is None
+    assert afternoon.selected is None
+    assert next_day.selected == current
+
+
+def test_zero_to_zero_remains_disabled_with_blocking_notification(tmp_path):
+    current = account(tmp_path, "disabled_blocked", "00.00-00.00")
+    notifications = NotificationService(tmp_path)
+    notifications.create(
+        current.username,
+        NotificationType.ACCOUNT_DISABLED,
+        NotificationSeverity.CRITICAL,
+    )
+    scheduler = PhoneScheduler(
+        DeviceRecord("PHONE", "T1", True, (current,)),
+        tmp_path,
+        device_validator=lambda _: True,
+        notification_service=notifications,
+    )
+
+    decision = scheduler.evaluate(
+        (current,), datetime(2026, 10, 13, 12, 0)  # noqa: DTZ001
+    )
+
+    assert decision.selected is None
+    assert decision.next_session is None
+    assert notifications.active()[0].type is NotificationType.ACCOUNT_DISABLED
 
 
 def test_schedule_decision_excludes_account_without_application_id(tmp_path, caplog):

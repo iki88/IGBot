@@ -1,12 +1,19 @@
+import logging
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from IGBot.notifications import NotificationService
 from IGBot.services.account_assignment_service import AccountAssignmentService
 from IGBot.services.transfer_service import TransferService, TransferValidationResult
 
 ARCHIVED_ACCOUNTS = "ARCHIVED_ACCOUNTS"
+ARCHIVE_REQUIRES_STOPPED_DEVICE = (
+    "Please stop the device before archiving an account."
+)
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -23,9 +30,22 @@ class ArchiveValidationResult:
 class ArchiveService:
     """Safely validate and archive existing account device assignments."""
 
-    def __init__(self, account_assignments: AccountAssignmentService) -> None:
+    def __init__(
+        self,
+        account_assignments: AccountAssignmentService,
+        *,
+        phone_is_active: Callable[[str], bool] = lambda _serial: False,
+        notification_service: NotificationService | None = None,
+    ) -> None:
         self._account_assignments = account_assignments
         self._transfer_validation = TransferService(account_assignments)
+        self._phone_is_active = phone_is_active
+        self._notification_service = notification_service
+
+    def set_phone_is_active(self, phone_is_active: Callable[[str], bool]) -> None:
+        """Install the authoritative phone-runtime guard used at archive time."""
+
+        self._phone_is_active = phone_is_active
 
     def validate_archive(
         self, username: str, source_serial: str
@@ -76,6 +96,17 @@ class ArchiveService:
         if not result.valid or result.config_path is None:
             return result
 
+        # Recheck at the operation boundary.  The phone may have started after
+        # the operator opened or confirmed the archive dialog.
+        if self._phone_is_active(result.source_serial):
+            return ArchiveValidationResult(
+                False,
+                result.username,
+                result.source_serial,
+                config_path=result.config_path,
+                error=ARCHIVE_REQUIRES_STOPPED_DEVICE,
+            )
+
         assignment = TransferValidationResult(
             valid=True,
             username=result.username,
@@ -93,6 +124,14 @@ class ArchiveService:
                 config_path=result.config_path,
                 error=str(error),
             )
+        if self._notification_service is not None:
+            try:
+                self._notification_service.resolve_all_for_account(result.username)
+            except Exception:
+                logger.exception(
+                    "Archived account notification cleanup failed for %s",
+                    result.username,
+                )
         return result
 
     def restore(

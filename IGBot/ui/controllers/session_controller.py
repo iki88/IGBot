@@ -38,6 +38,7 @@ class SessionController(QObject):
 
     state_changed = Signal(str, str)
     account_state_changed = Signal(str, str)
+    notifications_changed = Signal()
     operation_failed = Signal(str)
 
     def __init__(self, workspace_root: Path, parent: QObject | None = None) -> None:
@@ -63,7 +64,11 @@ class SessionController(QObject):
         }:
             self.operation_failed.emit("This phone scheduler is already active.")
             return
-        scheduler = PhoneScheduler(device, self._workspace_root)
+        scheduler = PhoneScheduler(
+            device,
+            self._workspace_root,
+            notifications_changed=self.notifications_changed.emit,
+        )
         self._schedulers[serial] = scheduler
         holder = {}
         worker = _SchedulerWorker(

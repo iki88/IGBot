@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from math import ceil
 
+from IGBot.notifications import BlockingAwareDevice, BlockingScreenActive
 from IGBot.runtime.candidates import (
     Candidate,
     CandidateObservation,
@@ -254,6 +255,8 @@ class AndroidFollowProvider:
                 username,
                 bounded_accounts_scroll=bounded_accounts_scroll,
             )
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             context.logger.error("[Search] Action failed", reason=str(error))
             return self._search_failure(
@@ -506,6 +509,8 @@ class AndroidFollowProvider:
             self._tap(device, control)
             context.logger.info(f"[{label}] {label} list opened")
             return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             context.logger.error(f"[{label}] Action failed", reason=str(error))
             return AndroidFollowResult(
@@ -527,6 +532,8 @@ class AndroidFollowProvider:
             self._tap(device, node)
             self._wait()
             return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             return AndroidFollowResult(
                 AndroidFollowStatus.FOLLOW_FAILED,
@@ -552,6 +559,8 @@ class AndroidFollowProvider:
             device.send_keys(prefix, clear=True)
             self._wait()
             return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             return AndroidFollowResult(
                 AndroidFollowStatus.FOLLOW_FAILED,
@@ -593,6 +602,8 @@ class AndroidFollowProvider:
             device.swipe(x, start_y, x, end_y, duration=0.4)
             self._wait()
             return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             return AndroidFollowResult(
                 AndroidFollowStatus.FOLLOW_FAILED,
@@ -624,6 +635,8 @@ class AndroidFollowProvider:
             device.swipe(x, start_y, x, end_y, duration=0.4)
             self._wait()
             return AndroidFollowResult(AndroidFollowStatus.SUCCESS)
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             return AndroidFollowResult(
                 AndroidFollowStatus.FOLLOW_FAILED,
@@ -780,6 +793,8 @@ class AndroidFollowProvider:
             if self._profile_observer is not None:
                 self._profile_observer(context, profile)
             return AndroidFollowResult(AndroidFollowStatus.SUCCESS, profile=profile)
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             context.logger.error("[Candidate] Action failed", reason=str(error))
             return AndroidFollowResult(
@@ -826,6 +841,8 @@ class AndroidFollowProvider:
                 AndroidFollowStatus.CONTACT_SCRAPED,
                 contact_details=details,
             )
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             return AndroidFollowResult(
                 AndroidFollowStatus.FOLLOW_FAILED,
@@ -885,6 +902,8 @@ class AndroidFollowProvider:
             return self._verify_follow_handoff(
                 context, device, returned, continuation=continuation
             )
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             return AndroidFollowResult(
                 AndroidFollowStatus.FOLLOW_FAILED,
@@ -992,6 +1011,8 @@ class AndroidFollowProvider:
             if not self._wait_for_mute_closed(device):
                 raise RuntimeError("Mute page did not close")
             mute_completed = True
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - optional Android UI boundary
             warning = f"Mute could not be completed: {error}"
             context.logger.warning("[Mute] Action failed.", reason=str(error))
@@ -1207,6 +1228,8 @@ class AndroidFollowProvider:
             device.press("back")
             self._wait()
             return outcome
+        except BlockingScreenActive:
+            raise
         except Exception as error:  # noqa: BLE001 - Android isolation boundary
             context.logger.warning("Returning to Followers failed", reason=str(error))
             detail = outcome.detail or "Navigation outcome recorded."
@@ -1269,7 +1292,9 @@ class AndroidFollowProvider:
         return result
 
     def _device(self, context: RuntimeContext) -> object:
-        return self._device_factory(context.session.phone_id)
+        return BlockingAwareDevice(
+            self._device_factory(context.session.phone_id), context
+        )
 
     def _fresh_nodes(self, device: object) -> tuple[_Node, ...]:
         self._wait()

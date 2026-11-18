@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from IGBot.notifications.database import NotificationsDatabase
@@ -96,6 +96,58 @@ class NotificationService:
             )
             database.connection.commit()
             return cursor.rowcount > 0
+
+    def resolve_all_for_account(self, username: str) -> int:
+        """Resolve every active notification owned by one account atomically."""
+
+        with NotificationsDatabase(self.workspace) as database:
+            cursor = database.connection.execute(
+                """UPDATE notifications SET active = 0, resolved_at = ?
+                   WHERE username = ? AND active = 1""",
+                (_utc_now(), username),
+            )
+            database.connection.commit()
+            return cursor.rowcount
+
+    def resolve_blocking_for_account(self, username: str) -> int:
+        """Resolve active native blocking-screen notifications."""
+
+        types = (
+            NotificationType.HUMAN_CAPTCHA.value,
+            NotificationType.ACCOUNT_DISABLED.value,
+        )
+        with NotificationsDatabase(self.workspace) as database:
+            cursor = database.connection.execute(
+                """UPDATE notifications SET active = 0, resolved_at = ?
+                   WHERE username = ? AND active = 1 AND type IN (?, ?)""",
+                (_utc_now(), username, *types),
+            )
+            database.connection.commit()
+            return cursor.rowcount
+
+    def blocking_detected_on_local_date(
+        self, username: str, local_date: date, *, timezone=None
+    ) -> bool:
+        """Return whether a persisted blocker was detected on ``local_date``."""
+
+        types = (
+            NotificationType.HUMAN_CAPTCHA.value,
+            NotificationType.ACCOUNT_DISABLED.value,
+        )
+        with NotificationsDatabase(self.workspace) as database:
+            row = database.connection.execute(
+                """SELECT last_detected_at FROM notifications
+                   WHERE username = ? AND type IN (?, ?)
+                   ORDER BY last_detected_at DESC LIMIT 1""",
+                (username, *types),
+            ).fetchone()
+        if row is None:
+            return False
+        detected = datetime.fromisoformat(str(row["last_detected_at"]))
+        if detected.tzinfo is None or detected.utcoffset() is None:
+            detected = detected.replace(tzinfo=UTC)
+        zone = timezone or datetime.now().astimezone().tzinfo
+        return detected.astimezone(zone).date() == local_date
 
     def active(self) -> tuple[Notification, ...]:
         return self._query("active = 1")
