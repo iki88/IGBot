@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEvent, QPointF, QRect, Qt
+from PySide6.QtGui import QMouseEvent
+from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
 
 from IGBot.core.device import AssignedAccount, DeviceRecord
+from IGBot.notifications import NotificationSeverity
 from IGBot.runtime.analytics import AnalyticsDatabase
 from IGBot.services.account_metadata_service import AccountMetadataService
 from IGBot.ui.pages.account_statistics_page import AccountStatisticsPage
@@ -213,9 +215,7 @@ def test_account_options_reflect_and_emit_existing_debug_setting(tmp_path):
     directory = tmp_path / "accounts" / "real_account"
     directory.mkdir(parents=True)
     config_path = directory / "config.yml"
-    config_path.write_text(
-        "username: real_account\ndebug: true\n", encoding="utf-8"
-    )
+    config_path.write_text("username: real_account\ndebug: true\n", encoding="utf-8")
     account = AssignedAccount(
         "real_account", "phone-a", "com.instagram.android", config_path
     )
@@ -254,6 +254,85 @@ def test_phone_account_double_click_opens_selected_account():
 
     assert opened == [account]
     assert page.model.HEADERS[-1] == "Actions"
+    assert application is not None
+
+
+def test_notification_indicator_role_and_archived_visibility():
+    QApplication.instance() or QApplication([])
+    page = PhoneAccountsPage()
+    account = AssignedAccount(
+        "alert_account",
+        "phone-a",
+        "com.instagram.android",
+        Path("accounts/alert_account/config.yml"),
+    )
+    page.set_phone(DeviceRecord("phone-a", "Rack One", True), [account])
+    page.model.set_active_notification_severities(
+        {"ALERT_ACCOUNT": NotificationSeverity.WARNING}
+    )
+    source = page.model.index(0, page.model.USERNAME)
+    proxy = page.proxy_model.mapFromSource(source)
+
+    assert (
+        source.data(page.model.ActiveNotificationSeverityRole)
+        == NotificationSeverity.WARNING.value
+    )
+    assert page.notification_delegate._severity(proxy) is NotificationSeverity.WARNING
+
+    page.set_archived([account])
+    archived = page.proxy_model.index(0, page.model.USERNAME)
+    assert page.notification_delegate._severity(archived) is None
+
+
+def test_notification_indicator_is_right_aligned_and_emits_once_for_double_click():
+    application = QApplication.instance() or QApplication([])
+    page = PhoneAccountsPage()
+    account = AssignedAccount(
+        "a_very_long_instagram_username_that_needs_eliding",
+        "phone-a",
+        "com.instagram.android",
+        Path("accounts/long/config.yml"),
+    )
+    page.set_phone(DeviceRecord("phone-a", "Rack One", True), [account])
+    page.model.set_active_notification_severities(
+        {account.username: NotificationSeverity.CRITICAL}
+    )
+    index = page.proxy_model.index(0, page.model.USERNAME)
+    option = QStyleOptionViewItem()
+    option.rect = QRect(10, 0, 180, 34)
+    hit = page.notification_delegate.indicator_rect(option.rect)
+    requests = []
+    opened = []
+    page.notification_history_requested.connect(requests.append)
+    page.account_open_requested.connect(opened.append)
+
+    assert hit.right() == option.rect.right() - page.notification_delegate.RIGHT_MARGIN
+
+    def event(event_type):
+        point = QPointF(hit.center())
+        return QMouseEvent(
+            event_type,
+            point,
+            point,
+            point,
+            Qt.LeftButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        )
+
+    assert page.notification_delegate.editorEvent(
+        event(QEvent.MouseButtonRelease), page.proxy_model, option, index
+    )
+    assert page.notification_delegate.editorEvent(
+        event(QEvent.MouseButtonDblClick), page.proxy_model, option, index
+    )
+    assert page.notification_delegate.editorEvent(
+        event(QEvent.MouseButtonRelease), page.proxy_model, option, index
+    )
+    page.table.doubleClicked.emit(index)
+
+    assert requests == [account.username]
+    assert opened == []
     assert application is not None
 
 
@@ -386,7 +465,10 @@ def test_statistics_dialog_handles_missing_and_existing_analytics(tmp_path):
     populated.set_account(account)
     assert populated.table.objectName() == "statisticsTable"
     assert populated.table.rowCount() == 1
-    assert populated.table.item(0, 0).text() == datetime.now(timezone.utc).date().isoformat()
+    assert (
+        populated.table.item(0, 0).text()
+        == datetime.now(timezone.utc).date().isoformat()
+    )
     assert populated.table.item(0, 3).text() == "20"
     assert application is not None
 
@@ -441,7 +523,9 @@ def test_phone_accounts_reads_today_analytics_and_computes_snapshot_delta(tmp_pa
         "analytic_account", "phone-a", "com.instagram.android", config_path
     )
     with AnalyticsDatabase(directory) as database:
-        previous_day = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+        previous_day = (
+            datetime.now(timezone.utc).date() - timedelta(days=1)
+        ).isoformat()
         database._connection.execute(
             """
             INSERT INTO daily_summary (
@@ -463,10 +547,7 @@ def test_phone_accounts_reads_today_analytics_and_computes_snapshot_delta(tmp_pa
     assert page.model.index(0, columns["Followers"]).data() == "108 ▲8"
     assert page.model.index(0, columns["Following"]).data() == "47 ▼3"
     assert page.model.index(0, columns["Posts"]).data() == "11 ▲1"
-    assert (
-        page.table.itemDelegateForColumn(columns["Followers"])
-        is page.trend_delegate
-    )
+    assert page.table.itemDelegateForColumn(columns["Followers"]) is page.trend_delegate
     assert page.model.index(0, columns["Followed"]).data() == "2"
     assert page.model.index(0, columns["Like"]).data() == "3"
     assert application is not None

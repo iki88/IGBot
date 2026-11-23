@@ -1,6 +1,9 @@
-from PySide6.QtCore import Qt
+from datetime import datetime
+
+from PySide6.QtCore import QEvent, QPointF, QRect, Qt
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
 
 from IGBot.notifications import (
     NotificationService,
@@ -114,3 +117,62 @@ def test_notifications_page_reads_service_and_filters(tmp_path):
 
     page.severity.setCurrentText("Critical")
     assert page.model.rowCount() == 0
+
+
+def test_since_column_uses_local_date_and_full_tooltip(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    service = NotificationService(tmp_path)
+    created = service.create(
+        "example",
+        NotificationType.ZERO_INTERACTIONS,
+        NotificationSeverity.WARNING,
+        device="phone-1",
+    )
+    page = NotificationsPage(notification_service=service)
+    application.processEvents()
+    index = page.model.index(0, 5)
+    expected = datetime.fromisoformat(created.detected_at).astimezone()
+
+    assert page.model.data(index) == expected.strftime("%Y-%m-%d")
+    tooltip = page.model.data(index, Qt.ToolTipRole)
+    assert expected.strftime("%Y-%m-%d %H:%M:%S") in tooltip
+    assert expected.strftime("%z") in tooltip
+
+
+def test_notification_actions_emit_only_for_icon_hit_areas(tmp_path):
+    application = QApplication.instance() or QApplication([])
+    service = NotificationService(tmp_path)
+    service.create(
+        "example",
+        NotificationType.ZERO_INTERACTIONS,
+        NotificationSeverity.WARNING,
+        device="phone-1",
+    )
+    page = NotificationsPage(notification_service=service)
+    page.show()
+    application.processEvents()
+    index = page.model.index(0, 6)
+    option = QStyleOptionViewItem()
+    option.rect = QRect(0, 0, 92, 36)
+    viewed = []
+    managed = []
+    page.view_phone_requested.connect(viewed.append)
+    page.open_phone_accounts_requested.connect(managed.append)
+
+    def click(x):
+        event = QMouseEvent(
+            QEvent.MouseButtonRelease,
+            QPointF(x, 18),
+            QPointF(x, 18),
+            QPointF(x, 18),
+            Qt.LeftButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        )
+        return page.actions_delegate.editorEvent(event, page.model, option, index)
+
+    assert click(20)
+    assert click(52)
+    assert not click(88)
+    assert viewed == ["phone-1"]
+    assert managed == ["phone-1"]

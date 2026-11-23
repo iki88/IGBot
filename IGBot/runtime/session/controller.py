@@ -33,6 +33,7 @@ class SessionController:
         ignore_service: IgnoreService | None = None,
         analytics: AnalyticsService | None = None,
         blocking_screen_monitor=None,
+        verified_startup_callback: Callable[[RuntimeContext], None] | None = None,
         cancellation_requested: Callable[[], bool] = lambda: False,
         cancellation_wait: Callable[[float], bool] | None = None,
     ) -> None:
@@ -43,6 +44,7 @@ class SessionController:
         self._ignore_service = ignore_service or IgnoreService()
         self._analytics = analytics
         self._blocking_screen_monitor = blocking_screen_monitor
+        self._verified_startup_callback = verified_startup_callback
         self._cancellation_requested = cancellation_requested
         self._cancellation_wait = cancellation_wait
         self._contexts: dict[UUID, RuntimeContext] = {}
@@ -98,6 +100,14 @@ class SessionController:
             if runtime_context.session_state is SessionState.WAITING_FOR_OPERATOR:
                 return SessionStartResult(
                     handle, runtime_context, startup_result, False
+                )
+
+        if self._verified_startup_callback is not None:
+            try:
+                self._verified_startup_callback(runtime_context)
+            except Exception as error:  # noqa: BLE001 - startup must remain available
+                self._logger.warning(
+                    "Zero Interactions analytics check failed", detail=str(error)
                 )
 
         runtime_context.session_state = SessionState.RUNNING

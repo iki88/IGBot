@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -179,6 +180,66 @@ def test_session_controller_transfers_completed_startup_to_scheduler(session_con
     assert scheduler.calls == [result.context]
     assert result.context.startup_result is result.startup_result
     assert controller.state_for(session_context.session_id) is SessionState.COMPLETED
+
+
+def test_verified_startup_callback_runs_before_scheduler(session_context):
+    events = []
+
+    class OrderedScheduler:
+        def start(self, context):
+            events.append(("scheduler", context))
+
+    stage = RecordingStage(
+        StartupStageResult(
+            StartupStageName.ACCOUNT_VERIFICATION,
+            StartupStageStatus.SUCCESS,
+            account_verified=True,
+        ),
+        [],
+    )
+    controller = SessionController(
+        StartupPipeline((stage,)),
+        OrderedScheduler(),
+        RecordingLogger(),
+        verified_startup_callback=lambda context: events.append(("analytics", context)),
+    )
+
+    result = controller.start(session_context)
+
+    assert [name for name, _context in events] == ["analytics", "scheduler"]
+    assert all(context is result.context for _name, context in events)
+
+
+def test_verified_startup_callback_failure_does_not_block_scheduler(session_context):
+    logger = RecordingLogger()
+    scheduler = RecordingScheduler()
+    stage = RecordingStage(
+        StartupStageResult(
+            StartupStageName.ACCOUNT_VERIFICATION,
+            StartupStageStatus.SUCCESS,
+            account_verified=True,
+        ),
+        [],
+    )
+
+    def fail(_context):
+        raise sqlite3.DatabaseError("unreadable analytics")
+
+    controller = SessionController(
+        StartupPipeline((stage,)),
+        scheduler,
+        logger,
+        verified_startup_callback=fail,
+    )
+
+    result = controller.start(session_context)
+
+    assert result.scheduler_started is True
+    assert scheduler.calls == [result.context]
+    assert any(
+        message == "Zero Interactions analytics check failed"
+        for _, message, _ in logger.messages
+    )
 
 
 def test_session_controller_preserves_waiting_when_scheduler_detects_blocker(

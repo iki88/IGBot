@@ -7,6 +7,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor, QFont
 
 from IGBot.core.device import AssignedAccount
+from IGBot.notifications import NotificationSeverity
 from IGBot.runtime.analytics import AnalyticsDatabase, DailySummaryDisplay
 from IGBot.services.account_metadata_service import AccountMetadataService
 
@@ -53,6 +54,7 @@ class PhoneAccountsModel(QAbstractTableModel):
         HEADERS.index("Posted"): "posted",
     }
     AccountRole = Qt.UserRole + 2
+    ActiveNotificationSeverityRole = Qt.UserRole + 3
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -61,6 +63,7 @@ class PhoneAccountsModel(QAbstractTableModel):
         self._schedules: dict[str, tuple[str, str]] = {}
         self._statistics: dict[str, DailySummaryDisplay] = {}
         self._tags: dict[str, str] = {}
+        self._active_notification_severity: dict[str, NotificationSeverity] = {}
 
     def rowCount(self, parent=_ROOT_INDEX) -> int:
         return 0 if parent.isValid() else len(self._accounts)
@@ -94,6 +97,10 @@ class PhoneAccountsModel(QAbstractTableModel):
             return account.device_id
         if role == self.AccountRole:
             return account
+        if role == self.ActiveNotificationSeverityRole:
+            return self._active_notification_severity.get(
+                account.username.strip().casefold()
+            )
         if role != Qt.DisplayRole:
             return None
         if index.column() == self.USERNAME:
@@ -234,3 +241,31 @@ class PhoneAccountsModel(QAbstractTableModel):
                 self._statuses[str(account.config_path.resolve())] = status
                 index = self.index(row, self.STATUS)
                 self.dataChanged.emit(index, index, [Qt.DisplayRole])
+
+    def set_active_notification_severities(
+        self, mapping: dict[str, NotificationSeverity]
+    ) -> None:
+        normalized = {
+            str(username).strip().casefold(): severity
+            for username, severity in mapping.items()
+            if str(username).strip()
+            and severity
+            in {NotificationSeverity.CRITICAL, NotificationSeverity.WARNING}
+        }
+        if normalized == self._active_notification_severity:
+            return
+        changed = set(self._active_notification_severity) ^ set(normalized)
+        changed.update(
+            username
+            for username in set(self._active_notification_severity) & set(normalized)
+            if self._active_notification_severity[username] != normalized[username]
+        )
+        self._active_notification_severity = normalized
+        for row, account in enumerate(self._accounts):
+            if account.username.strip().casefold() in changed:
+                index = self.index(row, self.USERNAME)
+                self.dataChanged.emit(
+                    index,
+                    index,
+                    [self.ActiveNotificationSeverityRole],
+                )

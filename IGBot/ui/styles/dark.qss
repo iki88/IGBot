@@ -394,6 +394,7 @@ QPlainTextEdit#liveLogOutput {
 }
 
 QDialog#confirmationDialog,
+QDialog#accountNotificationHistoryDialog,
 QDialog#addDeviceDialog,
 QDialog#addAccountDialog,
 QDialog#inputDialog,
@@ -512,6 +513,76 @@ QLabel#dialogDetail {
     margin-top: 5px;
 }
 
+QLabel#notificationHistoryUsername,
+QLabel#notificationHistoryMetadata,
+QLabel#notificationHistoryEmptyDetail {
+    color: #A1A1AA;
+    font-size: 12px;
+}
+
+QDialog#accountNotificationHistoryDialog {
+    background-color: #18181B;
+    border: 1px solid #3F3F46;
+    border-radius: 10px;
+}
+
+QLabel#notificationHistoryActiveCount,
+QLabel#notificationHistoryStatus {
+    background-color: #27272A;
+    border: 1px solid #3F3F46;
+    border-radius: 9px;
+    color: #D4D4D8;
+    font-size: 11px;
+    padding: 2px 7px;
+}
+
+QLabel#notificationHistoryActiveCount,
+QLabel#notificationHistoryStatus[active="true"][severity="warning"] {
+    background-color: #302313;
+    border-color: #6B4617;
+    color: #FBBF24;
+}
+
+QLabel#notificationHistoryStatus[active="true"][severity="critical"] {
+    background-color: #321C1C;
+    border-color: #7F1D1D;
+    color: #F87171;
+}
+
+QScrollArea#notificationHistoryScroll,
+QWidget#notificationHistoryContents {
+    background-color: transparent;
+    border: 0;
+}
+
+QFrame#notificationHistoryEntry {
+    background-color: #202023;
+    border: 1px solid #303036;
+    border-radius: 8px;
+}
+
+QLabel#notificationHistoryType,
+QLabel#notificationHistoryEmptyTitle {
+    color: #F9FAFB;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QLabel#notificationHistorySeverity[severity="critical"] {
+    color: #F87171;
+    font-size: 15px;
+}
+
+QLabel#notificationHistorySeverity[severity="warning"] {
+    color: #FBBF24;
+    font-size: 15px;
+}
+
+QLabel#notificationHistoryDescription {
+    color: #E4E4E7;
+    font-size: 12px;
+}
+
 QMenu {
     background-color: #151b23;
     border: 1px solid #354252;
@@ -626,6 +697,7 @@ QRadioButton:disabled {
 QWidget#navigationSidebar,
 QToolBar#topToolbar,
 QDialog#confirmationDialog,
+QDialog#accountNotificationHistoryDialog,
 QDialog#addDeviceDialog,
 QDialog#addAccountDialog,
 QDialog#inputDialog,

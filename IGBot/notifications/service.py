@@ -97,6 +97,105 @@ class NotificationService:
             database.connection.commit()
             return cursor.rowcount > 0
 
+    def reconcile_zero_interactions_day(
+        self,
+        *,
+        account_key: str,
+        username: str,
+        device: str,
+        tag: str,
+        evidence_date: date,
+        total_interactions: int | None,
+    ) -> str:
+        """Atomically reconcile one recorded UTC analytics day exactly once."""
+
+        evidence = evidence_date.isoformat()
+        now = _utc_now()
+        with NotificationsDatabase(self.workspace) as database:
+            connection = database.connection
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT last_zero_interactions_evaluated_date FROM account_lifecycle "
+                "WHERE account_key = ?",
+                (account_key,),
+            ).fetchone()
+            if row is not None and row[0] == evidence:
+                connection.rollback()
+                return "already_evaluated"
+
+            connection.execute(
+                """INSERT INTO account_lifecycle
+                   (account_key, username, device, tag, first_successful_session_at,
+                    consecutive_zero_interaction_sessions,
+                    last_zero_interactions_evaluated_date, updated_at)
+                   VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+                   ON CONFLICT(account_key) DO UPDATE SET
+                     username=excluded.username, device=excluded.device,
+                     tag=excluded.tag,
+                     first_successful_session_at=COALESCE(
+                       account_lifecycle.first_successful_session_at,
+                       excluded.first_successful_session_at),
+                     consecutive_zero_interaction_sessions=0,
+                     last_zero_interactions_evaluated_date=
+                       excluded.last_zero_interactions_evaluated_date,
+                     updated_at=excluded.updated_at""",
+                (account_key, username, device, tag, now, evidence, now),
+            )
+
+            outcome = "unchanged"
+            if total_interactions is None:
+                outcome = "no_row"
+            elif total_interactions > 0:
+                cursor = connection.execute(
+                    """UPDATE notifications SET active = 0, resolved_at = ?
+                       WHERE username = ? AND type = ? AND active = 1""",
+                    (now, username, NotificationType.ZERO_INTERACTIONS.value),
+                )
+                if cursor.rowcount:
+                    outcome = "resolved"
+            else:
+                critical_types = (
+                    NotificationType.HUMAN_CAPTCHA.value,
+                    NotificationType.ACCOUNT_DISABLED.value,
+                )
+                critical = connection.execute(
+                    """SELECT 1 FROM notifications
+                       WHERE username = ? AND type IN (?, ?)
+                         AND (substr(detected_at, 1, 10) = ?
+                              OR substr(last_detected_at, 1, 10) = ?)
+                       LIMIT 1""",
+                    (username, *critical_types, evidence, evidence),
+                ).fetchone()
+                if critical is not None:
+                    outcome = "suppressed_by_critical"
+                else:
+                    active = connection.execute(
+                        """SELECT id FROM notifications
+                           WHERE username = ? AND type = ? AND active = 1""",
+                        (username, NotificationType.ZERO_INTERACTIONS.value),
+                    ).fetchone()
+                    if active is None:
+                        connection.execute(
+                            """INSERT INTO notifications
+                               (username, device, tag, severity, type, active,
+                                occurrences, detected_at, last_detected_at,
+                                resolved_at, details)
+                               VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?, NULL, ?)""",
+                            (
+                                username,
+                                device,
+                                tag,
+                                NotificationSeverity.WARNING.value,
+                                NotificationType.ZERO_INTERACTIONS.value,
+                                now,
+                                now,
+                                f"No verified interactions were recorded on {evidence}.",
+                            ),
+                        )
+                        outcome = "created"
+            connection.commit()
+            return outcome
+
     def resolve_all_for_account(self, username: str) -> int:
         """Resolve every active notification owned by one account atomically."""
 
@@ -125,7 +224,9 @@ class NotificationService:
             database.connection.commit()
             return cursor.rowcount
 
-    def purge_account(self, username: str, account_directory: str | Path) -> tuple[int, int]:
+    def purge_account(
+        self, username: str, account_directory: str | Path
+    ) -> tuple[int, int]:
         """Permanently remove notification state owned by one deleted account."""
 
         normalized_username = username.strip()
@@ -176,6 +277,45 @@ class NotificationService:
 
     def all(self) -> tuple[Notification, ...]:
         return self._query("1 = 1")
+
+    def history_for_account(self, username: str) -> tuple[Notification, ...]:
+        """Return one account's complete history, active first and newest first."""
+
+        normalized = username.strip()
+        if not normalized:
+            return ()
+        with NotificationsDatabase(self.workspace) as database:
+            rows = database.connection.execute(
+                """SELECT * FROM notifications
+                   WHERE username = ?
+                   ORDER BY active DESC, last_detected_at DESC""",
+                (normalized,),
+            ).fetchall()
+            return tuple(self._notification(row) for row in rows)
+
+    def active_severity_by_username(self) -> dict[str, NotificationSeverity]:
+        """Return one highest active badge severity per normalized username."""
+
+        with NotificationsDatabase(self.workspace) as database:
+            rows = database.connection.execute(
+                """SELECT username,
+                          MAX(CASE severity
+                                WHEN 'CRITICAL' THEN 2
+                                WHEN 'WARNING' THEN 1
+                                ELSE 0 END) AS priority
+                   FROM notifications
+                   WHERE active = 1
+                   GROUP BY username"""
+            ).fetchall()
+        severities = {
+            2: NotificationSeverity.CRITICAL,
+            1: NotificationSeverity.WARNING,
+        }
+        return {
+            str(row["username"]).strip().casefold(): severities[int(row["priority"])]
+            for row in rows
+            if int(row["priority"]) in severities
+        }
 
     def count_active(self, *, badge_only: bool = False) -> int:
         clause = "active = 1"

@@ -1452,15 +1452,14 @@ class NativeAccountRuntime:
                     result.startup_result.failure_reason or "Native startup failed."
                 )
             runtime_context = getattr(result, "context", None)
-            if isinstance(runtime_context, RuntimeContext):
-                if (
-                    runtime_context.session_state
-                    is RuntimeSessionState.WAITING_FOR_OPERATOR
-                ):
-                    self.state = UiSessionState.WAITING
-                    state_changed(self.state)
-                    return
-                self._record_notification_lifecycle(runtime_context)
+            if (
+                isinstance(runtime_context, RuntimeContext)
+                and runtime_context.session_state
+                is RuntimeSessionState.WAITING_FOR_OPERATOR
+            ):
+                self.state = UiSessionState.WAITING
+                state_changed(self.state)
+                return
             if self._stop_event.is_set():
                 self._runtime_logger.info("Session stopping")
             self.state = UiSessionState.STOPPED
@@ -1493,22 +1492,23 @@ class NativeAccountRuntime:
                         exception=f"{type(error).__name__}: {error}",
                     )
 
-    def _record_notification_lifecycle(self, context: RuntimeContext) -> None:
-        """Reconcile notifications without allowing them to alter runtime truth."""
+    def _evaluate_zero_interactions(self, context: RuntimeContext) -> None:
+        """Evaluate yesterday's recorded analytics without blocking startup."""
         if self._notification_detector is None:
             return
         try:
             metadata = self._mapping(self.account.config_path.parent / "account.json")
-            self._notification_detector.record_completed_session(
+            outcome = self._notification_detector.evaluate_previous_day(
                 account_directory=self.account.config_path.parent,
                 username=self.account.username,
                 device=self.account.device_id,
                 tag=str(metadata.get("tag") or ""),
-                verified_interactions=context.verified_interactions,
             )
+            if outcome in {"created", "resolved"}:
+                self._notifications_changed()
         except Exception as error:  # noqa: BLE001 - notification isolation boundary
             context.logger.warning(
-                "Notification lifecycle update failed", detail=str(error)
+                "Zero Interactions analytics check failed", detail=str(error)
             )
 
     def request_stop(self, state_changed) -> None:
@@ -1652,6 +1652,7 @@ class NativeAccountRuntime:
             ignore_service=ignore_service,
             analytics=AnalyticsService(self.account.config_path.parent),
             blocking_screen_monitor=blocking_monitor,
+            verified_startup_callback=self._evaluate_zero_interactions,
             cancellation_requested=self._stop_event.is_set,
             cancellation_wait=self._stop_event.wait,
         )

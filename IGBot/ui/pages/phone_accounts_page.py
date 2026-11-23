@@ -21,6 +21,9 @@ from IGBot.core.device import AssignedAccount, DeviceRecord
 from IGBot.services.archive_service import ARCHIVED_ACCOUNTS
 from IGBot.ui.models.phone_accounts_model import PhoneAccountsModel
 from IGBot.ui.widgets.account_actions_delegate import AccountActionsDelegate
+from IGBot.ui.widgets.account_notification_indicator_delegate import (
+    AccountNotificationIndicatorDelegate,
+)
 from IGBot.ui.widgets.empty_state import EmptyState
 from IGBot.ui.widgets.page_header import PageHeader
 from IGBot.ui.widgets.text_input_dialog import TextInputDialog
@@ -45,6 +48,7 @@ class PhoneAccountsPage(QWidget):
     debug_logging_requested = Signal(object, bool)
     account_open_requested = Signal(object)
     statistics_requested = Signal(object)
+    notification_history_requested = Signal(str)
     active_account_changed = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -117,7 +121,11 @@ class PhoneAccountsPage(QWidget):
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.actions_delegate = AccountActionsDelegate(self.table)
+        self.notification_delegate = AccountNotificationIndicatorDelegate(self.table)
         self.trend_delegate = TrendIndicatorDelegate(self.table)
+        self.table.setItemDelegateForColumn(
+            PhoneAccountsModel.USERNAME, self.notification_delegate
+        )
         for column in (
             PhoneAccountsModel.HEADERS.index("Followers"),
             PhoneAccountsModel.HEADERS.index("Following"),
@@ -128,6 +136,9 @@ class PhoneAccountsPage(QWidget):
             PhoneAccountsModel.ACTIONS, self.actions_delegate
         )
         self.actions_delegate.action_requested.connect(self._handle_account_action)
+        self.notification_delegate.history_requested.connect(
+            self.notification_history_requested.emit
+        )
         self._configure_columns()
         self.table.doubleClicked.connect(self._open_account)
         self.table.selectionModel().selectionChanged.connect(self._selection_changed)
@@ -217,6 +228,7 @@ class PhoneAccountsPage(QWidget):
         self._serial = device.serial
         self.actions_delegate.set_archive_visible(True)
         self.actions_delegate.set_delete_visible(False)
+        self.notification_delegate.set_indicators_visible(True)
         self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 112)
         self.device_context.show()
         self.search.clear()
@@ -256,6 +268,7 @@ class PhoneAccountsPage(QWidget):
         self._serial = ""
         self.actions_delegate.set_archive_visible(False)
         self.actions_delegate.set_delete_visible(True)
+        self.notification_delegate.set_indicators_visible(False)
         self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 112)
         self.device_context.show()
         self.search.clear()
@@ -280,6 +293,7 @@ class PhoneAccountsPage(QWidget):
         self._serial = ""
         self.actions_delegate.set_archive_visible(True)
         self.actions_delegate.set_delete_visible(False)
+        self.notification_delegate.set_indicators_visible(True)
         self.table.setColumnWidth(PhoneAccountsModel.ACTIONS, 112)
         self.search.clear()
         self.search.show()
@@ -324,7 +338,9 @@ class PhoneAccountsPage(QWidget):
     def _open_account(self, index) -> None:
         source_index = self.proxy_model.mapToSource(index)
         account = self.model.account_at(source_index.row())
-        if account is not None:
+        if account is not None and not self.notification_delegate.recently_activated(
+            account.username
+        ):
             self.account_open_requested.emit(account)
 
     def _handle_account_action(self, action: str, account: AssignedAccount) -> None:

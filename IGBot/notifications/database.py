@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Self
 
 
 class NotificationsDatabase:
+    _initialization_lock = threading.Lock()
+
     def __init__(self, workspace: str | Path) -> None:
         self.path = Path(workspace) / "Notifications" / "notifications.db"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(self.path, timeout=30)
         self.connection.row_factory = sqlite3.Row
-        self.connection.execute("PRAGMA journal_mode=WAL")
-        self.connection.execute("PRAGMA foreign_keys=ON")
-        self._initialize()
+        with self._initialization_lock:
+            self.connection.execute("PRAGMA journal_mode=WAL")
+            self.connection.execute("PRAGMA foreign_keys=ON")
+            self._initialize()
 
     def _initialize(self) -> None:
         self.connection.executescript(
@@ -46,10 +50,20 @@ class NotificationsDatabase:
                 tag TEXT NOT NULL DEFAULT '',
                 first_successful_session_at TEXT,
                 consecutive_zero_interaction_sessions INTEGER NOT NULL DEFAULT 0,
+                last_zero_interactions_evaluated_date TEXT,
                 updated_at TEXT NOT NULL
             );
             """
         )
+        columns = {
+            str(row["name"])
+            for row in self.connection.execute("PRAGMA table_info(account_lifecycle)")
+        }
+        if "last_zero_interactions_evaluated_date" not in columns:
+            self.connection.execute(
+                "ALTER TABLE account_lifecycle "
+                "ADD COLUMN last_zero_interactions_evaluated_date TEXT"
+            )
         self.connection.commit()
 
     def close(self) -> None:

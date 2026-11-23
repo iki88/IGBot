@@ -1,5 +1,15 @@
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QPainter
+from datetime import UTC, datetime
+
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QEvent,
+    QModelIndex,
+    QRect,
+    QSize,
+    Qt,
+    Signal,
+)
+from PySide6.QtGui import QHelpEvent, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -10,6 +20,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QTableView,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -20,6 +31,18 @@ from IGBot.ui.widgets.empty_state import EmptyState
 from IGBot.ui.widgets.page_header import PageHeader
 
 _INVALID_INDEX = QModelIndex()
+
+
+def _local_notification_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone()
 
 
 class NotificationsTableModel(QAbstractTableModel):
@@ -48,15 +71,27 @@ class NotificationsTableModel(QAbstractTableModel):
         notification = self.notifications[index.row()]
         if role == Qt.UserRole:
             return notification
+        if role == Qt.ToolTipRole and index.column() == 5:
+            local_time = _local_notification_time(notification.detected_at)
+            return (
+                local_time.strftime("%Y-%m-%d %H:%M:%S %Z (%z)")
+                if local_time is not None
+                else notification.detected_at or "Timestamp unavailable"
+            )
         if role != Qt.DisplayRole:
             return None
+        local_time = _local_notification_time(notification.detected_at)
         values = (
             notification.severity.value.title(),
             notification.username,
             notification.tag,
             notification.device,
             notification.type.value.replace("_", " ").title(),
-            notification.detected_at,
+            (
+                local_time.strftime("%Y-%m-%d")
+                if local_time is not None
+                else ""
+            ),
             "",
         )
         return values[index.column()]
@@ -75,6 +110,16 @@ class NotificationActionsDelegate(QStyledItemDelegate):
     """Reserve the future Open Phone and Account Settings row actions."""
 
     ACTIONS = (("view", "View Phone"), ("manage", "Open Phone Accounts"))
+    action_requested = Signal(str, object)
+
+    @staticmethod
+    def _action_rect(option: QStyleOptionViewItem, offset: int) -> QRect:
+        return QRect(
+            option.rect.left() + 12 + offset * 32,
+            option.rect.center().y() - 9,
+            18,
+            18,
+        )
 
     def paint(
         self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex
@@ -82,13 +127,28 @@ class NotificationActionsDelegate(QStyledItemDelegate):
         super().paint(painter, option, index)
         foreground = option.palette.text().color().name()
         for offset, (action, _tooltip) in enumerate(self.ACTIONS):
-            rectangle = QRect(
-                option.rect.left() + 12 + offset * 32,
-                option.rect.center().y() - 9,
-                18,
-                18,
-            )
+            rectangle = self._action_rect(option, offset)
             workspace_action_icon(action, foreground).paint(painter, rectangle)
+
+    def editorEvent(self, event, model, option, index) -> bool:
+        if event.type() != QEvent.MouseButtonRelease or event.button() != Qt.LeftButton:
+            return False
+        for offset, (action, _tooltip) in enumerate(self.ACTIONS):
+            if self._action_rect(option, offset).contains(event.position().toPoint()):
+                notification = index.data(Qt.UserRole)
+                if notification is not None:
+                    self.action_requested.emit(action, notification)
+                    return True
+        return False
+
+    def helpEvent(self, event, view, option, index) -> bool:
+        if isinstance(event, QHelpEvent):
+            for offset, (_action, tooltip) in enumerate(self.ACTIONS):
+                if self._action_rect(option, offset).contains(event.pos()):
+                    QToolTip.showText(event.globalPos(), tooltip, view)
+                    return True
+        QToolTip.hideText()
+        return False
 
     def sizeHint(self, option, index) -> QSize:
         return QSize(84, 36)
@@ -164,6 +224,8 @@ class NotificationsPage(QWidget):
         "Try Again Later",
         "Zero Interactions",
     )
+    view_phone_requested = Signal(str)
+    open_phone_accounts_requested = Signal(str)
 
     def __init__(
         self,
@@ -234,6 +296,7 @@ class NotificationsPage(QWidget):
         self.table.setColumnWidth(6, 92)
         self.actions_delegate = NotificationActionsDelegate(self.table)
         self.table.setItemDelegateForColumn(6, self.actions_delegate)
+        self.actions_delegate.action_requested.connect(self._perform_row_action)
 
         self.empty_state = EmptyState(
             workspace_action_icon("view"),
@@ -330,6 +393,15 @@ class NotificationsPage(QWidget):
     def _show_all_active(self) -> None:
         self.severity.setCurrentText("All")
         self.status.setCurrentText("Active")
+
+    def _perform_row_action(self, action: str, notification: Notification) -> None:
+        device = str(notification.device or "").strip()
+        if not device:
+            return
+        if action == "view":
+            self.view_phone_requested.emit(device)
+        elif action == "manage":
+            self.open_phone_accounts_requested.emit(device)
 
     def _select_summary_card(self, selected: NotificationSummaryCard) -> None:
         for card in (

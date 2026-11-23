@@ -31,6 +31,9 @@ from IGBot.ui.pages.global_settings_page import GlobalSettingsPage
 from IGBot.ui.pages.notifications_page import NotificationsPage
 from IGBot.ui.pages.phone_accounts_page import PhoneAccountsPage
 from IGBot.ui.pages.templates_page import TemplatesPage
+from IGBot.ui.widgets.account_notification_history_dialog import (
+    AccountNotificationHistoryDialog,
+)
 from IGBot.ui.widgets.add_account_dialog import AddAccountDialog
 from IGBot.ui.widgets.confirmation_dialog import ConfirmationDialog
 from IGBot.ui.widgets.error_dialog import ErrorDialog
@@ -147,12 +150,21 @@ class MainWindow(QMainWindow):
         self.phone_accounts_page.active_account_changed.connect(
             self._update_runtime_toolbar
         )
+        self.phone_accounts_page.notification_history_requested.connect(
+            self._show_account_notification_history
+        )
         self.session_controller.state_changed.connect(self._runtime_state_changed)
         self.session_controller.account_state_changed.connect(
             self._account_runtime_state_changed
         )
         self.session_controller.notifications_changed.connect(
             self._refresh_notifications
+        )
+        self.notifications_page.view_phone_requested.connect(
+            self.device_controller.view_phone
+        )
+        self.notifications_page.open_phone_accounts_requested.connect(
+            self.device_controller.open_phone_accounts
         )
         self.session_controller.operation_failed.connect(self._show_runtime_error)
         self.device_controller.refresh_started.connect(
@@ -693,7 +705,14 @@ class MainWindow(QMainWindow):
         self.sidebar.set_notification_count(
             self.notification_service.count_active(badge_only=True)
         )
+        self.phone_accounts_page.model.set_active_notification_severities(
+            self.notification_service.active_severity_by_username()
+        )
         self.live_log.show()
+
+    def _show_account_notification_history(self, username: str) -> None:
+        notifications = self.notification_service.history_for_account(username)
+        AccountNotificationHistoryDialog(username, notifications, self).exec()
 
     def _templates_changed(self, templates) -> None:
         self._templates = tuple(templates)
